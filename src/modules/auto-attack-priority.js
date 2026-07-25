@@ -123,11 +123,23 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
 
   function trySelectPriorityTarget() {
     if (!config.enabled || !bot.attack?.config?.enabled || !bot.attack?.status?.().running) return false;
-    if (getCurrentTarget()) return false;
 
-    const target = getPreferredTarget();
-    if (!target) return false;
-    return selectTarget(target);
+    const preferredTarget = getPreferredTarget();
+    if (!preferredTarget) return false;
+
+    const currentTarget = getCurrentTarget();
+    if (!currentTarget) return selectTarget(preferredTarget);
+    if (Number(currentTarget.id) === Number(preferredTarget.id)) return false;
+
+    const preferredPriority = getPriorityIndex(preferredTarget);
+    const currentPriority = getPriorityIndex(currentTarget);
+
+    // Listed creatures outrank normal, unlisted targets. A lower list index is
+    // a higher priority. Do not switch between equal-priority creatures.
+    if (preferredPriority < 0) return false;
+    if (currentPriority >= 0 && preferredPriority >= currentPriority) return false;
+
+    return selectTarget(preferredTarget);
   }
 
   function addName(name) {
