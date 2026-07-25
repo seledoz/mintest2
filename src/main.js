@@ -65,7 +65,7 @@
 
   function installPauseBreakToggle(bot) {
     let paused = false;
-    let resumeSnapshot = { cave: false, attack: false };
+    let resumeSnapshot = { cave: false, attack: false, greatFireballV2: false };
 
     function isTypingTarget(target) {
       if (!(target instanceof Element)) return false;
@@ -78,7 +78,7 @@
       if (!panel) return;
       panel.dataset.pauseBreakPaused = paused ? "true" : "false";
       panel.style.outline = paused ? "3px solid #d93025" : "";
-      panel.title = paused ? "PAUSED — press Pause/Break to resume Cavebot and Auto Attack" : "";
+      panel.title = paused ? "PAUSED — press Pause/Break to resume Cavebot, Auto Attack, and GFB" : "";
     }
 
     function pause() {
@@ -87,6 +87,7 @@
       resumeSnapshot = {
         cave: !!bot.cave?.status?.().running,
         attack: !!bot.attack?.status?.().running,
+        greatFireballV2: !!bot.greatFireballV2?.status?.().running,
       };
 
       if (resumeSnapshot.cave) {
@@ -95,10 +96,13 @@
       if (resumeSnapshot.attack) {
         bot.attack.stop({ persistEnabled: false });
       }
+      if (resumeSnapshot.greatFireballV2) {
+        bot.greatFireballV2.stop({ persistEnabled: false });
+      }
 
       paused = true;
       updatePanelState();
-      bot.log("Pause/Break paused Cavebot and Auto Attack", { ...resumeSnapshot });
+      bot.log("Pause/Break paused Cavebot, Auto Attack, and GFB", { ...resumeSnapshot });
       return true;
     }
 
@@ -107,7 +111,7 @@
 
       const snapshot = { ...resumeSnapshot };
       paused = false;
-      resumeSnapshot = { cave: false, attack: false };
+      resumeSnapshot = { cave: false, attack: false, greatFireballV2: false };
 
       if (snapshot.cave) {
         bot.cave?.start?.();
@@ -115,9 +119,12 @@
       if (snapshot.attack) {
         bot.attack?.start?.();
       }
+      if (snapshot.greatFireballV2) {
+        bot.greatFireballV2?.start?.();
+      }
 
       updatePanelState();
-      bot.log("Pause/Break resumed Cavebot and Auto Attack", snapshot);
+      bot.log("Pause/Break resumed Cavebot, Auto Attack, and GFB", snapshot);
       return true;
     }
 
