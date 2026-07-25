@@ -15,6 +15,7 @@ window.__minibiaBotBundle.installMaxLightModule = function installMaxLightModule
   let timerId = null;
   let originalLight = null;
   let lastAppliedTarget = null;
+  const originalCanvasFilters = new Map();
 
   function persistConfig() {
     bot.storage.set(configStorageKey, { ...config });
@@ -22,6 +23,14 @@ window.__minibiaBotBundle.installMaxLightModule = function installMaxLightModule
 
   function getPlayer() {
     return window.gameClient?.player || window.gameClient?.world?.player || null;
+  }
+
+  function getGameCanvases() {
+    return Array.from(document.querySelectorAll("canvas"))
+      .filter((canvas) => {
+        const rect = canvas.getBoundingClientRect();
+        return rect.width >= 200 && rect.height >= 150;
+      });
   }
 
   function cloneLight(light) {
@@ -38,24 +47,21 @@ window.__minibiaBotBundle.installMaxLightModule = function installMaxLightModule
   }
 
   function callLightSetter(player, level, color) {
-    const setters = [
-      player?.setLight,
-      player?.updateLight,
-      player?.setCreatureLight,
-      window.gameClient?.setPlayerLight,
-      window.gameClient?.world?.setCreatureLight,
-    ].filter((setter) => typeof setter === "function");
+    const setterEntries = [
+      [player?.setLight, player],
+      [player?.updateLight, player],
+      [player?.setCreatureLight, player],
+      [window.gameClient?.setPlayerLight, window.gameClient],
+      [window.gameClient?.world?.setCreatureLight, window.gameClient?.world],
+    ].filter(([setter]) => typeof setter === "function");
 
-    for (const setter of setters) {
+    for (const [setter, context] of setterEntries) {
       try {
-        setter.call(setter === player?.setLight || setter === player?.updateLight || setter === player?.setCreatureLight ? player : window.gameClient, {
-          level,
-          color,
-        });
+        setter.call(context, { level, color });
         return true;
       } catch (firstError) {
         try {
-          setter.call(player, level, color);
+          setter.call(context, level, color);
           return true;
         } catch (secondError) {}
       }
@@ -89,32 +95,67 @@ window.__minibiaBotBundle.installMaxLightModule = function installMaxLightModule
     return changed;
   }
 
+  function applyRendererLightFallback() {
+    const canvases = getGameCanvases();
+    if (!canvases.length) return false;
+
+    canvases.forEach((canvas) => {
+      if (!originalCanvasFilters.has(canvas)) {
+        originalCanvasFilters.set(canvas, canvas.style.filter || "");
+      }
+
+      const originalFilter = originalCanvasFilters.get(canvas) || "";
+      const withoutOldFallback = originalFilter
+        .replace(/\s*brightness\([^)]*\)/gi, "")
+        .replace(/\s*saturate\([^)]*\)/gi, "")
+        .trim();
+      canvas.style.filter = `${withoutOldFallback} brightness(1.6) saturate(1.08)`.trim();
+    });
+
+    return true;
+  }
+
+  function restoreRendererLightFallback() {
+    for (const [canvas, filter] of originalCanvasFilters.entries()) {
+      if (canvas?.isConnected) canvas.style.filter = filter;
+    }
+    originalCanvasFilters.clear();
+  }
+
   function applyGameLight() {
     if (!config.enabled) return false;
 
     const player = getPlayer();
-    if (!player) return false;
-
-    captureOriginalLight(player);
     const level = Math.max(1, Math.min(255, Number(config.level) || 255));
     const color = Math.max(0, Math.min(255, Number(config.color) || 215));
+    let nativeApplied = false;
 
-    const setterApplied = callLightSetter(player, level, color);
-    const objectApplied = assignLightObject(player, level, color);
+    if (player) {
+      captureOriginalLight(player);
+      const setterApplied = callLightSetter(player, level, color);
+      const objectApplied = assignLightObject(player, level, color);
+      lastAppliedTarget = player;
+      nativeApplied = setterApplied || objectApplied;
+    }
 
-    lastAppliedTarget = player;
-    return setterApplied || objectApplied;
+    const rendererApplied = applyRendererLightFallback();
+    return nativeApplied || rendererApplied;
   }
 
   function restoreOriginalLight() {
     const player = lastAppliedTarget || getPlayer();
-    if (!player || !originalLight) return false;
+    let restored = false;
 
-    callLightSetter(player, originalLight.level, originalLight.color);
-    assignLightObject(player, originalLight.level, originalLight.color);
+    if (player && originalLight) {
+      callLightSetter(player, originalLight.level, originalLight.color);
+      assignLightObject(player, originalLight.level, originalLight.color);
+      restored = true;
+    }
+
+    restoreRendererLightFallback();
     originalLight = null;
     lastAppliedTarget = null;
-    return true;
+    return restored;
   }
 
   function refreshControls() {
@@ -182,9 +223,9 @@ window.__minibiaBotBundle.installMaxLightModule = function installMaxLightModule
       <div class="mb-stack">
         <label class="mb-toggle">
           <input type="checkbox" id="minibia-bot-max-light-enabled" />
-          <span>Full Screen Spell Light</span>
+          <span>Auto Light</span>
         </label>
-        <div class="mb-small-note">Uses the player light source like utevo lux. No brightness filter.</div>
+        <div class="mb-small-note">Keeps the game view bright and retries the native player-light method.</div>
       </div>
     `;
 
