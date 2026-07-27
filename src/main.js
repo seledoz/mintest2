@@ -4,7 +4,6 @@
     ["rune", "minibiaBot.rune.config"],
     ["heal", "minibiaBot.heal.config"],
     ["antiParalyze", "minibiaBot.antiParalyzeV2.config"],
-    ["autoHaste", "minibiaBot.autoHaste.config"],
     ["damageTtsAlert", "minibiaBot.damageTtsAlert.config"],
     ["invisible", "minibiaBot.invisible.config"],
     ["magicShield", "minibiaBot.magicShield.config"],
@@ -90,15 +89,9 @@
         greatFireballV2: !!bot.greatFireballV2?.status?.().running,
       };
 
-      if (resumeSnapshot.cave) {
-        bot.cave.stop({ persistEnabled: false });
-      }
-      if (resumeSnapshot.attack) {
-        bot.attack.stop({ persistEnabled: false });
-      }
-      if (resumeSnapshot.greatFireballV2) {
-        bot.greatFireballV2.stop({ persistEnabled: false });
-      }
+      if (resumeSnapshot.cave) bot.cave.stop({ persistEnabled: false });
+      if (resumeSnapshot.attack) bot.attack.stop({ persistEnabled: false });
+      if (resumeSnapshot.greatFireballV2) bot.greatFireballV2.stop({ persistEnabled: false });
 
       paused = true;
       updatePanelState();
@@ -108,21 +101,12 @@
 
     function resume() {
       if (!paused) return false;
-
       const snapshot = { ...resumeSnapshot };
       paused = false;
       resumeSnapshot = { cave: false, attack: false, greatFireballV2: false };
-
-      if (snapshot.cave) {
-        bot.cave?.start?.();
-      }
-      if (snapshot.attack) {
-        bot.attack?.start?.();
-      }
-      if (snapshot.greatFireballV2) {
-        bot.greatFireballV2?.start?.();
-      }
-
+      if (snapshot.cave) bot.cave?.start?.();
+      if (snapshot.attack) bot.attack?.start?.();
+      if (snapshot.greatFireballV2) bot.greatFireballV2?.start?.();
       updatePanelState();
       bot.log("Pause/Break resumed Cavebot, Auto Attack, and GFB", snapshot);
       return true;
@@ -135,7 +119,6 @@
     function onKeyDown(event) {
       const isPauseBreak = event.key === "Pause" || event.code === "Pause" || event.keyCode === 19;
       if (!isPauseBreak || event.repeat || isTypingTarget(event.target)) return;
-
       event.preventDefault();
       event.stopPropagation();
       toggle();
@@ -143,14 +126,12 @@
 
     document.addEventListener("keydown", onKeyDown, true);
     bot.addCleanup(() => document.removeEventListener("keydown", onKeyDown, true));
-
     bot.pauseBreak = {
       pause,
       resume,
       toggle,
       status: () => ({ paused, resumeSnapshot: { ...resumeSnapshot } }),
     };
-
     updatePanelState();
   }
 
@@ -167,7 +148,6 @@
     currentBundle.installRuneModule(bot);
     currentBundle.installHealModule(bot);
     currentBundle.installAntiParalyzeModule?.(bot);
-    currentBundle.installAutoHasteModule?.(bot);
     currentBundle.installHasteParalyzeMonsterRangeGuard?.(bot);
     currentBundle.installDamageTtsAlertModule?.(bot);
     currentBundle.installAutoInvisibleModule(bot);
@@ -214,7 +194,6 @@
       rune: bot.rune.status(),
       heal: bot.heal.status(),
       antiParalyze: bot.antiParalyze?.status?.() || null,
-      autoHaste: bot.autoHaste?.status?.() || null,
       damageTtsAlert: bot.damageTtsAlert?.status?.() || null,
       invisible: bot.invisible.status(),
       magicShield: bot.magicShield.status(),
@@ -245,7 +224,7 @@
       branch: bot.version.branch,
       commit: bot.version.commit,
       buildDate: bot.version.date,
-      modules: ["pz", "xray", "panic", "gmDefaultChatKillSwitch", "rune", "heal", "antiParalyze", "autoHaste", "damageTtsAlert", "invisible", "magicShield", "attack", "attackExclude", "attackPriority", "attackAoe", "greatFireballV2", "lureMode", "redTextAlert", "cave", "caveForwardLoop", "caveArrowKeys", "caveWaypointActions", "githubWaypointLibrary", "equipRing", "mining", "eat", "talk", "runeMakerDrop", "maxLight", "pauseBreak", "ui"],
+      modules: ["pz", "xray", "panic", "gmDefaultChatKillSwitch", "rune", "heal", "antiParalyze", "damageTtsAlert", "invisible", "magicShield", "attack", "attackExclude", "attackPriority", "attackAoe", "greatFireballV2", "lureMode", "redTextAlert", "cave", "caveForwardLoop", "caveArrowKeys", "caveWaypointActions", "githubWaypointLibrary", "equipRing", "mining", "eat", "talk", "runeMakerDrop", "maxLight", "pauseBreak", "ui"],
     });
     console.log("minibiaBot.reload()");
     console.log("minibiaBot.attackExclude.addName(\"monster name\")");
