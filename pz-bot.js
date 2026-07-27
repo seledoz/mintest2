@@ -12,7 +12,6 @@
     "src/modules/rune.js",
     "src/modules/heal.js",
     "src/modules/anti-paralyze.js",
-    "src/modules/auto-haste.js",
     "src/modules/haste-paralyze-monster-range-guard.js",
     "src/modules/damage-tts-alert.js",
     "src/modules/auto-invisible.js",
