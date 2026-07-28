@@ -26,7 +26,7 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
       beepIntervalMs: 1000,
       alertDurationMs: 60000,
       clearEventAfterNoCaptchaMs: 1500,
-      scanMs: 250,
+      scanMs: 2000,
       minChoiceCount: 5,
       maxChoiceCount: 9,
       scanExistingOnStart: false,
@@ -37,7 +37,7 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
   config.beepIntervalMs = positiveInt(config.beepIntervalMs, 1000);
   config.alertDurationMs = positiveInt(config.alertDurationMs, 60000);
   config.clearEventAfterNoCaptchaMs = positiveInt(config.clearEventAfterNoCaptchaMs, 1500);
-  config.scanMs = Math.max(100, positiveInt(config.scanMs, 250));
+  config.scanMs = 2000;
   config.minChoiceCount = Math.max(3, positiveInt(config.minChoiceCount, 5));
   config.maxChoiceCount = Math.max(config.minChoiceCount, positiveInt(config.maxChoiceCount, 9));
   config.scanExistingOnStart = false;
@@ -263,7 +263,7 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
 
   function startScanTimer() {
     stopScanTimer();
-    state.scanTimerId = window.setInterval(scanForCaptcha, Math.max(100, positiveInt(config.scanMs, 250)));
+    state.scanTimerId = window.setInterval(scanForCaptcha, 2000);
   }
 
   function stopScanTimer() {
@@ -306,7 +306,7 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
   }
 
   function start(overrides = {}) {
-    updateConfig(Object.assign({}, overrides, { enabled: true, scanExistingOnStart: false }), { silent: true });
+    updateConfig(Object.assign({}, overrides, { enabled: true, scanMs: 2000, scanExistingOnStart: false }), { silent: true });
     if (state.running) return false;
     state.running = true;
     state.mode = "watching";
@@ -345,11 +345,12 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
     if (Object.prototype.hasOwnProperty.call(nextConfig, "alertDurationMs")) nextConfig.alertDurationMs = positiveInt(nextConfig.alertDurationMs, config.alertDurationMs || 60000);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "clearEventAfterNoCaptchaMs")) nextConfig.clearEventAfterNoCaptchaMs = positiveInt(nextConfig.clearEventAfterNoCaptchaMs, config.clearEventAfterNoCaptchaMs || 1500);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "clearEventAfterNoRedMs")) nextConfig.clearEventAfterNoCaptchaMs = positiveInt(nextConfig.clearEventAfterNoRedMs, config.clearEventAfterNoCaptchaMs || 1500);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "scanMs")) nextConfig.scanMs = Math.max(100, positiveInt(nextConfig.scanMs, config.scanMs || 250));
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "scanMs")) nextConfig.scanMs = 2000;
     if (Object.prototype.hasOwnProperty.call(nextConfig, "minChoiceCount")) nextConfig.minChoiceCount = Math.max(3, positiveInt(nextConfig.minChoiceCount, config.minChoiceCount || 5));
     if (Object.prototype.hasOwnProperty.call(nextConfig, "maxChoiceCount")) nextConfig.maxChoiceCount = Math.max(config.minChoiceCount, positiveInt(nextConfig.maxChoiceCount, config.maxChoiceCount || 9));
     if (Object.prototype.hasOwnProperty.call(nextConfig, "scanExistingOnStart")) nextConfig.scanExistingOnStart = false;
     Object.assign(config, nextConfig);
+    config.scanMs = 2000;
     config.scanExistingOnStart = false;
     config.minChoiceCount = Math.max(3, positiveInt(config.minChoiceCount, 5));
     config.maxChoiceCount = Math.max(config.minChoiceCount, positiveInt(config.maxChoiceCount, 9));
