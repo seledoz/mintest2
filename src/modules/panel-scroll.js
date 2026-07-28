@@ -4,6 +4,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   const styleId = "minibia-bot-panel-scroll-style";
   const controlsId = "minibia-bot-panel-scroll-controls";
   const caveNewButtonId = "minibia-bot-cave-preset-new";
+  let selectedCavePreset = "";
 
   document.getElementById(styleId)?.remove();
   document.getElementById(controlsId)?.remove();
@@ -71,6 +72,26 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
   (document.head || document.documentElement).appendChild(style);
 
+  function retainCavePresetSelection() {
+    const select = document.getElementById("minibia-bot-cave-preset-select");
+    if (!select) return false;
+
+    if (select.dataset.selectionRetentionInstalled !== "true") {
+      select.dataset.selectionRetentionInstalled = "true";
+      select.addEventListener("change", () => {
+        selectedCavePreset = select.value;
+      });
+    }
+
+    if (selectedCavePreset && Array.from(select.options).some((option) => option.value === selectedCavePreset)) {
+      select.value = selectedCavePreset;
+    } else if (!selectedCavePreset && select.value) {
+      selectedCavePreset = select.value;
+    }
+
+    return true;
+  }
+
   function installCaveNewButton() {
     if (document.getElementById(caveNewButtonId)) return true;
 
@@ -101,10 +122,12 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       bot.cave.clearTransitions?.();
       bot.cave.savePreset?.(name);
       bot.cave.loadPreset?.(name);
+      selectedCavePreset = name;
       bot.ui?.refreshCaveStatus?.();
       bot.ui?.refreshCavePresetControls?.();
       bot.ui?.refreshCaveClosestStatus?.();
       bot.ui?.refreshCaveTransitionStatus?.();
+      retainCavePresetSelection();
       bot.log?.("created new cavebot preset", { name });
     });
 
@@ -143,6 +166,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       }
 
       installCaveNewButton();
+      retainCavePresetSelection();
       const rect = panel.getBoundingClientRect();
       const maxScrollLeft = Math.max(0, panel.scrollWidth - panel.clientWidth);
       const hasHorizontalOverflow = maxScrollLeft > 2;
@@ -194,6 +218,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   if (!installControls()) {
     const observer = new MutationObserver(() => {
       installCaveNewButton();
+      retainCavePresetSelection();
       if (installControls()) observer.disconnect();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
