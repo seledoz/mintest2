@@ -1,5 +1,6 @@
 (() => {
   let lastRopeFallbackAt = 0;
+  let lastRopeSourceKey = null;
 
   function normalizePosition(value) {
     if (!value) return null;
@@ -29,7 +30,7 @@
     if (equipment?.slots) {
       for (let index = 0; index < equipment.slots.length; index += 1) {
         const item = equipment.getSlotItem?.(index);
-        if (isRope(item)) return { which: equipment, index };
+        if (isRope(item)) return { which: equipment, index, location: "equipment" };
       }
     }
 
@@ -38,8 +39,23 @@
       const slots = container?.slots || [];
       for (let index = 0; index < slots.length; index += 1) {
         const item = container.getSlotItem?.(index);
-        if (isRope(item)) return { which: container, index };
+        if (isRope(item)) return { which: container, index, location: "container" };
       }
+    }
+    return null;
+  }
+
+  function getRouteRopeSource(bot, status, player) {
+    const route = bot.cave?.getRoute?.() || status?.route || [];
+    const currentIndex = Math.trunc(Number(status?.currentIndex) || 0);
+    const direction = Number(status?.direction) || 1;
+    const candidateIndexes = [currentIndex - direction, currentIndex - 1, currentIndex + 1];
+
+    for (const index of candidateIndexes) {
+      const candidate = normalizePosition(route[index]);
+      if (!candidate || candidate.z !== player.z) continue;
+      const distance = Math.max(Math.abs(candidate.x - player.x), Math.abs(candidate.y - player.y));
+      if (distance <= 8) return candidate;
     }
     return null;
   }
@@ -49,48 +65,67 @@
     bot.cave.__learnedRopeFallbackInstalled = true;
 
     const timerId = window.setInterval(() => {
-      const status = bot.cave?.status?.();
-      const player = normalizePosition(bot.getPlayerPosition?.());
-      const waypoint = normalizePosition(status?.currentWaypoint);
-      if (!status?.running || !player || !waypoint || waypoint.z >= player.z) return;
-      if (Date.now() - lastRopeFallbackAt < 1200) return;
+      try {
+        const status = bot.cave?.status?.();
+        const player = normalizePosition(bot.getPlayerPosition?.());
+        const waypoint = normalizePosition(status?.currentWaypoint);
+        if (!status?.running || !player || !waypoint || waypoint.z >= player.z) return;
 
-      const transitions = Array.isArray(status.transitions) ? status.transitions : [];
-      const transition = transitions
-        .filter((entry) => Number(entry?.from?.z) === player.z && Number(entry?.to?.z) === waypoint.z)
-        .sort((left, right) => {
-          const leftDistance = Math.abs(Number(left.from.x) - player.x) + Math.abs(Number(left.from.y) - player.y);
-          const rightDistance = Math.abs(Number(right.from.x) - player.x) + Math.abs(Number(right.from.y) - player.y);
-          return leftDistance - rightDistance;
-        })[0];
-      const source = normalizePosition(transition?.from);
-      if (!source) return;
+        const transitions = Array.isArray(status.transitions) ? status.transitions : [];
+        const transition = transitions
+          .filter((entry) => Number(entry?.from?.z) === player.z && Number(entry?.to?.z) === waypoint.z)
+          .sort((left, right) => {
+            const leftDistance = Math.abs(Number(left.from.x) - player.x) + Math.abs(Number(left.from.y) - player.y);
+            const rightDistance = Math.abs(Number(right.from.x) - player.x) + Math.abs(Number(right.from.y) - player.y);
+            return leftDistance - rightDistance;
+          })[0];
 
-      const dx = Math.abs(source.x - player.x);
-      const dy = Math.abs(source.y - player.y);
-      if (dx > 1 || dy > 1) {
-        try {
+        const source = normalizePosition(transition?.from) || getRouteRopeSource(bot, status, player);
+        if (!source) return;
+
+        const dx = Math.abs(source.x - player.x);
+        const dy = Math.abs(source.y - player.y);
+        if (dx > 1 || dy > 1) {
           window.gameClient?.world?.pathfinder?.findPath?.(
             new Position(player.x, player.y, player.z),
             new Position(source.x, source.y, source.z)
           );
-        } catch (_) {}
-        return;
+          return;
+        }
+
+        const now = Date.now();
+        const sourceKey = `${source.x},${source.y},${source.z}`;
+        if (now - lastRopeFallbackAt < 1200 && sourceKey === lastRopeSourceKey) return;
+
+        const tile = window.gameClient?.world?.getTileFromWorldPosition?.(
+          new Position(source.x, source.y, source.z)
+        );
+        const rope = findRopeSource();
+        if (!tile || !rope) {
+          if (!rope && now - lastRopeFallbackAt >= 3000) {
+            bot.log?.("cave rope transition skipped: no rope found");
+            lastRopeFallbackAt = now;
+          }
+          return;
+        }
+
+        window.gameClient?.mouse?.__handleItemUseWith?.(
+          { which: rope.which, index: rope.index },
+          { which: tile, index: 0xFF }
+        );
+        lastRopeFallbackAt = now;
+        lastRopeSourceKey = sourceKey;
+        bot.log?.("cave used rope transition fallback", {
+          source,
+          waypoint,
+          sourceType: transition ? "learned" : "route",
+          ropeLocation: rope.location,
+          ropeSlot: rope.index,
+        });
+      } catch (error) {
+        bot.log?.("cave rope transition fallback failed", error?.message || error);
       }
-
-      const tile = window.gameClient?.world?.getTileFromWorldPosition?.(
-        new Position(source.x, source.y, source.z)
-      );
-      const rope = findRopeSource();
-      if (!tile || !rope) return;
-
-      window.gameClient?.mouse?.__handleItemUseWith?.(
-        { which: rope.which, index: rope.index },
-        { which: tile, index: 0xFF }
-      );
-      lastRopeFallbackAt = Date.now();
-      bot.log?.("cave used learned rope transition fallback", { source, waypoint });
-    }, 250);
+    }, 150);
 
     bot.addCleanup?.(() => window.clearInterval(timerId));
     return true;
