@@ -169,6 +169,7 @@
     currentBundle.installCaveWaypointActionsModule?.(bot);
 
     bot.ui.inject();
+    bot.gmDefaultChatKillSwitch?.injectPanelControl?.();
     bot.maxLight?.injectControls?.();
     installPauseBreakToggle(bot);
     currentBundle.installRuneMakerDropModule?.(bot);
