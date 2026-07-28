@@ -1,5 +1,5 @@
 (() => {
-  const repository = "seledoz/min-new";
+  const repository = "seledoz/mintest2";
   const ref = "main";
   const rawBaseUrl = `https://raw.githubusercontent.com/${repository}/${ref}`;
   const sourceFiles = [
