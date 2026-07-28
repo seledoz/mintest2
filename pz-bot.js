@@ -217,11 +217,50 @@
     return code.replace(triggerPattern, delayedTrigger);
   }
 
+  function addSafeUiPerformanceOptimizations(code, path) {
+    if (path === "src/ui/panel.js") {
+      code = code.replace(
+        `  function refreshVisibleCreatures() {\n    const list = document.getElementById("minibia-bot-visible-creatures-list");\n    if (!list) return;`,
+        `  function refreshVisibleCreatures() {\n    const list = document.getElementById("minibia-bot-visible-creatures-list");\n    if (!list || isPanelCollapsed()) return;`
+      );
+      code = code.replace(
+        `    const visibleCreaturesTimerId = window.setInterval(refreshVisibleCreatures, 1000);`,
+        `    const visibleCreaturesTimerId = window.setInterval(() => {\n      if (!isPanelCollapsed()) refreshVisibleCreatures();\n    }, 1000);`
+      );
+      code = code.replace(
+        `    const talkStatusTimerId = window.setInterval(refreshTalkStatus, 1000);`,
+        `    const talkStatusTimerId = window.setInterval(() => {\n      if (!isPanelCollapsed()) refreshTalkStatus();\n    }, 1000);`
+      );
+      code = code.replace(
+        `    const caveStatusTimerId = window.setInterval(() => {\n      refreshCaveStatus();`,
+        `    const caveStatusTimerId = window.setInterval(() => {\n      if (isPanelCollapsed()) return;\n      refreshCaveStatus();`
+      );
+    }
+
+    if (path === "src/modules/auto-attack-aoe.js") {
+      code = code.replace(
+        `  function status() {\n    const monsters = getCandidateMonsters();\n    const bestWave = getBestEnergyWaveCandidate();\n    const bestGfb = getBestGfbCandidate();`,
+        `  function status() {\n    const monsters = state.running && config.enabled ? getCandidateMonsters() : [];\n    const bestWave = state.running && config.enabled && config.energyWaveEnabled ? getBestEnergyWaveCandidate() : null;\n    const bestGfb = state.running && config.enabled && config.gfbEnabled ? getBestGfbCandidate() : null;`
+      );
+      code = code.replace(
+        `    const bestWave = getBestEnergyWaveCandidate();\n    const bestGfb = getBestGfbCandidate();`,
+        `    const panelCollapsed = document.getElementById("minibia-bot-panel")?.dataset?.collapsed === "true";\n    const shouldScanUi = state.running && config.enabled && !panelCollapsed;\n    const bestWave = shouldScanUi && config.energyWaveEnabled ? getBestEnergyWaveCandidate() : null;\n    const bestGfb = shouldScanUi && config.gfbEnabled ? getBestGfbCandidate() : null;`
+      );
+      code = code.replace(
+        `        ? \`AoE: square \${getCandidateMonsters().length}/\${config.minMonsters}; wave \${bestWave?.count || 0}/\${config.energyWaveMinMonsters}; gfb \${bestGfb?.count || 0}/\${config.gfbMinMonsters}\``,
+        `        ? \`AoE: square \${shouldScanUi ? getCandidateMonsters().length : 0}/\${config.minMonsters}; wave \${bestWave?.count || 0}/\${config.energyWaveMinMonsters}; gfb \${bestGfb?.count || 0}/\${config.gfbMinMonsters}\``
+      );
+    }
+
+    return code;
+  }
+
   async function loadSourceFile(path) {
     const response = await fetch(`${rawBaseUrl}/${path}?t=${Date.now()}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`Failed to load ${path}: HTTP ${response.status}`);
 
     let code = await response.text();
+    code = addSafeUiPerformanceOptimizations(code, path);
     if (path === "src/modules/auto-attack-aoe.js") {
       code = addEnergyWaveCastDelay(code);
     }
