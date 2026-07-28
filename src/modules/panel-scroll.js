@@ -4,6 +4,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   const styleId = "minibia-bot-panel-scroll-style";
   const controlsId = "minibia-bot-panel-scroll-controls";
   const caveNewButtonId = "minibia-bot-cave-preset-new";
+  const caveRemoveLastButtonId = "minibia-bot-cave-remove-last";
   let selectedCavePreset = "";
 
   document.getElementById(styleId)?.remove();
@@ -23,9 +24,6 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       touch-action: pan-x pan-y;
     }
 
-    /* Keep the normal three-column layout at its full width. When the user
-       resizes the outer panel narrower, this creates real horizontal overflow
-       instead of squeezing or clipping the controls. */
     #minibia-bot-panel:not([data-collapsed="true"]) .mb-body {
       min-width: 936px !important;
     }
@@ -56,13 +54,8 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
     }
 
-    #minibia-bot-panel-scroll-left {
-      left: 4px;
-    }
-
-    #minibia-bot-panel-scroll-right {
-      right: 4px;
-    }
+    #minibia-bot-panel-scroll-left { left: 4px; }
+    #minibia-bot-panel-scroll-right { right: 4px; }
 
     #minibia-bot-panel-scroll-controls button:disabled {
       opacity: 0.25;
@@ -92,6 +85,41 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     return true;
   }
 
+  function refreshCaveUi(bot) {
+    bot.ui?.refreshCaveStatus?.();
+    bot.ui?.refreshCavePresetControls?.();
+    bot.ui?.refreshCaveClosestStatus?.();
+    bot.ui?.refreshCaveTransitionStatus?.();
+    retainCavePresetSelection();
+  }
+
+  function installCaveRemoveLastButton() {
+    if (document.getElementById(caveRemoveLastButtonId)) return true;
+
+    const addButton = document.getElementById("minibia-bot-cave-add");
+    const row = addButton?.parentElement;
+    if (!addButton || !row) return false;
+
+    const removeButton = document.createElement("button");
+    removeButton.type = "button";
+    removeButton.id = caveRemoveLastButtonId;
+    removeButton.textContent = "Remove Last";
+    removeButton.title = "Remove the most recently added waypoint";
+    removeButton.addEventListener("click", () => {
+      const bot = window.minibiaBot;
+      if (!bot?.cave?.removeLastWaypoint) return;
+
+      const removed = bot.cave.removeLastWaypoint();
+      if (removed) {
+        bot.log?.("removed last cavebot waypoint", removed);
+      }
+      refreshCaveUi(bot);
+    });
+
+    addButton.insertAdjacentElement("afterend", removeButton);
+    return true;
+  }
+
   function installCaveNewButton() {
     if (document.getElementById(caveNewButtonId)) return true;
 
@@ -118,16 +146,16 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       }
 
       bot.cave.stop?.();
-      bot.cave.clearRoute?.();
-      bot.cave.clearTransitions?.();
-      bot.cave.savePreset?.(name);
-      bot.cave.loadPreset?.(name);
+      if (bot.cave.createPreset) {
+        bot.cave.createPreset(name);
+      } else {
+        bot.cave.clearWaypoints?.();
+        bot.cave.clearTransitions?.();
+        bot.cave.savePreset?.(name);
+        bot.cave.loadPreset?.(name);
+      }
       selectedCavePreset = name;
-      bot.ui?.refreshCaveStatus?.();
-      bot.ui?.refreshCavePresetControls?.();
-      bot.ui?.refreshCaveClosestStatus?.();
-      bot.ui?.refreshCaveTransitionStatus?.();
-      retainCavePresetSelection();
+      refreshCaveUi(bot);
       bot.log?.("created new cavebot preset", { name });
     });
 
@@ -166,6 +194,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       }
 
       installCaveNewButton();
+      installCaveRemoveLastButton();
       retainCavePresetSelection();
       const rect = panel.getBoundingClientRect();
       const maxScrollLeft = Math.max(0, panel.scrollWidth - panel.clientWidth);
@@ -218,6 +247,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   if (!installControls()) {
     const observer = new MutationObserver(() => {
       installCaveNewButton();
+      installCaveRemoveLastButton();
       retainCavePresetSelection();
       if (installControls()) observer.disconnect();
     });
