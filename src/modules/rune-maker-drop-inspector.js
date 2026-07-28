@@ -214,11 +214,52 @@
     return result;
   }
 
+  function ensureGmKillSwitchControl() {
+    const bot = window.minibiaBot;
+    const panel = document.getElementById("minibia-bot-panel");
+    if (!bot?.gmDefaultChatKillSwitch || !panel) return false;
+
+    let toggle = document.getElementById("minibia-bot-gm-kill-switch-enabled");
+    if (!toggle) {
+      const labels = Array.from(panel.querySelectorAll(".mb-label"));
+      const quickControlsLabel = labels.find((label) =>
+        String(label.textContent || "").trim().toLowerCase() === "quick controls"
+      );
+      const stack = quickControlsLabel?.parentElement?.querySelector?.(".mb-stack") ||
+        panel.querySelector(".mb-cave-column .mb-section:nth-child(2) .mb-stack") ||
+        panel.querySelector(".mb-cave-column .mb-stack");
+      if (!stack) return false;
+
+      const row = document.createElement("label");
+      row.className = "mb-toggle";
+      toggle = document.createElement("input");
+      toggle.type = "checkbox";
+      toggle.id = "minibia-bot-gm-kill-switch-enabled";
+      const text = document.createElement("span");
+      text.textContent = "Enable GM Kill Switch";
+      row.append(toggle, text);
+      stack.prepend(row);
+    }
+
+    if (toggle.dataset.gmKillSwitchBound !== "true") {
+      toggle.dataset.gmKillSwitchBound = "true";
+      toggle.addEventListener("change", () => {
+        if (toggle.checked) bot.gmDefaultChatKillSwitch.start?.();
+        else bot.gmDefaultChatKillSwitch.stop?.();
+        toggle.checked = !!bot.gmDefaultChatKillSwitch.status?.().running;
+      });
+    }
+
+    toggle.checked = !!bot.gmDefaultChatKillSwitch.status?.().running;
+    return true;
+  }
+
   window.inspectMinibiaContainers = inspectMinibiaContainers;
   window.testMinibiaRuneDropMove = sendDirectRuneMove;
 
   const attach = () => {
     installRuneDropMoveAdapter();
+    ensureGmKillSwitchControl();
     if (!window.minibiaBot?.runeMakerDrop) return false;
     window.minibiaBot.runeMakerDrop.inspectOpenContainers = inspectMinibiaContainers;
     return true;
@@ -228,7 +269,9 @@
   let attempts = 0;
   const timer = window.setInterval(() => {
     attempts += 1;
-    if (attach() || attempts >= 40) window.clearInterval(timer);
+    const attached = attach();
+    const gmControlReady = ensureGmKillSwitchControl();
+    if ((attached && gmControlReady) || attempts >= 80) window.clearInterval(timer);
   }, 250);
 
   console.log("[minibia-bot] direct rune drop packet adapter ready");
