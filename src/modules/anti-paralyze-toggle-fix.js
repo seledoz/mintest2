@@ -2,6 +2,7 @@
   let lastRopeFallbackAt = 0;
   let lastRopeSourceKey = null;
   let ropeCandidateIndex = 0;
+  const runeCooldownBackupKey = "minibiaBot.attack.runeCooldownMs.backup";
 
   function normalizePosition(value) {
     if (!value) return null;
@@ -182,23 +183,57 @@
 
   function installCaveWaypointCompatibility(bot) {
     if (!bot?.cave) return false;
-
     if (typeof bot.cave.addCurrentPosition !== "function" && typeof bot.cave.addWaypointCurrentSpot === "function") {
       bot.cave.addCurrentPosition = (...args) => bot.cave.addWaypointCurrentSpot(...args);
     }
-
     if (typeof bot.cave.clearRoute !== "function" && typeof bot.cave.clearWaypoints === "function") {
       bot.cave.clearRoute = (...args) => bot.cave.clearWaypoints(...args);
     }
-
     installLearnedRopeFallback(bot);
     return typeof bot.cave.addCurrentPosition === "function";
+  }
+
+  function findRuneCooldownInput() {
+    const inputs = Array.from(document.querySelectorAll("#minibia-bot-panel input"));
+    return inputs.find((input) => {
+      const label = input.closest("label");
+      return /rune\s*ms|rune\s*cooldown/i.test(String(label?.textContent || ""));
+    }) || null;
+  }
+
+  function installRuneCooldownPersistence(bot) {
+    if (!bot?.attack || bot.attack.__runeCooldownPersistenceInstalled) return !!bot?.attack;
+    bot.attack.__runeCooldownPersistenceInstalled = true;
+
+    const input = findRuneCooldownInput();
+    const saved = Number(window.localStorage.getItem(runeCooldownBackupKey));
+    if (Number.isFinite(saved) && saved >= 0) {
+      bot.attack.updateConfig?.({ runeCooldownMs: Math.trunc(saved) });
+      if (input) input.value = String(Math.trunc(saved));
+    }
+
+    const saveValue = () => {
+      const currentInput = findRuneCooldownInput();
+      const value = Number(currentInput?.value);
+      if (!Number.isFinite(value) || value < 0) return;
+      const normalized = Math.trunc(value);
+      window.localStorage.setItem(runeCooldownBackupKey, String(normalized));
+      bot.attack.updateConfig?.({ runeCooldownMs: normalized });
+    };
+
+    document.addEventListener("change", (event) => {
+      const currentInput = findRuneCooldownInput();
+      if (currentInput && event.target === currentInput) saveValue();
+    }, true);
+
+    return true;
   }
 
   function install() {
     const bot = window.minibiaBot;
     if (bot?.equipRing && !bot.ring) bot.ring = bot.equipRing;
     installCaveWaypointCompatibility(bot);
+    installRuneCooldownPersistence(bot);
 
     const toggle = document.getElementById("minibia-bot-anti-paralyze-enabled");
     const spellInput = document.getElementById("minibia-bot-anti-paralyze-spell");
@@ -206,23 +241,15 @@
     if (toggle.dataset.antiParalyzeToggleFix === "true") return true;
 
     toggle.dataset.antiParalyzeToggleFix = "true";
-
     toggle.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopImmediatePropagation();
-
       const shouldEnable = !bot.antiParalyze.status().running;
       const spellWords = String(spellInput.value || "").trim();
-
-      if (shouldEnable) {
-        bot.antiParalyze.start({ spellWords });
-      } else {
-        bot.antiParalyze.stop();
-      }
-
+      if (shouldEnable) bot.antiParalyze.start({ spellWords });
+      else bot.antiParalyze.stop();
       toggle.checked = !!bot.antiParalyze.status().running;
     }, true);
-
     return true;
   }
 
