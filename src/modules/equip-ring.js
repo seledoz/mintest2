@@ -44,9 +44,14 @@ window.__minibiaBotBundle.installEquipRingModule = function installEquipRingModu
   function getItemDefinition(item) {
     if (!item) return null;
 
+    const cid = item.cid ?? item.id;
+    const sid = item.sid ?? item.id;
     return (
-      window.gameClient?.itemDefinitionsBySid?.[item.sid] ||
+      window.gameClient?.itemDefinitionsByCid?.[cid] ||
+      window.gameClient?.itemDefinitionsBySid?.[sid] ||
       window.gameClient?.itemDefinitions?.[item.id] ||
+      window.gameClient?.itemDefinitions?.[cid] ||
+      window.gameClient?.itemDefinitions?.[sid] ||
       null
     );
   }
@@ -62,7 +67,8 @@ window.__minibiaBotBundle.installEquipRingModule = function installEquipRingModu
 
   function getAllowedRingInfo(item) {
     const itemName = normalizeName(getItemName(item));
-    return ALLOWED_RINGS.find((ring) => itemName === ring.name) || null;
+    if (!itemName) return null;
+    return ALLOWED_RINGS.find((ring) => itemName === ring.name || itemName.includes(ring.name)) || null;
   }
 
   function isRingItem(item) {
@@ -136,16 +142,18 @@ window.__minibiaBotBundle.installEquipRingModule = function installEquipRingModu
       }
     };
 
-    for (let slotIndex = 0; slotIndex < equipment.slots.length; slotIndex += 1) {
+    const equipmentSlots = equipment?.slots || [];
+    for (let slotIndex = 0; slotIndex < equipmentSlots.length; slotIndex += 1) {
       if (slotIndex === RING_SLOT) continue;
-      consider(equipment, slotIndex, equipment.getSlotItem(slotIndex));
+      consider(equipment, slotIndex, equipment.getSlotItem?.(slotIndex));
     }
 
-    getOpenContainers().forEach((container) => {
-      (container?.slots || []).forEach((slot, slotIndex) => {
-        consider(container, slotIndex, container.getSlotItem(slotIndex));
-      });
-    });
+    for (const container of getOpenContainers()) {
+      const slots = container?.slots || [];
+      for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
+        consider(container, slotIndex, container.getSlotItem?.(slotIndex));
+      }
+    }
 
     return best;
   }
@@ -356,10 +364,6 @@ window.__minibiaBotBundle.installEquipRingModule = function installEquipRingModu
     return { ...config };
   }
 
-  if (config.enabled) {
-    start();
-  }
-
   bot.equipRing = {
     start,
     stop,
@@ -375,4 +379,8 @@ window.__minibiaBotBundle.installEquipRingModule = function installEquipRingModu
     isPlayerInProtectionZone,
     tryUnequipRingInProtectionZone,
   };
+
+  if (config.enabled) {
+    start();
+  }
 };
