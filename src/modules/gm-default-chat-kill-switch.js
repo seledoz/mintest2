@@ -218,6 +218,17 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     if (!panel || !githubSection) return false;
 
     let section = document.getElementById("minibia-bot-gm-kill-switch-section");
+    const sectionIsIncomplete = section && (
+      !section.querySelector("#minibia-bot-gm-kill-switch-enabled") ||
+      !section.querySelector("#minibia-bot-gm-responder-enabled") ||
+      !section.querySelector("#minibia-bot-gm-responder-message")
+    );
+
+    if (sectionIsIncomplete) {
+      section.remove();
+      section = null;
+    }
+
     if (!section) {
       section = document.createElement("div");
       section.className = "mb-section mb-column-section";
@@ -240,6 +251,8 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
           <div class="mb-small-note">Responder delay: 2 seconds</div>
         </div>
       `;
+      githubSection.insertAdjacentElement("afterend", section);
+    } else if (githubSection.nextElementSibling !== section) {
       githubSection.insertAdjacentElement("afterend", section);
     }
 
