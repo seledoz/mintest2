@@ -8,51 +8,67 @@ fetch("https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js?t=" + D
 
 ## Private repository
 
-Use a fine-grained GitHub token with read-only access to the repository contents.
+Use a fine-grained GitHub token with read and write access to the repository contents.
 
 ```js
 (async () => {
-  const token = prompt("Paste your GitHub read-only token:")?.trim();
+  const token = prompt("Paste your GitHub token:")?.trim();
   if (!token) return;
 
   const repository = "seledoz/mintest2";
+  const legacyRepository = "seledoz/Min-new";
   const ref = "main";
   const rawPrefix = `https://raw.githubusercontent.com/${repository}/${ref}/`;
+  const legacyRawPrefix = `https://raw.githubusercontent.com/${legacyRepository}/${ref}/`;
+  const apiPrefix = `https://api.github.com/repos/${repository}/contents`;
+  const legacyApiPrefix = `https://api.github.com/repos/${legacyRepository}/contents`;
   const originalFetch = window.fetch.bind(window);
 
-  function githubHeaders(existingHeaders) {
+  function githubHeaders(existingHeaders, accept = "application/vnd.github+json") {
     const headers = new Headers(existingHeaders || {});
     headers.set("Authorization", `Bearer ${token}`);
-    headers.set("Accept", "application/vnd.github.raw+json");
+    headers.set("Accept", accept);
     headers.set("X-GitHub-Api-Version", "2022-11-28");
     return headers;
   }
 
-  // pz-bot.js normally loads its modules from raw.githubusercontent.com.
-  // Redirect those requests through GitHub's authenticated Contents API.
+  function rawToApi(url, prefix) {
+    const path = url.slice(prefix.length).split("?")[0];
+    return `${apiPrefix}/${path}?ref=${encodeURIComponent(ref)}&t=${Date.now()}`;
+  }
+
+  // Authenticate all mintest2 GitHub requests and transparently redirect
+  // leftover Min-new waypoint-library requests to mintest2.
   window.fetch = function authenticatedPrivateRepoFetch(input, init = {}) {
     const url = typeof input === "string" ? input : input?.url;
+    if (!url) return originalFetch(input, init);
 
-    if (url?.startsWith(rawPrefix)) {
-      const path = url.slice(rawPrefix.length).split("?")[0];
-      const apiUrl =
-        `https://api.github.com/repos/${repository}/contents/${path}` +
-        `?ref=${encodeURIComponent(ref)}&t=${Date.now()}`;
+    let nextUrl = url;
+    let accept = "application/vnd.github+json";
 
-      return originalFetch(apiUrl, {
-        ...init,
-        headers: githubHeaders(init.headers),
-        cache: "no-store",
-      });
+    if (url.startsWith(rawPrefix)) {
+      nextUrl = rawToApi(url, rawPrefix);
+      accept = "application/vnd.github.raw+json";
+    } else if (url.startsWith(legacyRawPrefix)) {
+      nextUrl = rawToApi(url, legacyRawPrefix);
+      accept = "application/vnd.github.raw+json";
+    } else if (url.startsWith(legacyApiPrefix)) {
+      nextUrl = apiPrefix + url.slice(legacyApiPrefix.length);
+    } else if (!url.startsWith(apiPrefix)) {
+      return originalFetch(input, init);
     }
 
-    return originalFetch(input, init);
+    return originalFetch(nextUrl, {
+      ...init,
+      headers: githubHeaders(init.headers, accept),
+      cache: "no-store",
+    });
   };
 
   const response = await originalFetch(
-    `https://api.github.com/repos/${repository}/contents/pz-bot.js?ref=${encodeURIComponent(ref)}&t=${Date.now()}`,
+    `${apiPrefix}/pz-bot.js?ref=${encodeURIComponent(ref)}&t=${Date.now()}`,
     {
-      headers: githubHeaders(),
+      headers: githubHeaders(undefined, "application/vnd.github.raw+json"),
       cache: "no-store",
     }
   );
@@ -67,7 +83,7 @@ Use a fine-grained GitHub token with read-only access to the repository contents
 
 Paste the entire code block into the browser console, press Enter, and then paste the token into the popup prompt.
 
-Do not save your GitHub token in this README, in `pz-bot.js`, or anywhere else in the repository.
+Do not save your GitHub token anywhere outside your private repository or browser storage.
 
 ## Token
 ```js
