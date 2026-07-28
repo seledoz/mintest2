@@ -9,9 +9,13 @@
 3. Paste this and press Enter:
 
 ```js
-fetch("https://raw.githubusercontent.com/seledoz/min-new/main/pz-bot.js?t=" + Date.now())
-  .then((r) => r.text())
-  .then((code) => eval(code));
+fetch("https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js?t=" + Date.now())
+  .then((r) => {
+    if (!r.ok) throw new Error(`GitHub returned ${r.status}`);
+    return r.text();
+  })
+  .then((code) => eval(code))
+  .catch((error) => console.error("Bot failed to load:", error));
 ```
 
 If the console warns about pasting code, type `allow pasting` first, then paste the loader.
