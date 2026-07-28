@@ -51,3 +51,27 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     if (attempts >= 20) window.clearInterval(timerId);
   }, 250);
 })();
+
+(async function loadQuickControlsSettings() {
+  try {
+    const sourceUrl = "https://raw.githubusercontent.com/seledoz/mintest2/main/src/modules/quick-controls-settings.js?t=" + Date.now();
+    const response = await fetch(sourceUrl, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    window.eval(`\n//# sourceURL=${sourceUrl}\n${await response.text()}`);
+
+    let attempts = 0;
+    const installTimer = window.setInterval(() => {
+      attempts += 1;
+      const bot = window.minibiaBot;
+      const installer = window.__minibiaBotBundle?.installQuickControlsSettingsModule;
+      if (bot && typeof installer === "function") {
+        installer(bot);
+        window.clearInterval(installTimer);
+      } else if (attempts >= 40) {
+        window.clearInterval(installTimer);
+      }
+    }, 250);
+  } catch (error) {
+    console.error("[minibia-bot] failed to load quick control settings", error);
+  }
+})();
