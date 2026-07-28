@@ -70,5 +70,6 @@ Paste the entire code block into the browser console, press Enter, and then past
 Do not save your GitHub token in this README, in `pz-bot.js`, or anywhere else in the repository.
 
 ## Token
-
+```js
 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
+```
