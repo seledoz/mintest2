@@ -1,12 +1,30 @@
 window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
 window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDefaultChatKillSwitch(bot) {
+  const configStorageKey = "minibiaBot.gmKillSwitch.config";
+  const config = Object.assign(
+    {
+      responderEnabled: false,
+      responderMessage: "",
+      responderDelayMs: 2000,
+    },
+    bot.storage.get(configStorageKey, {})
+  );
+
   const state = {
     running: false,
     timerId: null,
     seenEntryKeys: new Set(),
     panelTimerId: null,
+    pendingReplyTimerIds: new Set(),
   };
+
+  function persistConfig() {
+    config.responderEnabled = !!config.responderEnabled;
+    config.responderMessage = String(config.responderMessage || "").trim();
+    config.responderDelayMs = 2000;
+    bot.storage.set(configStorageKey, { ...config });
+  }
 
   function normalizeName(name) {
     return String(name || "").trim().toLowerCase();
@@ -64,12 +82,40 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     }
   }
 
-  function refreshPanelToggle() {
-    const toggle = document.getElementById("minibia-bot-gm-kill-switch-enabled");
-    if (toggle) toggle.checked = state.running;
+  function refreshPanelControls() {
+    const killToggle = document.getElementById("minibia-bot-gm-kill-switch-enabled");
+    const responderToggle = document.getElementById("minibia-bot-gm-responder-enabled");
+    const responderMessage = document.getElementById("minibia-bot-gm-responder-message");
+
+    if (killToggle) killToggle.checked = state.running;
+    if (responderToggle) responderToggle.checked = !!config.responderEnabled;
+    if (responderMessage && responderMessage !== document.activeElement) {
+      responderMessage.value = config.responderMessage;
+    }
+  }
+
+  function scheduleResponder(speaker, message) {
+    const reply = String(config.responderMessage || "").trim();
+    if (!config.responderEnabled || !reply) return false;
+
+    const timerId = window.setTimeout(() => {
+      state.pendingReplyTimerIds.delete(timerId);
+      const sent = bot.sendChat?.(reply);
+      bot.log(sent ? "GM responder sent reply" : "GM responder failed to send reply", {
+        speaker,
+        message,
+        reply,
+        delayMs: 2000,
+      });
+    }, 2000);
+
+    state.pendingReplyTimerIds.add(timerId);
+    bot.log("GM responder scheduled reply", { speaker, reply, delayMs: 2000 });
+    return true;
   }
 
   function stopAutomationForGmChat(speaker, message) {
+    scheduleResponder(speaker, message);
     bot.playAlarm?.();
     bot.log("game master kill switch triggered from Default chat", {
       players: [speaker],
@@ -134,14 +180,14 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     state.running = true;
     rememberExistingEntries();
     tick();
-    refreshPanelToggle();
+    refreshPanelControls();
     bot.log("GM Default chat kill switch watcher started");
     return true;
   }
 
   function stop() {
     if (!state.running && state.timerId == null) {
-      refreshPanelToggle();
+      refreshPanelControls();
       return false;
     }
     state.running = false;
@@ -149,52 +195,92 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
       window.clearTimeout(state.timerId);
       state.timerId = null;
     }
-    refreshPanelToggle();
+    refreshPanelControls();
     bot.log("GM Default chat kill switch watcher stopped");
     return true;
   }
 
+  function updateResponderConfig(nextConfig = {}) {
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "responderEnabled")) {
+      config.responderEnabled = !!nextConfig.responderEnabled;
+    }
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "responderMessage")) {
+      config.responderMessage = String(nextConfig.responderMessage || "").trim();
+    }
+    persistConfig();
+    refreshPanelControls();
+    return { ...config };
+  }
+
   function injectPanelControl() {
-    if (document.getElementById("minibia-bot-gm-kill-switch-enabled")) {
-      refreshPanelToggle();
-      return true;
+    const githubSection = document.getElementById("minibia-bot-github-waypoints-section");
+    const panel = document.getElementById("minibia-bot-panel");
+    if (!panel || !githubSection) return false;
+
+    let section = document.getElementById("minibia-bot-gm-kill-switch-section");
+    if (!section) {
+      section = document.createElement("div");
+      section.className = "mb-section mb-column-section";
+      section.id = "minibia-bot-gm-kill-switch-section";
+      section.innerHTML = `
+        <div class="mb-label">GM Kill Switch</div>
+        <div class="mb-stack">
+          <label class="mb-toggle">
+            <input type="checkbox" id="minibia-bot-gm-kill-switch-enabled" />
+            <span>Enable GM Kill Switch</span>
+          </label>
+          <label class="mb-toggle">
+            <input type="checkbox" id="minibia-bot-gm-responder-enabled" />
+            <span>Enable GM Responder</span>
+          </label>
+          <label class="mb-field">
+            <span class="mb-field-label">GM Auto Reply</span>
+            <textarea id="minibia-bot-gm-responder-message" placeholder="Message sent 2 seconds after a GM speaks"></textarea>
+          </label>
+          <div class="mb-small-note">Responder delay: 2 seconds</div>
+        </div>
+      `;
+      githubSection.insertAdjacentElement("afterend", section);
     }
 
-    const panel = document.getElementById("minibia-bot-panel");
-    if (!panel) return false;
+    const killToggle = section.querySelector("#minibia-bot-gm-kill-switch-enabled");
+    const responderToggle = section.querySelector("#minibia-bot-gm-responder-enabled");
+    const responderMessage = section.querySelector("#minibia-bot-gm-responder-message");
 
-    const quickControlsLabel = Array.from(panel.querySelectorAll(".mb-label")).find(
-      (label) => String(label.textContent || "").trim().toLowerCase() === "quick controls"
-    );
-    const stack = quickControlsLabel?.closest?.(".mb-section")?.querySelector?.(".mb-stack");
-    if (!stack) return false;
+    if (killToggle && killToggle.dataset.gmBound !== "true") {
+      killToggle.dataset.gmBound = "true";
+      killToggle.addEventListener("change", () => {
+        if (killToggle.checked) start();
+        else stop();
+        refreshPanelControls();
+      });
+    }
 
-    const label = document.createElement("label");
-    label.className = "mb-toggle";
+    if (responderToggle && responderToggle.dataset.gmBound !== "true") {
+      responderToggle.dataset.gmBound = "true";
+      responderToggle.addEventListener("change", () => {
+        updateResponderConfig({ responderEnabled: responderToggle.checked });
+      });
+    }
 
-    const toggle = document.createElement("input");
-    toggle.type = "checkbox";
-    toggle.id = "minibia-bot-gm-kill-switch-enabled";
-    toggle.checked = state.running;
+    if (responderMessage && responderMessage.dataset.gmBound !== "true") {
+      responderMessage.dataset.gmBound = "true";
+      const saveMessage = () => updateResponderConfig({ responderMessage: responderMessage.value });
+      responderMessage.addEventListener("change", saveMessage);
+      responderMessage.addEventListener("blur", saveMessage);
+    }
 
-    const text = document.createElement("span");
-    text.textContent = "Enable GM Kill Switch";
-
-    toggle.addEventListener("change", () => {
-      if (toggle.checked) start();
-      else stop();
-      toggle.checked = state.running;
-    });
-
-    label.append(toggle, text);
-    stack.appendChild(label);
+    refreshPanelControls();
     return true;
   }
+
+  persistConfig();
 
   bot.gmDefaultChatKillSwitch = {
     start,
     stop,
-    status: () => ({ running: state.running }),
+    status: () => ({ running: state.running, config: { ...config } }),
+    updateResponderConfig,
     injectPanelControl,
   };
 
@@ -203,13 +289,15 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   let panelAttempts = 0;
   state.panelTimerId = window.setInterval(() => {
     panelAttempts += 1;
-    if (injectPanelControl() || panelAttempts >= 80) {
+    if (injectPanelControl() || panelAttempts >= 120) {
       window.clearInterval(state.panelTimerId);
       state.panelTimerId = null;
     }
-  }, 100);
+  }, 250);
 
   bot.addCleanup?.(() => {
     if (state.panelTimerId != null) window.clearInterval(state.panelTimerId);
+    for (const timerId of state.pendingReplyTimerIds) window.clearTimeout(timerId);
+    state.pendingReplyTimerIds.clear();
   });
 };
