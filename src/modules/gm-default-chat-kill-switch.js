@@ -5,6 +5,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     running: false,
     timerId: null,
     seenEntryKeys: new Set(),
+    panelTimerId: null,
   };
 
   function normalizeName(name) {
@@ -61,6 +62,11 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     for (const item of getCurrentEntries()) {
       state.seenEntryKeys.add(getEntryKey(item.channel, item.entry, item.index));
     }
+  }
+
+  function refreshPanelToggle() {
+    const toggle = document.getElementById("minibia-bot-gm-kill-switch-enabled");
+    if (toggle) toggle.checked = state.running;
   }
 
   function stopAutomationForGmChat(speaker, message) {
@@ -128,18 +134,60 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     state.running = true;
     rememberExistingEntries();
     tick();
+    refreshPanelToggle();
     bot.log("GM Default chat kill switch watcher started");
     return true;
   }
 
   function stop() {
-    if (!state.running && state.timerId == null) return false;
+    if (!state.running && state.timerId == null) {
+      refreshPanelToggle();
+      return false;
+    }
     state.running = false;
     if (state.timerId != null) {
       window.clearTimeout(state.timerId);
       state.timerId = null;
     }
+    refreshPanelToggle();
     bot.log("GM Default chat kill switch watcher stopped");
+    return true;
+  }
+
+  function injectPanelControl() {
+    if (document.getElementById("minibia-bot-gm-kill-switch-enabled")) {
+      refreshPanelToggle();
+      return true;
+    }
+
+    const panel = document.getElementById("minibia-bot-panel");
+    if (!panel) return false;
+
+    const quickControlsLabel = Array.from(panel.querySelectorAll(".mb-label")).find(
+      (label) => String(label.textContent || "").trim().toLowerCase() === "quick controls"
+    );
+    const stack = quickControlsLabel?.closest?.(".mb-section")?.querySelector?.(".mb-stack");
+    if (!stack) return false;
+
+    const label = document.createElement("label");
+    label.className = "mb-toggle";
+
+    const toggle = document.createElement("input");
+    toggle.type = "checkbox";
+    toggle.id = "minibia-bot-gm-kill-switch-enabled";
+    toggle.checked = state.running;
+
+    const text = document.createElement("span");
+    text.textContent = "Enable GM Kill Switch";
+
+    toggle.addEventListener("change", () => {
+      if (toggle.checked) start();
+      else stop();
+      toggle.checked = state.running;
+    });
+
+    label.append(toggle, text);
+    stack.appendChild(label);
     return true;
   }
 
@@ -147,7 +195,21 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     start,
     stop,
     status: () => ({ running: state.running }),
+    injectPanelControl,
   };
 
   start();
+
+  let panelAttempts = 0;
+  state.panelTimerId = window.setInterval(() => {
+    panelAttempts += 1;
+    if (injectPanelControl() || panelAttempts >= 80) {
+      window.clearInterval(state.panelTimerId);
+      state.panelTimerId = null;
+    }
+  }, 100);
+
+  bot.addCleanup?.(() => {
+    if (state.panelTimerId != null) window.clearInterval(state.panelTimerId);
+  });
 };
