@@ -4,9 +4,10 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
   if (!bot || bot.playerScreenAlert) return bot?.playerScreenAlert || null;
 
   const configStorageKey = "minibiaBot.playerScreenAlert.config";
+  const scanIntervalMs = 2000;
   const defaultConfig = {
     enabled: false,
-    tickMs: 250,
+    tickMs: scanIntervalMs,
     repeatMs: 3000,
     durationMs: 15000,
     text: "player on screen",
@@ -24,6 +25,7 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
 
   const storedConfig = bot.storage.get(configStorageKey, {}) || {};
   const config = Object.assign({}, defaultConfig, storedConfig);
+  config.tickMs = scanIntervalMs;
   config.safeNames = normalizeSafeNames(config.safeNames);
   config.repeatMs = Math.max(500, Number(config.repeatMs) || defaultConfig.repeatMs);
   config.durationMs = Math.max(1000, Number(config.durationMs) || defaultConfig.durationMs);
@@ -49,6 +51,7 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
   }
 
   function persistConfig() {
+    config.tickMs = scanIntervalMs;
     bot.storage.set(configStorageKey, {
       ...config,
       safeNames: [...config.safeNames],
@@ -118,14 +121,14 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
   }
 
   function scheduleNextTick() {
-    if (!state.running) return;
-    state.timerId = window.setTimeout(tick, Math.max(100, Number(config.tickMs) || defaultConfig.tickMs));
+    if (!state.running || !config.enabled) return;
+    state.timerId = window.setTimeout(tick, scanIntervalMs);
   }
 
   function tick() {
-    if (!state.running) return;
+    if (!state.running || !config.enabled) return;
     try {
-      if (config.enabled) checkPlayers();
+      checkPlayers();
     } catch (error) {
       bot.log("player screen alert tick failed", error?.message || error);
     } finally {
@@ -135,6 +138,7 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
 
   function start() {
     config.enabled = true;
+    config.tickMs = scanIntervalMs;
     persistConfig();
     state.visibleUnsafePlayerIds = new Set(
       getVisibleUnsafePlayers().map(getPlayerKey).filter(Boolean)
@@ -145,7 +149,7 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
 
     if (state.running) return false;
     state.running = true;
-    bot.log("player screen alert started", { safeNames: [...config.safeNames] });
+    bot.log("player screen alert started", { safeNames: [...config.safeNames], tickMs: scanIntervalMs });
     tick();
     return true;
   }
@@ -201,7 +205,9 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
     if (Object.prototype.hasOwnProperty.call(nextConfig, "durationMs")) {
       nextConfig.durationMs = Math.max(1000, Number(nextConfig.durationMs) || defaultConfig.durationMs);
     }
+    delete nextConfig.tickMs;
     Object.assign(config, nextConfig);
+    config.tickMs = scanIntervalMs;
     config.safeNames = normalizeSafeNames(config.safeNames);
     persistConfig();
 
@@ -216,7 +222,7 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
   function status() {
     return {
       running: state.running,
-      config: { ...config, safeNames: [...config.safeNames] },
+      config: { ...config, tickMs: scanIntervalMs, safeNames: [...config.safeNames] },
       visibleUnsafePlayerIds: [...state.visibleUnsafePlayerIds],
       alertUntilAt: state.alertUntilAt,
       lastSpokenAt: state.lastSpokenAt,
@@ -303,7 +309,7 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
 
     const note = document.createElement("div");
     note.className = "mb-small-note";
-    note.textContent = "Repeats “player on screen” for 15 seconds when a new non-safe player enters. It re-arms after that player leaves.";
+    note.textContent = "Checks every 2 seconds while enabled. Repeats ‘player on screen’ for 15 seconds when a new non-safe player enters.";
 
     const inputRow = document.createElement("div");
     inputRow.style.display = "flex";
