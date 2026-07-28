@@ -1,6 +1,7 @@
 (() => {
   let lastRopeFallbackAt = 0;
   let lastRopeSourceKey = null;
+  let ropeCandidateIndex = 0;
 
   function normalizePosition(value) {
     if (!value) return null;
@@ -22,6 +23,28 @@
   function getThingName(thing) {
     const definition = getThingDefinition(thing?.id);
     return String(definition?.properties?.name || thing?.name || "").trim().toLowerCase();
+  }
+
+  function getTileThings(tile) {
+    if (!tile) return [];
+    const things = [];
+    if (tile.id) things.push(tile);
+    if (Array.isArray(tile.items)) tile.items.forEach((item) => item && things.push(item));
+    return things;
+  }
+
+  function getRopeTileScore(tile, position, anchor) {
+    const names = getTileThings(tile).map(getThingName).join(" ");
+    let score = Math.abs(position.x - anchor.x) + Math.abs(position.y - anchor.y);
+    if (/rope spot|rope hole/.test(names)) score -= 100;
+    else if (/hole/.test(names)) score -= 80;
+    const floorChange = getTileThings(tile).some((thing) => {
+      const definition = getThingDefinition(thing?.id);
+      return !!definition?.properties?.floorchange;
+    });
+    if (floorChange) score -= 40;
+    if (tile?.isWalkable?.() === false) score -= 10;
+    return score;
   }
 
   function findRopeSource() {
@@ -60,6 +83,27 @@
     return null;
   }
 
+  function getNearbyRopeCandidates(anchor, player) {
+    const candidates = [];
+    const seen = new Set();
+    const chunks = window.gameClient?.world?.chunks || [];
+    for (const chunk of chunks) {
+      if (!chunk?.tiles) continue;
+      for (const tile of chunk.tiles) {
+        const position = normalizePosition(tile?.__position);
+        if (!position || position.z !== player.z) continue;
+        if (Math.abs(position.x - anchor.x) > 2 || Math.abs(position.y - anchor.y) > 2) continue;
+        if (Math.abs(position.x - player.x) > 1 || Math.abs(position.y - player.y) > 1) continue;
+        const key = `${position.x},${position.y},${position.z}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        candidates.push({ tile, position, score: getRopeTileScore(tile, position, anchor) });
+      }
+    }
+    candidates.sort((a, b) => a.score - b.score);
+    return candidates;
+  }
+
   function installLearnedRopeFallback(bot) {
     if (!bot?.cave || bot.cave.__learnedRopeFallbackInstalled) return !!bot?.cave;
     bot.cave.__learnedRopeFallbackInstalled = true;
@@ -80,44 +124,49 @@
             return leftDistance - rightDistance;
           })[0];
 
-        const source = normalizePosition(transition?.from) || getRouteRopeSource(bot, status, player);
-        if (!source) return;
+        const anchor = normalizePosition(transition?.from) || getRouteRopeSource(bot, status, player);
+        if (!anchor) return;
 
-        const dx = Math.abs(source.x - player.x);
-        const dy = Math.abs(source.y - player.y);
+        const dx = Math.abs(anchor.x - player.x);
+        const dy = Math.abs(anchor.y - player.y);
         if (dx > 1 || dy > 1) {
           window.gameClient?.world?.pathfinder?.findPath?.(
             new Position(player.x, player.y, player.z),
-            new Position(source.x, source.y, source.z)
+            new Position(anchor.x, anchor.y, anchor.z)
           );
           return;
         }
 
         const now = Date.now();
-        const sourceKey = `${source.x},${source.y},${source.z}`;
-        if (now - lastRopeFallbackAt < 1200 && sourceKey === lastRopeSourceKey) return;
+        if (now - lastRopeFallbackAt < 900) return;
 
-        const tile = window.gameClient?.world?.getTileFromWorldPosition?.(
-          new Position(source.x, source.y, source.z)
-        );
         const rope = findRopeSource();
-        if (!tile || !rope) {
-          if (!rope && now - lastRopeFallbackAt >= 3000) {
+        if (!rope) {
+          if (now - lastRopeFallbackAt >= 3000) {
             bot.log?.("cave rope transition skipped: no rope found");
             lastRopeFallbackAt = now;
           }
           return;
         }
 
+        const candidates = getNearbyRopeCandidates(anchor, player);
+        if (!candidates.length) return;
+        const candidate = candidates[ropeCandidateIndex % candidates.length];
+        ropeCandidateIndex = (ropeCandidateIndex + 1) % candidates.length;
+        const sourceKey = `${candidate.position.x},${candidate.position.y},${candidate.position.z}`;
+
         window.gameClient?.mouse?.__handleItemUseWith?.(
           { which: rope.which, index: rope.index },
-          { which: tile, index: 0xFF }
+          { which: candidate.tile, index: 0xFF }
         );
         lastRopeFallbackAt = now;
         lastRopeSourceKey = sourceKey;
-        bot.log?.("cave used rope transition fallback", {
-          source,
+        bot.log?.("cave tried rope transition tile", {
+          anchor,
+          source: candidate.position,
           waypoint,
+          candidate: ropeCandidateIndex,
+          candidateCount: candidates.length,
           sourceType: transition ? "learned" : "route",
           ropeLocation: rope.location,
           ropeSlot: rope.index,
