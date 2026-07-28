@@ -1,6 +1,6 @@
 window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
-// Safe layout helper: no observers. It retries briefly, then stops.
+// Safe layout helper: retries briefly during startup, then stops.
 (function moveAoeIntoFourthColumnSafely() {
   const columnId = "minibia-bot-aoe-column";
   const styleId = "minibia-bot-aoe-column-style";
@@ -46,7 +46,6 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     if (!panel || !body || !aoeSection) return false;
 
     installStyle();
-
     let column = document.getElementById(columnId);
     if (!column) {
       column = document.createElement("div");
@@ -54,139 +53,24 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       column.className = "mb-aoe-column";
       body.appendChild(column);
     }
-
-    if (aoeSection.parentElement !== column) {
-      column.prepend(aoeSection);
-    }
-
+    if (aoeSection.parentElement !== column) column.prepend(aoeSection);
     return true;
   }
 
   let attempts = 0;
   const retryId = window.setInterval(() => {
     attempts += 1;
-    const moved = moveAoeSection();
-    if (moved || attempts >= 30) {
-      window.clearInterval(retryId);
-    }
+    if (moveAoeSection() || attempts >= 30) window.clearInterval(retryId);
   }, 1000);
-
   moveAoeSection();
 })();
 
-(function runGreatFireballWithoutSquareAoe() {
-  let lastShotAt = 0;
-  let shooting = false;
-
-  function numberValue(value, fallback) {
-    const n = Math.trunc(Number(value));
-    return Number.isFinite(n) && n > 0 ? n : fallback;
-  }
-
-  function getCurrentTarget() {
-    return window.minibiaBot?.attack?.getCurrentTarget?.() || window.gameClient?.player?.__target || null;
-  }
-
-  function isSameTarget(left, right) {
-    return !!left && !!right && (left === right || left.id === right.id);
-  }
-
-  function setTarget(monster) {
-    try {
-      if (!monster || isSameTarget(getCurrentTarget(), monster)) return true;
-      if (!window.gameClient?.player || typeof window.gameClient.send !== "function" || typeof TargetPacket !== "function") return false;
-      window.gameClient.player.setTarget(monster);
-      window.gameClient.send(new TargetPacket(monster.id));
-      return true;
-    } catch (error) {
-      return false;
-    }
-  }
-
-  function tickGfbOnly() {
-    try {
-      const bot = window.minibiaBot;
-      const aoe = bot?.attackAoe;
-      const config = aoe?.config;
-      if (!bot || !aoe || !config?.gfbEnabled || shooting) return;
-
-      const slot = numberValue(config.gfbHotbarSlot, 0);
-      const minMonsters = numberValue(config.gfbMinMonsters, 4);
-      const cooldown = Math.max(500, numberValue(config.gfbCooldownMs, 2000));
-      const now = Date.now();
-      if (!slot || now - lastShotAt < cooldown) return;
-
-      const best = aoe.getBestGfbCandidate?.();
-      const monster = best?.target || best?.monsters?.[0] || null;
-      if (!best || !monster || best.count < minMonsters) return;
-
-      shooting = true;
-      if (!setTarget(monster)) {
-        bot.log?.("great fireball target switch failed", { target: monster.name || "Mob", position: best.position });
-        shooting = false;
-        return;
-      }
-
-      window.setTimeout(() => {
-        const pressed = bot.clickHotbar?.(slot - 1);
-        if (pressed) {
-          lastShotAt = Date.now();
-          bot.log?.("used great fireball hotkey on current target", {
-            slot,
-            monsterCount: best.count,
-            target: monster.name || "Mob",
-            position: best.position,
-          });
-        } else {
-          bot.log?.("great fireball hotkey press failed", { slot, target: monster.name || "Mob" });
-        }
-        shooting = false;
-      }, 75);
-    } catch (error) {
-      shooting = false;
-    }
-  }
-
-  window.setInterval(tickGfbOnly, 250);
-})();
-
-(function clarifyGreatFireballHotkeyMode() {
-  const desiredText = "Hotkey should have Great Fireball set to Use on Target. Picks the best 1-5-5-7-5-5-1 shot and casts only if it hits the minimum.";
-
-  function updateNote() {
-    const sections = [
-      document.getElementById("minibia-bot-gfb-section"),
-      document.getElementById("minibia-bot-gfb-enabled")?.closest?.(".mb-section"),
-    ].filter(Boolean);
-
-    let updated = false;
-    sections.forEach((section) => {
-      const note = Array.from(section.querySelectorAll(".mb-small-note")).find((element) =>
-        /hotkey should have great fireball/i.test(String(element.textContent || ""))
-      );
-      if (note && note.textContent !== desiredText) {
-        note.textContent = desiredText;
-        updated = true;
-      }
-    });
-    return updated;
-  }
-
-  let attempts = 0;
-  const retryId = window.setInterval(() => {
-    attempts += 1;
-    updateNote();
-    if (attempts >= 30) window.clearInterval(retryId);
-  }, 500);
-
-  updateNote();
-})();
+// The old GFB helper used to run a permanent 250 ms interval even when disabled.
+// GFB 2.0 already owns its own timer and starts/stops it with the feature toggle,
+// so no separate background combat interval is installed here.
 
 (function configureCaptchaAlarmTiming() {
-  const desiredConfig = {
-    beepIntervalMs: 3000,
-    alertDurationMs: 30000,
-  };
+  const desiredConfig = { beepIntervalMs: 3000, alertDurationMs: 30000 };
 
   function applyTiming() {
     try {
@@ -194,7 +78,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       if (!alertModule?.updateConfig) return false;
       alertModule.updateConfig(desiredConfig, { silent: true });
       return true;
-    } catch (error) {
+    } catch (_) {
       return false;
     }
   }
@@ -202,10 +86,8 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   let attempts = 0;
   const retryId = window.setInterval(() => {
     attempts += 1;
-    const applied = applyTiming();
-    if (applied || attempts >= 30) window.clearInterval(retryId);
+    if (applyTiming() || attempts >= 30) window.clearInterval(retryId);
   }, 1000);
-
   applyTiming();
 })();
 
@@ -220,7 +102,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     try {
       window.minibiaBot?.attackAoe?.updateConfig?.({ cooldownMs });
       return true;
-    } catch (error) {
+    } catch (_) {
       return false;
     }
   }
@@ -231,7 +113,6 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     input.dataset.squareCooldownEditableInstalled = "true";
     input.removeAttribute("readonly");
     input.disabled = false;
-
     input.addEventListener("focus", () => {
       editing = true;
       draftValue = input.value;
@@ -252,13 +133,16 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     return true;
   }
 
-  window.setInterval(() => {
+  let attempts = 0;
+  const retryId = window.setInterval(() => {
+    attempts += 1;
     const input = document.getElementById(inputId);
     attach();
     if (editing && input && document.activeElement === input && input.value !== draftValue) {
       input.value = draftValue;
     }
-  }, 100);
+    if (attempts >= 40 && !editing) window.clearInterval(retryId);
+  }, 250);
 })();
 
 (function forceNormalAutoAttackRangeSix() {
@@ -273,10 +157,8 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
         window.localStorage.setItem(storageKey, JSON.stringify(config));
       }
       const attackConfig = window.minibiaBot?.attack?.config;
-      if (attackConfig && attackConfig.maxTargetDistance !== 6) {
-        attackConfig.maxTargetDistance = 6;
-      }
-    } catch (error) {}
+      if (attackConfig && attackConfig.maxTargetDistance !== 6) attackConfig.maxTargetDistance = 6;
+    } catch (_) {}
   }
 
   applySix();
