@@ -148,6 +148,7 @@
 
   function install() {
     const bot = window.minibiaBot;
+    if (bot?.equipRing && !bot.ring) bot.ring = bot.equipRing;
     installCaveWaypointCompatibility(bot);
 
     const toggle = document.getElementById("minibia-bot-anti-paralyze-enabled");
