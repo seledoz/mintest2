@@ -247,16 +247,24 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     const select = document.getElementById("minibia-bot-cave-pathfinder-mode");
     if (!select) return;
 
-    let option = Array.from(select.options).find((entry) => entry.value === "arrow");
-    if (!option) {
-      option = document.createElement("option");
-      option.value = "arrow";
-      select.appendChild(option);
+    let astarOption = Array.from(select.options).find((entry) => entry.value === "astar");
+    if (!astarOption) {
+      astarOption = document.createElement("option");
+      astarOption.value = "astar";
+      select.appendChild(astarOption);
     }
-    option.textContent = "Smart A* + Arrow Keys";
+    astarOption.textContent = "Smart A*";
+
+    let arrowOption = Array.from(select.options).find((entry) => entry.value === "arrow");
+    if (!arrowOption) {
+      arrowOption = document.createElement("option");
+      arrowOption.value = "arrow";
+      select.appendChild(arrowOption);
+    }
+    arrowOption.textContent = "Smart A* + Arrow Keys";
 
     const mode = bot.cave?.status?.().config?.pathfinderMode;
-    if (mode === "arrow") select.value = "arrow";
+    if (mode === "astar" || mode === "arrow") select.value = mode;
   }
 
   function status() {
