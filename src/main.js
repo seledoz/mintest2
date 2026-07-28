@@ -62,6 +62,53 @@
     return !!debugLabel;
   }
 
+  function installGmKillSwitchBelowGithub(bot) {
+    let attempts = 0;
+    const placeControl = () => {
+      const githubSection = document.getElementById("minibia-bot-github-waypoints-section");
+      if (!githubSection) return false;
+
+      document.getElementById("minibia-bot-gm-kill-switch-section")?.remove();
+      document.getElementById("minibia-bot-gm-kill-switch-enabled")?.closest?.("label")?.remove();
+
+      const section = document.createElement("div");
+      section.className = "mb-section mb-column-section";
+      section.id = "minibia-bot-gm-kill-switch-section";
+      section.innerHTML = `
+        <div class="mb-label">GM Kill Switch</div>
+        <div class="mb-stack">
+          <label class="mb-toggle">
+            <input type="checkbox" id="minibia-bot-gm-kill-switch-enabled" />
+            <span>Enable GM Kill Switch</span>
+          </label>
+          <div class="mb-small-note">Stops active bot features when a saved GM name speaks in Default chat.</div>
+        </div>
+      `;
+
+      githubSection.insertAdjacentElement("afterend", section);
+      const toggle = section.querySelector("#minibia-bot-gm-kill-switch-enabled");
+      const refresh = () => {
+        if (toggle) toggle.checked = !!bot.gmDefaultChatKillSwitch?.status?.().running;
+      };
+
+      toggle?.addEventListener("change", () => {
+        if (toggle.checked) bot.gmDefaultChatKillSwitch?.start?.();
+        else bot.gmDefaultChatKillSwitch?.stop?.();
+        refresh();
+      });
+
+      refresh();
+      return true;
+    };
+
+    if (placeControl()) return;
+    const timerId = window.setInterval(() => {
+      attempts += 1;
+      if (placeControl() || attempts >= 80) window.clearInterval(timerId);
+    }, 250);
+    bot.addCleanup?.(() => window.clearInterval(timerId));
+  }
+
   function installPauseBreakToggle(bot) {
     let paused = false;
     let resumeSnapshot = { cave: false, attack: false, greatFireballV2: false };
@@ -177,6 +224,7 @@
     currentBundle.installGreatFireballV2Module?.(bot);
     currentBundle.installLureModeModule?.(bot);
     currentBundle.installGithubWaypointLibraryModule?.(bot);
+    installGmKillSwitchBelowGithub(bot);
     removePanelDebugSection();
     window.setTimeout(removePanelDebugSection, 0);
     bot.caveArrowKeys?.ensureDropdownOption?.();
