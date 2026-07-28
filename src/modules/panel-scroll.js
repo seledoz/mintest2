@@ -3,6 +3,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 (() => {
   const styleId = "minibia-bot-panel-scroll-style";
   const controlsId = "minibia-bot-panel-scroll-controls";
+  const caveNewButtonId = "minibia-bot-cave-preset-new";
 
   document.getElementById(styleId)?.remove();
   document.getElementById(controlsId)?.remove();
@@ -70,6 +71,47 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
   (document.head || document.documentElement).appendChild(style);
 
+  function installCaveNewButton() {
+    if (document.getElementById(caveNewButtonId)) return true;
+
+    const saveButton = document.getElementById("minibia-bot-cave-preset-save");
+    const row = saveButton?.parentElement;
+    if (!saveButton || !row) return false;
+
+    const newButton = document.createElement("button");
+    newButton.type = "button";
+    newButton.id = caveNewButtonId;
+    newButton.textContent = "New";
+    newButton.title = "Create a new empty cavebot preset";
+    newButton.addEventListener("click", () => {
+      const bot = window.minibiaBot;
+      if (!bot?.cave) return;
+
+      const name = window.prompt("New preset name", "New Route")?.trim();
+      if (!name) return;
+
+      const existing = bot.cave.getPresetNames?.() || [];
+      if (existing.some((entry) => String(entry).toLowerCase() === name.toLowerCase())) {
+        window.alert(`A preset named "${name}" already exists.`);
+        return;
+      }
+
+      bot.cave.stop?.();
+      bot.cave.clearRoute?.();
+      bot.cave.clearTransitions?.();
+      bot.cave.savePreset?.(name);
+      bot.cave.loadPreset?.(name);
+      bot.ui?.refreshCaveStatus?.();
+      bot.ui?.refreshCavePresetControls?.();
+      bot.ui?.refreshCaveClosestStatus?.();
+      bot.ui?.refreshCaveTransitionStatus?.();
+      bot.log?.("created new cavebot preset", { name });
+    });
+
+    row.insertBefore(newButton, saveButton);
+    return true;
+  }
+
   function installControls() {
     const panel = document.getElementById("minibia-bot-panel");
     if (!panel || document.getElementById(controlsId)) return false;
@@ -100,6 +142,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
         return;
       }
 
+      installCaveNewButton();
       const rect = panel.getBoundingClientRect();
       const maxScrollLeft = Math.max(0, panel.scrollWidth - panel.clientWidth);
       const hasHorizontalOverflow = maxScrollLeft > 2;
@@ -150,6 +193,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
   if (!installControls()) {
     const observer = new MutationObserver(() => {
+      installCaveNewButton();
       if (installControls()) observer.disconnect();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
