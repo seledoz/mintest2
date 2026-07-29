@@ -145,6 +145,20 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     }
   }
 
+  function stopGmAlarm() {
+    try {
+      bot.stopAlarm?.();
+      bot.alarm?.stop?.();
+      bot.panic?.stopAlarm?.();
+      window.speechSynthesis?.cancel?.();
+      bot.log("GM kill switch alarm stopped");
+      return true;
+    } catch (error) {
+      bot.log("Failed to stop GM kill switch alarm", { error: String(error) });
+      return false;
+    }
+  }
+
   function sendReply(reply) {
     const senders = [
       () => bot.sendChat?.(reply),
@@ -284,7 +298,8 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     const sectionIsIncomplete = section && (
       !section.querySelector("#minibia-bot-gm-kill-switch-enabled") ||
       !section.querySelector("#minibia-bot-gm-responder-enabled") ||
-      !section.querySelector("#minibia-bot-gm-responder-message")
+      !section.querySelector("#minibia-bot-gm-responder-message") ||
+      !section.querySelector("#minibia-bot-gm-stop-alarm")
     );
 
     if (sectionIsIncomplete) {
@@ -303,6 +318,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
             <input type="checkbox" id="minibia-bot-gm-kill-switch-enabled" />
             <span>Enable GM Kill Switch</span>
           </label>
+          <button type="button" class="mb-button" id="minibia-bot-gm-stop-alarm">Stop Alarm</button>
           <label class="mb-toggle">
             <input type="checkbox" id="minibia-bot-gm-responder-enabled" />
             <span>Enable GM Responder</span>
@@ -320,6 +336,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     }
 
     const killToggle = section.querySelector("#minibia-bot-gm-kill-switch-enabled");
+    const stopAlarmButton = section.querySelector("#minibia-bot-gm-stop-alarm");
     const responderToggle = section.querySelector("#minibia-bot-gm-responder-enabled");
     const responderMessage = section.querySelector("#minibia-bot-gm-responder-message");
 
@@ -330,6 +347,11 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
         else stop();
         refreshPanelControls();
       });
+    }
+
+    if (stopAlarmButton && stopAlarmButton.dataset.gmBound !== "true") {
+      stopAlarmButton.dataset.gmBound = "true";
+      stopAlarmButton.addEventListener("click", stopGmAlarm);
     }
 
     if (responderToggle && responderToggle.dataset.gmBound !== "true") {
@@ -356,6 +378,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   bot.gmDefaultChatKillSwitch = {
     start,
     stop,
+    stopAlarm: stopGmAlarm,
     status: () => ({ running: state.running, config: { ...config } }),
     updateResponderConfig,
     injectPanelControl,
