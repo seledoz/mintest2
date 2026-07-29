@@ -100,17 +100,19 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     const spell = String(spellWords || "").trim();
     if (!spell) return false;
 
-    const senders = [
-      () => bot.sendChat?.(spell),
-      () => window.gameClient?.sendChat?.(spell),
-      () => window.gameClient?.interface?.channelManager?.sendMessage?.(spell),
-      () => window.gameClient?.interface?.channelManager?.say?.(spell),
+    const candidates = [
+      [bot, bot.sendChat],
+      [window.gameClient, window.gameClient?.sendChat],
+      [window.gameClient?.interface?.channelManager, window.gameClient?.interface?.channelManager?.sendMessage],
+      [window.gameClient?.interface?.channelManager, window.gameClient?.interface?.channelManager?.say],
     ];
 
-    for (const send of senders) {
+    for (const [context, sender] of candidates) {
+      if (typeof sender !== "function") continue;
+
       try {
-        const result = send();
-        if (result !== undefined && result !== false) return true;
+        const result = sender.call(context, spell);
+        if (result !== false) return true;
       } catch (error) {
         bot.log("rune spell chat method failed", { error: String(error) });
       }
