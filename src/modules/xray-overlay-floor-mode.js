@@ -126,3 +126,119 @@
     overlayObserver?.disconnect?.();
   }, { once: true });
 })();
+
+// Adds exact, user-entered GM names to the Default-chat GM kill switch.
+(() => {
+  const storageKey = "minibiaBot.gmKillSwitch.exactNames";
+  const inputId = "minibia-bot-gm-exact-names";
+  const fieldId = "minibia-bot-gm-exact-names-field";
+  let originalGetGameMasterNames = null;
+
+  function cleanName(value) {
+    return String(value || "").trim();
+  }
+
+  function normalizeName(value) {
+    return cleanName(value).toLowerCase();
+  }
+
+  function parseNames(value) {
+    const seen = new Set();
+    return String(value || "")
+      .split(/[\n,;]+/)
+      .map(cleanName)
+      .filter((name) => {
+        const normalized = normalizeName(name);
+        if (!normalized || seen.has(normalized)) return false;
+        seen.add(normalized);
+        return true;
+      });
+  }
+
+  function loadNames() {
+    try {
+      return parseNames(window.localStorage.getItem(storageKey) || "");
+    } catch (_) {
+      return [];
+    }
+  }
+
+  let exactNames = loadNames();
+
+  function saveNames(value) {
+    exactNames = parseNames(value);
+    try {
+      window.localStorage.setItem(storageKey, exactNames.join("\n"));
+    } catch (_) {}
+    return [...exactNames];
+  }
+
+  function patchNameProvider() {
+    const panic = window.minibiaBot?.panic;
+    if (!panic) return false;
+    if (panic.__exactGmNamesInstalled) return true;
+
+    originalGetGameMasterNames = typeof panic.getGameMasterNames === "function"
+      ? panic.getGameMasterNames.bind(panic)
+      : () => [];
+
+    panic.getGameMasterNames = () => {
+      let existing = [];
+      try {
+        existing = originalGetGameMasterNames() || [];
+      } catch (_) {}
+
+      const merged = new Map();
+      [...existing, ...exactNames].forEach((name) => {
+        const cleaned = cleanName(name);
+        const normalized = normalizeName(cleaned);
+        if (normalized && !merged.has(normalized)) merged.set(normalized, cleaned);
+      });
+      return [...merged.values()];
+    };
+
+    panic.__exactGmNamesInstalled = true;
+    return true;
+  }
+
+  function installField() {
+    const section = document.getElementById("minibia-bot-gm-kill-switch-section");
+    const stack = section?.querySelector?.(".mb-stack");
+    if (!section || !stack) return false;
+
+    let field = document.getElementById(fieldId);
+    if (!field) {
+      field = document.createElement("label");
+      field.id = fieldId;
+      field.className = "mb-field";
+      field.innerHTML = `
+        <span class="mb-field-label">Exact GM Name(s)</span>
+        <textarea id="${inputId}" placeholder="Enter the exact character name. One per line, or separate with commas."></textarea>
+        <span class="mb-small-note">Matching ignores capital letters but otherwise uses the full entered name.</span>`;
+
+      const responderToggle = document.getElementById("minibia-bot-gm-responder-enabled")?.closest?.("label");
+      if (responderToggle) responderToggle.insertAdjacentElement("beforebegin", field);
+      else stack.appendChild(field);
+    }
+
+    const input = document.getElementById(inputId);
+    if (!input) return false;
+    if (document.activeElement !== input) input.value = exactNames.join("\n");
+
+    if (input.dataset.exactGmNamesBound !== "true") {
+      input.dataset.exactGmNamesBound = "true";
+      const save = () => saveNames(input.value);
+      input.addEventListener("input", save);
+      input.addEventListener("change", save);
+      input.addEventListener("blur", save);
+    }
+    return true;
+  }
+
+  const timerId = window.setInterval(() => {
+    patchNameProvider();
+    installField();
+  }, 250);
+
+  window.addEventListener("beforeunload", () => window.clearInterval(timerId), { once: true });
+})();
