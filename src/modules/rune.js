@@ -14,7 +14,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
 
   const config = Object.assign(
     {
-      tickMs: 50,
+      tickMs: 100,
       minHpPercent: 50,
       minFoodSeconds: 30,
       runeSpellWords: "adori vita vis",
@@ -24,7 +24,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     },
     bot.storage.get(configStorageKey, {})
   );
-  config.tickMs = 50;
+  config.tickMs = 100;
 
   function persistConfig() {
     bot.storage.set(configStorageKey, { ...config });
@@ -155,7 +155,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     state.timerId = window.setTimeout(() => {
       state.timerId = null;
       tick();
-    }, Math.max(25, Number(config.tickMs) || 50));
+    }, Math.max(25, Number(config.tickMs) || 100));
   }
 
   function runImmediateTick() {
@@ -239,7 +239,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
 
   function start(overrides = {}) {
     Object.assign(config, overrides, { enabled: true });
-    config.tickMs = 50;
+    config.tickMs = 100;
     persistConfig();
 
     if (state.running) {
@@ -288,7 +288,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
 
   function updateConfig(nextConfig = {}) {
     Object.assign(config, nextConfig);
-    config.tickMs = 50;
+    config.tickMs = 100;
     persistConfig();
     bot.log("rune config updated", { ...config });
     return { ...config };
