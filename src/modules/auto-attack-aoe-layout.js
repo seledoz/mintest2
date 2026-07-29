@@ -164,3 +164,230 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   applySix();
   window.setTimeout(applySix, 500);
 })();
+
+// Adds a second square hotkey as a lower-priority fallback.
+// Square Hotkey #1 always wins whenever its configured monster requirement is met.
+(function installSecondSquareHotkey() {
+  const storageKey = "minibiaBot.attackAoe.square2.config";
+  const sectionId = "minibia-bot-auto-attack-aoe-square2-section";
+  const defaults = {
+    hotbarSlot: null,
+    minMonsters: 2,
+    squareRange: 3,
+    cooldownMs: 2000,
+  };
+  const state = {
+    lastHotkeyAt: 0,
+    lastMonsterCount: 0,
+  };
+
+  function normalizeSlot(value) {
+    const number = Math.trunc(Number(value));
+    return Number.isFinite(number) && number >= 1 && number <= 12 ? number : null;
+  }
+
+  function positiveInt(value, fallback) {
+    const number = Math.trunc(Number(value));
+    return Number.isFinite(number) && number > 0 ? number : fallback;
+  }
+
+  function nonNegativeInt(value, fallback) {
+    const number = Math.trunc(Number(value));
+    return Number.isFinite(number) && number >= 0 ? number : fallback;
+  }
+
+  function loadConfig() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem(storageKey) || "{}");
+      return {
+        hotbarSlot: normalizeSlot(saved.hotbarSlot),
+        minMonsters: positiveInt(saved.minMonsters, defaults.minMonsters),
+        squareRange: positiveInt(saved.squareRange, defaults.squareRange),
+        cooldownMs: nonNegativeInt(saved.cooldownMs, defaults.cooldownMs),
+      };
+    } catch (_) {
+      return { ...defaults };
+    }
+  }
+
+  const config = loadConfig();
+
+  function persistConfig() {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(config));
+    } catch (_) {}
+  }
+
+  function getPosition(value) {
+    const raw = value?.getPosition?.() || value?.__position || value?.position || value;
+    if (!raw) return null;
+    const x = Number(raw.x);
+    const y = Number(raw.y);
+    const z = Number(raw.z);
+    return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)
+      ? { x: Math.trunc(x), y: Math.trunc(y), z: Math.trunc(z) }
+      : null;
+  }
+
+  function tileDistance(left, right) {
+    if (!left || !right || left.z !== right.z) return Number.POSITIVE_INFINITY;
+    return Math.max(Math.abs(left.x - right.x), Math.abs(left.y - right.y));
+  }
+
+  function normalizeName(value) {
+    return String(value || "").trim().toLowerCase();
+  }
+
+  function passesTargetFilters(monster, primaryConfig) {
+    if (primaryConfig?.respectTargetFilters === false) return true;
+    const attackConfig = window.minibiaBot?.attack?.config || {};
+    const mode = attackConfig.targetFilterMode === "include" || attackConfig.targetFilterMode === "exclude"
+      ? attackConfig.targetFilterMode
+      : "all";
+    const name = normalizeName(monster?.name || "Mob");
+    const included = new Set((attackConfig.includedCreatureNames || []).map(normalizeName));
+    const excluded = new Set((attackConfig.excludedCreatureNames || []).map(normalizeName));
+    if (mode === "include") return (!included.size || included.has(name)) && !excluded.has(name);
+    return !excluded.has(name);
+  }
+
+  function countMonsters(range, primaryConfig) {
+    const bot = window.minibiaBot;
+    const playerPosition = getPosition(bot?.getPlayerPosition?.());
+    if (!bot || !playerPosition) return 0;
+    return (bot.xray?.getVisibleMonsters?.({ sameFloorOnly: true }) || [])
+      .filter((monster) => passesTargetFilters(monster, primaryConfig))
+      .filter((monster) => tileDistance(playerPosition, getPosition(monster)) <= range)
+      .length;
+  }
+
+  function getPrimaryStatus() {
+    try {
+      return window.minibiaBot?.attackAoe?.status?.() || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function primarySquareIsEligible(status) {
+    const primaryConfig = status?.config || {};
+    if (!status?.running || !primaryConfig.enabled || !normalizeSlot(primaryConfig.spellHotbarSlot)) return false;
+    if (primaryConfig.requireAutoAttackRunning !== false && !window.minibiaBot?.attack?.status?.().running) return false;
+    const primaryCount = countMonsters(positiveInt(primaryConfig.squareRange, 3), primaryConfig);
+    return primaryCount >= positiveInt(primaryConfig.minMonsters, 3);
+  }
+
+  function canCastSecond(now = Date.now()) {
+    const bot = window.minibiaBot;
+    const status = getPrimaryStatus();
+    const primaryConfig = status?.config || {};
+    if (!bot || !status?.running || !primaryConfig.enabled || !normalizeSlot(config.hotbarSlot)) return false;
+    if (primaryConfig.requireAutoAttackRunning !== false && !bot.attack?.status?.().running) return false;
+
+    // Strict priority: #2 never fires while #1's monster condition is satisfied.
+    if (primarySquareIsEligible(status)) return false;
+
+    if (now - state.lastHotkeyAt < nonNegativeInt(config.cooldownMs, 2000)) return false;
+    return countMonsters(positiveInt(config.squareRange, 3), primaryConfig) >= positiveInt(config.minMonsters, 2);
+  }
+
+  function triggerSecond(now = Date.now()) {
+    if (!canCastSecond(now)) return false;
+    const bot = window.minibiaBot;
+    const status = getPrimaryStatus();
+    const primaryConfig = status?.config || {};
+    const slot = normalizeSlot(config.hotbarSlot);
+    const monsterCount = countMonsters(positiveInt(config.squareRange, 3), primaryConfig);
+    const clicked = bot?.clickHotbar?.(slot - 1);
+    if (clicked) {
+      state.lastHotkeyAt = now;
+      state.lastMonsterCount = monsterCount;
+      bot.log?.("used square hotkey #2", {
+        slot,
+        monsterCount,
+        squareRange: config.squareRange,
+        priority: 2,
+      });
+    }
+    refreshUi();
+    return !!clicked;
+  }
+
+  function updateConfig(nextConfig = {}) {
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "hotbarSlot")) config.hotbarSlot = normalizeSlot(nextConfig.hotbarSlot);
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "minMonsters")) config.minMonsters = positiveInt(nextConfig.minMonsters, config.minMonsters || 2);
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "squareRange")) config.squareRange = positiveInt(nextConfig.squareRange, config.squareRange || 3);
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "cooldownMs")) config.cooldownMs = nonNegativeInt(nextConfig.cooldownMs, config.cooldownMs || 2000);
+    persistConfig();
+    refreshUi();
+  }
+
+  function ensureUi() {
+    if (document.getElementById(sectionId)) return true;
+    const mainSection = document.getElementById("minibia-bot-auto-attack-aoe-section");
+    const firstGrid = mainSection?.querySelector?.(".mb-field-grid");
+    if (!mainSection || !firstGrid) return false;
+
+    const section = document.createElement("div");
+    section.id = sectionId;
+    section.className = "mb-section";
+    section.innerHTML = `
+      <div class="mb-label">Square Hotkey #2 (Lower Priority)</div>
+      <div class="mb-field-grid">
+        <label class="mb-field"><span class="mb-field-label">Square Hotkey #2</span><input type="number" id="minibia-bot-auto-attack-aoe-hotkey-2" min="1" max="12" placeholder="6" /></label>
+        <label class="mb-field"><span class="mb-field-label">Square #2 Min Monsters</span><input type="number" id="minibia-bot-auto-attack-aoe-monsters-2" min="1" placeholder="2" /></label>
+        <label class="mb-field"><span class="mb-field-label">Square #2 Range</span><input type="number" id="minibia-bot-auto-attack-aoe-range-2" min="1" placeholder="3" /></label>
+        <label class="mb-field"><span class="mb-field-label">Square #2 Cooldown MS</span><input type="number" id="minibia-bot-auto-attack-aoe-cooldown-2" min="0" placeholder="2000" /></label>
+      </div>
+      <div class="mb-small-note" id="minibia-bot-auto-attack-aoe-status-2">Square #2: off</div>`;
+
+    firstGrid.insertAdjacentElement("afterend", section);
+
+    section.querySelector("#minibia-bot-auto-attack-aoe-hotkey-2")?.addEventListener("change", (event) => updateConfig({ hotbarSlot: event.target.value }));
+    section.querySelector("#minibia-bot-auto-attack-aoe-monsters-2")?.addEventListener("change", (event) => updateConfig({ minMonsters: event.target.value }));
+    section.querySelector("#minibia-bot-auto-attack-aoe-range-2")?.addEventListener("change", (event) => updateConfig({ squareRange: event.target.value }));
+    section.querySelector("#minibia-bot-auto-attack-aoe-cooldown-2")?.addEventListener("change", (event) => updateConfig({ cooldownMs: event.target.value }));
+    refreshUi();
+    return true;
+  }
+
+  function refreshUi() {
+    const hotkey = document.getElementById("minibia-bot-auto-attack-aoe-hotkey-2");
+    const monsters = document.getElementById("minibia-bot-auto-attack-aoe-monsters-2");
+    const range = document.getElementById("minibia-bot-auto-attack-aoe-range-2");
+    const cooldown = document.getElementById("minibia-bot-auto-attack-aoe-cooldown-2");
+    const label = document.getElementById("minibia-bot-auto-attack-aoe-status-2");
+    if (hotkey && document.activeElement !== hotkey) hotkey.value = config.hotbarSlot || "";
+    if (monsters && document.activeElement !== monsters) monsters.value = config.minMonsters;
+    if (range && document.activeElement !== range) range.value = config.squareRange;
+    if (cooldown && document.activeElement !== cooldown) cooldown.value = config.cooldownMs;
+
+    if (label) {
+      const status = getPrimaryStatus();
+      const primaryConfig = status?.config || {};
+      const count = countMonsters(positiveInt(config.squareRange, 3), primaryConfig);
+      if (!status?.running || !primaryConfig.enabled) label.textContent = "Square #2: off";
+      else if (primarySquareIsEligible(status)) label.textContent = `Square #2: waiting — #1 has priority (${count}/${config.minMonsters})`;
+      else label.textContent = `Square #2: watching (${count}/${config.minMonsters})`;
+    }
+  }
+
+  window.minibiaSquareHotkey2 = {
+    config,
+    updateConfig,
+    trigger: triggerSecond,
+    status: () => ({
+      config: { ...config },
+      lastMonsterCount: state.lastMonsterCount,
+      ready: canCastSecond(Date.now()),
+    }),
+  };
+
+  window.setInterval(() => {
+    ensureUi();
+    try { triggerSecond(); } catch (error) {
+      window.minibiaBot?.log?.("square hotkey #2 tick failed", error?.message || error);
+    }
+    refreshUi();
+  }, 250);
+})();
