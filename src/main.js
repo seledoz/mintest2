@@ -48,6 +48,19 @@
     });
   }
 
+  function forceAttackAndCaveDisabled() {
+    ["minibiaBot.attack.config", "minibiaBot.cave.config"].forEach((storageKey) => {
+      try {
+        const rawValue = window.localStorage.getItem(storageKey);
+        const config = rawValue ? JSON.parse(rawValue) : {};
+        config.enabled = false;
+        window.localStorage.setItem(storageKey, JSON.stringify(config));
+      } catch (error) {
+        console.error("[minibia-bot] failed to disable startup module", { storageKey, error });
+      }
+    });
+  }
+
   function removePanelDebugSection() {
     const debugToggle = document.getElementById("minibia-bot-debug-enabled");
     const debugSection = debugToggle?.closest?.(".mb-section");
@@ -186,6 +199,7 @@
     const previousEnabledSnapshot = getPersistedEnabledSnapshot(window.minibiaBot);
     if (window.minibiaBot?.destroy) window.minibiaBot.destroy();
     restorePersistedEnabledSnapshot(previousEnabledSnapshot);
+    forceAttackAndCaveDisabled();
 
     const bot = currentBundle.createBot();
     currentBundle.installPzModule(bot);
@@ -200,11 +214,14 @@
     currentBundle.installAutoInvisibleModule(bot);
     currentBundle.installAutoMagicShieldModule(bot);
     currentBundle.installAutoAttackModule(bot);
-    bot.attack?.updateConfig?.({ maxTargetDistance: 7, runeCooldownMs: 2000 });
+    bot.attack?.updateConfig?.({ enabled: false, maxTargetDistance: 7, runeCooldownMs: 2000 });
+    bot.attack?.stop?.();
     currentBundle.installAutoAttackExcludeModule?.(bot);
     currentBundle.installAutoAttackAoeModule?.(bot);
     currentBundle.installRedTextAlertModule?.(bot);
     currentBundle.installCaveModule(bot);
+    bot.cave?.updateConfig?.({ enabled: false });
+    bot.cave?.stop?.();
     currentBundle.installCaveForwardLoopModule?.(bot);
     currentBundle.installCaveArrowKeysModule?.(bot);
     currentBundle.installEquipRingModule(bot);
