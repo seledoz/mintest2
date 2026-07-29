@@ -129,10 +129,36 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     updateStatus();
   }
 
+  function getRightColumn(panel) {
+    return panel?.querySelector?.(".mb-side-column") ||
+      panel?.querySelector?.(".mb-cave-column") ||
+      panel?.querySelector?.(".mb-body") ||
+      panel;
+  }
+
+  function moveUtilitySectionsToBottomRight(panel) {
+    const rightColumn = getRightColumn(panel);
+    if (!rightColumn) return false;
+
+    const lowCapSection = document.getElementById(sectionId);
+    const miningSection = document.getElementById("minibia-bot-mining-section");
+
+    if (lowCapSection) rightColumn.appendChild(lowCapSection);
+    if (miningSection) rightColumn.appendChild(miningSection);
+    return !!(lowCapSection || miningSection);
+  }
+
   function ensureUi() {
     const panel = document.getElementById("minibia-bot-panel") || document.getElementById("k9x-panel");
-    if (!panel || document.getElementById(sectionId)) return;
-    const firstColumn = panel.querySelector(".mb-main-column") || panel.querySelector(".mb-body") || panel;
+    if (!panel) return;
+
+    const existing = document.getElementById(sectionId);
+    if (existing) {
+      moveUtilitySectionsToBottomRight(panel);
+      return;
+    }
+
+    const rightColumn = getRightColumn(panel);
     const section = document.createElement("div");
     section.id = sectionId;
     section.className = "mb-section mb-column-section";
@@ -147,7 +173,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
         </div>
         <div class="mb-small-note" id="${statusId}">Status: off</div>
       </div>`;
-    firstColumn.prepend(section);
+    rightColumn.appendChild(section);
 
     const enabled = document.getElementById(enabledId);
     const threshold = document.getElementById(thresholdId);
@@ -174,11 +200,15 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       saveConfig();
       updateStatus();
     });
+
+    moveUtilitySectionsToBottomRight(panel);
   }
 
   function tick() {
     if (window.__minibiaLowCapAlarmToken !== token) return;
     ensureUi();
+    const panel = document.getElementById("minibia-bot-panel") || document.getElementById("k9x-panel");
+    if (panel) moveUtilitySectionsToBottomRight(panel);
     tickAlarm();
   }
 
