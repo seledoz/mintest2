@@ -30,14 +30,57 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     return String(name || "").trim().toLowerCase();
   }
 
+  function valueAsName(value) {
+    if (typeof value === "string") return value.trim();
+    if (!value || typeof value !== "object") return "";
+    return String(
+      value.name ??
+      value.playerName ??
+      value.characterName ??
+      value.label ??
+      value.text ??
+      ""
+    ).trim();
+  }
+
+  function isDefaultChannel(channel) {
+    const name = normalizeName(channel?.name ?? channel?.title ?? channel?.label);
+    if (!name) return !!channel?.isDefault || channel?.type === "default";
+    return name === "default" || name === "default chat" || name.startsWith("default ");
+  }
+
   function getDefaultChannels() {
-    return (window.gameClient?.interface?.channelManager?.channels || []).filter(
-      (channel) => normalizeName(channel?.name) === "default"
-    );
+    const manager = window.gameClient?.interface?.channelManager;
+    const channels = manager?.channels || manager?.channelList || [];
+    return Array.from(channels || []).filter(isDefaultChannel);
+  }
+
+  function getChannelEntries(channel) {
+    const entries =
+      channel?.__contents ??
+      channel?.contents ??
+      channel?.messages ??
+      channel?.entries ??
+      channel?.history ??
+      [];
+    return Array.from(entries || []);
   }
 
   function getEntryMessage(entry) {
-    return String(entry?.message ?? entry?.text ?? entry?.content ?? "");
+    return String(
+      entry?.message ??
+      entry?.text ??
+      entry?.content ??
+      entry?.value ??
+      entry?.body ??
+      ""
+    );
+  }
+
+  function stripChatPrefix(message) {
+    return String(message || "")
+      .replace(/^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*/, "")
+      .trim();
   }
 
   function getEntrySpeaker(entry, message) {
@@ -47,26 +90,34 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
       entry?.name ??
       entry?.author ??
       entry?.senderName ??
-      entry?.sender;
+      entry?.sender ??
+      entry?.playerName ??
+      entry?.characterName ??
+      entry?.creature?.name ??
+      entry?.player?.name;
 
-    if (typeof directSpeaker === "string" && directSpeaker.trim()) {
-      return directSpeaker.trim();
-    }
+    const directName = valueAsName(directSpeaker);
+    if (directName) return directName;
 
-    const saysMatch = message.match(/^(.+?)\s+says:\s*/i);
-    return saysMatch?.[1]?.trim() || null;
+    const text = stripChatPrefix(message);
+    const saysMatch = text.match(/^(.+?)\s+says:\s*/i);
+    if (saysMatch?.[1]) return saysMatch[1].trim();
+
+    const colonMatch = text.match(/^([^:]{1,40}):\s+.+$/);
+    return colonMatch?.[1]?.trim() || null;
   }
 
   function getEntryKey(channel, entry, index) {
     const message = getEntryMessage(entry);
-    const time = entry?.__time ?? entry?.time ?? entry?.timestamp ?? "no-time";
+    const time = entry?.__time ?? entry?.time ?? entry?.timestamp ?? entry?.createdAt ?? "no-time";
     const speaker = getEntrySpeaker(entry, message) || "no-speaker";
-    return `${channel?.name || "Default"}|${time}|${speaker}|${message}|${index}`;
+    const id = entry?.id ?? entry?._id ?? entry?.key ?? "no-id";
+    return `${channel?.name || channel?.title || "Default"}|${id}|${time}|${speaker}|${message}|${index}`;
   }
 
   function getCurrentEntries() {
     return getDefaultChannels().flatMap((channel) =>
-      (channel?.__contents || []).map((entry, index) => ({
+      getChannelEntries(channel).map((entry, index) => ({
         channel,
         entry,
         index,
@@ -94,13 +145,33 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     }
   }
 
+  function sendReply(reply) {
+    const senders = [
+      () => bot.sendChat?.(reply),
+      () => window.gameClient?.sendChat?.(reply),
+      () => window.gameClient?.interface?.channelManager?.sendMessage?.(reply),
+      () => window.gameClient?.interface?.channelManager?.say?.(reply),
+    ];
+
+    for (const send of senders) {
+      try {
+        const result = send();
+        if (result !== undefined && result !== false) return true;
+      } catch (error) {
+        bot.log("GM responder send method failed", { error: String(error) });
+      }
+    }
+
+    return false;
+  }
+
   function scheduleResponder(speaker, message) {
     const reply = String(config.responderMessage || "").trim();
     if (!config.responderEnabled || !reply) return false;
 
     const timerId = window.setTimeout(() => {
       state.pendingReplyTimerIds.delete(timerId);
-      const sent = bot.sendChat?.(reply);
+      const sent = sendReply(reply);
       bot.log(sent ? "GM responder sent reply" : "GM responder failed to send reply", {
         speaker,
         message,
@@ -155,6 +226,19 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     return true;
   }
 
+  function isConfiguredGameMaster(entry, speaker, gmNames) {
+    if (gmNames.has(normalizeName(speaker))) return true;
+    return !!(
+      entry?.isGameMaster ||
+      entry?.isGamemaster ||
+      entry?.gameMaster ||
+      entry?.gamemaster ||
+      entry?.speaker?.isGameMaster ||
+      entry?.sender?.isGameMaster ||
+      entry?.author?.isGameMaster
+    );
+  }
+
   function tick() {
     if (!state.running) return;
 
@@ -166,7 +250,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
       state.seenEntryKeys.add(key);
 
       const speaker = getEntrySpeaker(item.entry, item.message);
-      if (!speaker || !gmNames.has(normalizeName(speaker))) continue;
+      if (!speaker || !isConfiguredGameMaster(item.entry, speaker, gmNames)) continue;
 
       stopAutomationForGmChat(speaker, item.message);
       return;
@@ -279,6 +363,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     if (responderMessage && responderMessage.dataset.gmBound !== "true") {
       responderMessage.dataset.gmBound = "true";
       const saveMessage = () => updateResponderConfig({ responderMessage: responderMessage.value });
+      responderMessage.addEventListener("input", saveMessage);
       responderMessage.addEventListener("change", saveMessage);
       responderMessage.addEventListener("blur", saveMessage);
     }
@@ -310,6 +395,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
 
   bot.addCleanup?.(() => {
     if (state.panelTimerId != null) window.clearInterval(state.panelTimerId);
+    if (state.timerId != null) window.clearTimeout(state.timerId);
     for (const timerId of state.pendingReplyTimerIds) window.clearTimeout(timerId);
     state.pendingReplyTimerIds.clear();
   });
