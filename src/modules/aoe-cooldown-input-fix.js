@@ -73,6 +73,8 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   const enabledStorageKey = "minibiaBot.attackAoe.square2.enabled";
   const savedSlotStorageKey = "minibiaBot.attackAoe.square2.savedSlot";
   const toggleId = "minibia-bot-auto-attack-aoe-enabled-2";
+  let observedStatusLabel = null;
+  let statusObserver = null;
 
   function readEnabled() {
     try {
@@ -149,13 +151,30 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     return true;
   }
 
+  function forceOffStatus() {
+    if (readEnabled()) return;
+    const statusLabel = document.getElementById("minibia-bot-auto-attack-aoe-status-2");
+    if (statusLabel && statusLabel.textContent !== "Square #2: off") {
+      statusLabel.textContent = "Square #2: off";
+    }
+  }
+
+  function ensureStatusObserver() {
+    const statusLabel = document.getElementById("minibia-bot-auto-attack-aoe-status-2");
+    if (!statusLabel || statusLabel === observedStatusLabel) return;
+    statusObserver?.disconnect();
+    observedStatusLabel = statusLabel;
+    statusObserver = new MutationObserver(forceOffStatus);
+    statusObserver.observe(statusLabel, { childList: true, characterData: true, subtree: true });
+    forceOffStatus();
+  }
+
   function refreshToggle() {
     const enabled = readEnabled();
     const input = document.getElementById(toggleId);
     if (input && input.checked !== enabled) input.checked = enabled;
-
-    const statusLabel = document.getElementById("minibia-bot-auto-attack-aoe-status-2");
-    if (!enabled && statusLabel) statusLabel.textContent = "Square #2: off";
+    ensureStatusObserver();
+    if (!enabled) forceOffStatus();
   }
 
   function tick() {
