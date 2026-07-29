@@ -195,32 +195,11 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
       source: "default-chat",
     });
 
-    bot.rune?.stop?.();
-    bot.eat?.stop?.();
-    bot.invisible?.stop?.();
-    bot.magicShield?.stop?.();
     bot.cave?.stop?.();
     bot.attack?.stop?.();
-    bot.equipRing?.stop?.();
 
-    if (bot.panic?.config) {
-      bot.panic.config.unknownPlayerEnabled = false;
-      bot.panic.config.healthLossEnabled = false;
-      bot.panic.updateConfig?.({
-        unknownPlayerEnabled: false,
-        healthLossEnabled: false,
-      });
-      bot.panic.stop?.();
-    }
-
-    bot.ui?.refreshPanicStatus?.();
-    bot.ui?.refreshRuneStatus?.();
-    bot.ui?.refreshAutoEatStatus?.();
-    bot.ui?.refreshAutoInvisibleStatus?.();
-    bot.ui?.refreshAutoMagicShieldStatus?.();
     bot.ui?.refreshAutoAttackStatus?.();
     bot.ui?.refreshCaveStatus?.();
-    bot.ui?.refreshEquipRingStatus?.();
 
     stop();
     return true;
