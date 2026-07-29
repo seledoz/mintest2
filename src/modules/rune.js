@@ -96,13 +96,36 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     return getGateStatus(now).canMakeRune;
   }
 
+  function sendRuneSpell(spellWords) {
+    const spell = String(spellWords || "").trim();
+    if (!spell) return false;
+
+    const senders = [
+      () => bot.sendChat?.(spell),
+      () => window.gameClient?.sendChat?.(spell),
+      () => window.gameClient?.interface?.channelManager?.sendMessage?.(spell),
+      () => window.gameClient?.interface?.channelManager?.say?.(spell),
+    ];
+
+    for (const send of senders) {
+      try {
+        const result = send();
+        if (result !== undefined && result !== false) return true;
+      } catch (error) {
+        bot.log("rune spell chat method failed", { error: String(error) });
+      }
+    }
+
+    return false;
+  }
+
   function tryMakeRune(now = Date.now()) {
     const gateStatus = getGateStatus(now);
     if (!gateStatus.canMakeRune) {
       return false;
     }
 
-    const sent = bot.sendChat(config.runeSpellWords);
+    const sent = sendRuneSpell(config.runeSpellWords);
     if (sent) {
       state.lastRuneAt = Date.now();
       return true;
