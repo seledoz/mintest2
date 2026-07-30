@@ -147,12 +147,25 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
 
   function stopGmAlarm() {
     try {
-      bot.stopAlarm?.();
+      let stopped = false;
+
+      if (typeof bot.stopAlarm === "function") {
+        stopped = bot.stopAlarm() !== false || stopped;
+      }
+
       bot.alarm?.stop?.();
       bot.panic?.stopAlarm?.();
       window.speechSynthesis?.cancel?.();
-      bot.log("GM kill switch alarm stopped");
-      return true;
+
+      if (!stopped && typeof bot.getAlarmAudioSrc === "function" && typeof bot.setAlarmAudioSrc === "function") {
+        const currentSrc = bot.getAlarmAudioSrc();
+        if (currentSrc) {
+          stopped = bot.setAlarmAudioSrc(currentSrc) !== false || stopped;
+        }
+      }
+
+      bot.log("GM kill switch alarm stopped", { stopped });
+      return stopped;
     } catch (error) {
       bot.log("Failed to stop GM kill switch alarm", { error: String(error) });
       return false;
