@@ -13,6 +13,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     lastMonsterCount: 0,
     lastTargetName: "",
     lastTargetPosition: null,
+    currentBest: null,
   };
 
   const config = Object.assign({
@@ -125,7 +126,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     };
   }
 
-  function getBestCandidate() {
+  function calculateBestCandidate() {
     const playerPosition = getPosition(bot.getPlayerPosition?.());
     if (!playerPosition) return null;
 
@@ -150,6 +151,11 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
       return tileDistance(playerPosition, left.position) - tileDistance(playerPosition, right.position);
     });
     return evaluations[0] || null;
+  }
+
+  function getBestCandidate() {
+    if (!state.running || !config.enabled) return null;
+    return state.currentBest || calculateBestCandidate();
   }
 
   function getTile(position) {
@@ -210,17 +216,17 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     return false;
   }
 
-  function canCast(now = Date.now()) {
+  function canCast(now = Date.now(), best = state.currentBest) {
     if (!state.running || !config.enabled || !normalizeHotbarSlot(config.hotbarSlot)) return false;
     if (now - state.lastCastAt < config.cooldownMs) return false;
-    const best = getBestCandidate();
     return !!best && best.count >= config.minMonsters;
   }
 
   function trigger(now = Date.now()) {
-    if (!canCast(now)) return false;
-    const best = getBestCandidate();
-    if (!best || best.count < config.minMonsters) return false;
+    if (!state.running || !config.enabled) return false;
+    const best = state.currentBest || calculateBestCandidate();
+    state.currentBest = best;
+    if (!canCast(now, best)) return false;
 
     const fired = fireCrosshairAt(best);
     if (fired) {
@@ -241,19 +247,23 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
   }
 
   function tick() {
-    if (!state.running) return;
+    if (!state.running || !config.enabled) return;
     try {
+      state.currentBest = calculateBestCandidate();
       trigger();
     } catch (error) {
       bot.log("great fireball 2.0 tick failed", error?.message || error);
     }
-    state.timerId = window.setTimeout(tick, config.scanMs);
+    if (state.running && config.enabled) {
+      state.timerId = window.setTimeout(tick, config.scanMs);
+    }
   }
 
   function start(overrides = {}) {
     updateConfig({ ...overrides, enabled: true }, { silent: true });
     if (state.running) return false;
     state.running = true;
+    state.currentBest = null;
     tick();
     refreshUi();
     return true;
@@ -261,6 +271,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
 
   function stop(options = {}) {
     state.running = false;
+    state.currentBest = null;
     if (state.timerId != null) window.clearTimeout(state.timerId);
     state.timerId = null;
     if (options.persistEnabled !== false) {
@@ -281,12 +292,13 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     if (Object.prototype.hasOwnProperty.call(nextConfig, "respectTargetFilters")) nextConfig.respectTargetFilters = nextConfig.respectTargetFilters !== false;
     Object.assign(config, nextConfig);
     persistConfig();
+    if (!config.enabled) state.currentBest = null;
     if (!options.silent) refreshUi();
     return { ...config };
   }
 
   function status() {
-    const best = getBestCandidate();
+    const best = state.running && config.enabled ? state.currentBest : null;
     return {
       running: state.running,
       config: { ...config },
@@ -296,7 +308,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
       lastMonsterCount: state.lastMonsterCount,
       lastTargetName: state.lastTargetName,
       lastTargetPosition: state.lastTargetPosition,
-      ready: canCast(Date.now()),
+      ready: canCast(Date.now(), best),
     };
   }
 
@@ -340,7 +352,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     const monsters = document.getElementById("minibia-bot-gfb-v2-monsters");
     const cooldown = document.getElementById("minibia-bot-gfb-v2-cooldown");
     const statusLabel = document.getElementById("minibia-bot-gfb-v2-status");
-    const best = getBestCandidate();
+    const best = state.running && config.enabled ? state.currentBest : null;
     if (enabled) enabled.checked = !!state.running;
     if (hotkey && document.activeElement !== hotkey) hotkey.value = config.hotbarSlot || "";
     if (monsters && document.activeElement !== monsters) monsters.value = config.minMonsters;
