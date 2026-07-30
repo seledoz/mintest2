@@ -231,6 +231,12 @@ window.__minibiaBotBundle.installXrayModule = function installXrayModule(bot) {
         background: rgba(11, 61, 43, 0.8);
         color: #d8ffea;
       }
+
+      #${overlayRootId} .mb-xray-marker.mb-xray-marker-player {
+        border-color: rgba(255, 92, 92, 0.95);
+        background: rgba(92, 10, 10, 0.84);
+        color: #ffd6d6;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -289,6 +295,10 @@ window.__minibiaBotBundle.installXrayModule = function installXrayModule(bot) {
       const healthLabel = readCreatureHealth(creature);
       const marker = document.createElement("div");
       marker.className = "mb-xray-marker";
+
+      if (creature?.type === 0) {
+        marker.classList.add("mb-xray-marker-player");
+      }
 
       if (pos.z === me.z) {
         marker.classList.add("mb-xray-marker-offscreen");
