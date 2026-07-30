@@ -12,13 +12,90 @@
   document.getElementById("minibia-bot-panel")?.remove();
   document.getElementById(panelId)?.remove();
 
-  const createBot = window.__minibiaBotBundle?.createBot;
-  if (typeof createBot !== "function") {
-    throw new Error("[PERF TEST] Core module was not loaded.");
+  const reconnectButtonSelectors = [
+    "button",
+    '[role="button"]',
+    'input[type="button"]',
+    'input[type="submit"]',
+    "a",
+    ".button",
+    ".btn",
+  ];
+
+  let reconnectObserver = null;
+  let reconnectPollTimerId = null;
+  let lastReconnectClickAt = 0;
+
+  function normalizeUiText(text) {
+    return String(text || "").trim().toLowerCase().replace(/\s+/g, " ");
   }
 
-  window.minibiaBot = createBot();
-  window.minibiaBot.status = () => ({ mode: "core-plus-ui-performance-test" });
+  function isVisibleElement(element) {
+    if (!(element instanceof Element)) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
+  }
+
+  function getElementUiText(element) {
+    if (!(element instanceof Element)) return "";
+    return normalizeUiText(
+      element.textContent ||
+      element.innerText ||
+      element.getAttribute("value") ||
+      element.getAttribute("aria-label") ||
+      element.getAttribute("title") ||
+      ""
+    );
+  }
+
+  function findReconnectElement() {
+    for (const selector of reconnectButtonSelectors) {
+      const candidates = document.querySelectorAll(selector);
+      for (const candidate of candidates) {
+        if (isVisibleElement(candidate) && getElementUiText(candidate) === "reconnect") {
+          return candidate;
+        }
+      }
+    }
+    return null;
+  }
+
+  function runReconnectCheck() {
+    try {
+      const now = Date.now();
+      if (now - lastReconnectClickAt < 3000) return;
+      const reconnectElement = findReconnectElement();
+      if (!reconnectElement) return;
+      reconnectElement.click();
+      lastReconnectClickAt = now;
+      console.log("[PERF TEST] clicked reconnect");
+    } catch (error) {
+      console.error("[PERF TEST] reconnect watcher failed", error);
+    }
+  }
+
+  reconnectObserver = new MutationObserver(runReconnectCheck);
+  reconnectObserver.observe(document.documentElement || document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["class", "style", "hidden", "aria-hidden", "value"],
+  });
+  reconnectPollTimerId = window.setInterval(runReconnectCheck, 2000);
+  runReconnectCheck();
+
+  window.minibiaBot = {
+    status: () => ({ mode: "core-reconnect-watcher-performance-test" }),
+    destroy() {
+      reconnectObserver?.disconnect();
+      reconnectObserver = null;
+      if (reconnectPollTimerId) window.clearInterval(reconnectPollTimerId);
+      reconnectPollTimerId = null;
+      document.getElementById(panelId)?.remove();
+    },
+  };
 
   const panel = document.createElement("div");
   panel.id = panelId;
@@ -36,16 +113,10 @@
     "box-shadow:0 4px 18px rgba(0,0,0,.45)",
   ].join(";");
   panel.innerHTML = `
-    <div style="font-weight:700">FPS TEST — CORE + UI</div>
-    <div style="margin-top:4px;font-size:12px">Core is running. Feature modules and scanners are not loaded.</div>
+    <div style="font-weight:700">FPS TEST — CORE WATCHER + UI</div>
+    <div style="margin-top:4px;font-size:12px">Reconnect watcher is running. Other feature modules and scanners are not loaded.</div>
   `;
   document.body.appendChild(panel);
 
-  const originalDestroy = window.minibiaBot.destroy.bind(window.minibiaBot);
-  window.minibiaBot.destroy = function destroyPerfTest() {
-    document.getElementById(panelId)?.remove();
-    originalDestroy();
-  };
-
-  console.log("[PERF TEST] Core + UI stage loaded. No feature modules or scanners installed.");
+  console.log("[PERF TEST] Core reconnect watcher + UI loaded.");
 })();
