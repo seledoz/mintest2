@@ -58,17 +58,6 @@ window.__minibiaBotBundle.installHasteParalyzeMonsterRangeGuard = function insta
     const normalizedMessage = normalizeSpellWords(message);
     if (!normalizedMessage) return null;
 
-    const autoHasteStatus = bot.autoHaste?.status?.();
-    const hasteWords = normalizeSpellWords(bot.autoHaste?.config?.spellWords);
-    if (
-      hasteWords &&
-      normalizedMessage === hasteWords &&
-      autoHasteStatus?.running &&
-      bot.autoHaste?.config?.enabled
-    ) {
-      return "auto haste";
-    }
-
     const antiParalyzeStatus = bot.antiParalyze?.status?.();
     const antiParalyzeWords = normalizeSpellWords(bot.antiParalyze?.config?.spellWords);
     if (
@@ -135,7 +124,7 @@ window.__minibiaBotBundle.installHasteParalyzeMonsterRangeGuard = function insta
     isBlocked: () => getMonstersWithinRange().length > 0,
   };
 
-  bot.log("haste, anti-paralyze, auto invisible, and magic trainer monster range guard installed", {
+  bot.log("anti-paralyze, auto invisible, and magic trainer monster range guard installed", {
     range: MONSTER_BLOCK_RANGE,
   });
 };
