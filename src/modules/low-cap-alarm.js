@@ -40,6 +40,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   }
 
   function getCap() {
+    if (!config.enabled) return null;
     const pageText = String(document.body?.innerText || "");
     const patterns = [
       /(?:^|\b)(?:cap|capacity)\s*[:=]?\s*(\d+(?:\.\d+)?)/i,
@@ -88,14 +89,17 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     lastBeepAt = 0;
   }
 
-  function updateStatus() {
+  function updateStatus(capValue) {
     const status = document.getElementById(statusId);
     if (!status) return;
-    const cap = getCap();
-    const threshold = numberValue(config.threshold, 0);
     if (!config.enabled) {
       status.textContent = "Status: off";
-    } else if (cap == null) {
+      return;
+    }
+
+    const cap = arguments.length ? capValue : getCap();
+    const threshold = numberValue(config.threshold, 0);
+    if (cap == null) {
       status.textContent = `Status: watching, cap number not found, threshold ${threshold}`;
     } else if (alarmStartedAt) {
       const remaining = Math.max(0, Math.ceil((config.alertDurationMs - (Date.now() - alarmStartedAt)) / 1000));
@@ -107,15 +111,22 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
   function tickAlarm() {
     if (window.__minibiaLowCapAlarmToken !== token) return;
+    if (!config.enabled) {
+      alarmStartedAt = 0;
+      lastBeepAt = 0;
+      updateStatus(null);
+      return;
+    }
+
     const now = Date.now();
     const cap = getCap();
     const threshold = numberValue(config.threshold, 0);
     const below = cap != null && cap < threshold;
 
-    if (!config.enabled || !below) {
+    if (!below) {
       alarmStartedAt = 0;
       lastBeepAt = 0;
-      updateStatus();
+      updateStatus(cap);
       return;
     }
 
@@ -126,7 +137,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       lastBeepAt = now;
     }
 
-    updateStatus();
+    updateStatus(cap);
   }
 
   function getRightColumn(panel) {
