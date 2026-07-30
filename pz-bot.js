@@ -218,6 +218,13 @@
   }
 
   function addSafeUiPerformanceOptimizations(code, path) {
+    if (path === "src/core.js") {
+      code = code.replace(
+        "  startReconnectWatcher();",
+        "  // Reconnect watcher temporarily disabled for FPS testing."
+      );
+    }
+
     if (path === "src/ui/panel.js") {
       code = code.replace(
         `  function refreshVisibleCreatures() {\n    const list = document.getElementById("minibia-bot-visible-creatures-list");\n    if (!list) return;`,
