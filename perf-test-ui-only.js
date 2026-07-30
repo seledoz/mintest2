@@ -18,7 +18,6 @@
   let aoeScanTimerId = null;
   let cavebotScanTimerId = null;
   let healingScanTimerId = null;
-  let hasteScanTimerId = null;
   let lastVisibleCount = 0;
   let lastVisiblePlayerCount = 0;
   let lastAttackCandidateCount = 0;
@@ -33,9 +32,6 @@
   let lastHealthPercent = null;
   let lastManaPercent = null;
   let lastHealingDecision = "none";
-  let lastHasteActive = false;
-  let lastSpeed = null;
-  let lastHasteDecision = "none";
   let lastDamageMessage = null;
 
   const testWaypointOffset = { x: 6, y: 4 };
@@ -289,48 +285,22 @@
     if (decisionElement) decisionElement.textContent = lastHealingDecision;
   }
 
-  function runHasteMonitor() {
-    const state = getPlayerState() || {};
-    const player = window.gameClient?.player || {};
-    const conditions = state.conditions || player.conditions || {};
-
-    lastSpeed = readNumber(state.speed, state.currentSpeed, player.speed, player.currentSpeed);
-    lastHasteActive = Boolean(
-      state.haste ||
-      state.isHasted ||
-      player.haste ||
-      player.isHasted ||
-      conditions.haste ||
-      conditions.hasted
-    );
-    lastHasteDecision = lastHasteActive ? "none" : "cast haste";
-
-    const activeElement = document.getElementById("minibia-bot-perf-haste-active");
-    const speedElement = document.getElementById("minibia-bot-perf-speed");
-    const decisionElement = document.getElementById("minibia-bot-perf-haste-decision");
-    if (activeElement) activeElement.textContent = lastHasteActive ? "yes" : "no";
-    if (speedElement) speedElement.textContent = String(lastSpeed);
-    if (decisionElement) decisionElement.textContent = lastHasteDecision;
-  }
-
   creatureScanTimerId = window.setInterval(scanVisibleCreatures, 250);
   panicScanTimerId = window.setInterval(runPanicScanner, 200);
   attackScanTimerId = window.setInterval(runAttackMonitor, 100);
   aoeScanTimerId = window.setInterval(runAoeScanner, 100);
   cavebotScanTimerId = window.setInterval(runCavebotMonitor, 100);
   healingScanTimerId = window.setInterval(runHealingMonitor, 100);
-  hasteScanTimerId = window.setInterval(runHasteMonitor, 100);
   scanVisibleCreatures();
   runPanicScanner();
   runAttackMonitor();
   runAoeScanner();
   runCavebotMonitor();
   runHealingMonitor();
-  runHasteMonitor();
 
   window.minibiaBot = {
     status: () => ({
-      mode: "core-creature-panic-attack-aoe-cavebot-healing-and-haste-monitor-performance-test",
+      mode: "core-creature-panic-attack-aoe-cavebot-and-healing-monitor-performance-test",
       reconnectWatcher: false,
       visibleCreatureScanner: true,
       panicScanner: true,
@@ -338,14 +308,12 @@
       aoeScanner: true,
       cavebotMonitor: true,
       healingMonitor: true,
-      hasteMonitor: true,
       creatureScanIntervalMs: 250,
       panicScanIntervalMs: 200,
       attackScanIntervalMs: 100,
       aoeScanIntervalMs: 100,
       cavebotScanIntervalMs: 100,
       healingScanIntervalMs: 100,
-      hasteScanIntervalMs: 100,
       visibleCreatureCount: lastVisibleCount,
       visiblePlayerCount: lastVisiblePlayerCount,
       attackCandidateCount: lastAttackCandidateCount,
@@ -360,9 +328,6 @@
       healthPercent: lastHealthPercent,
       manaPercent: lastManaPercent,
       healingDecision: lastHealingDecision,
-      hasteActive: lastHasteActive,
-      speed: lastSpeed,
-      hasteDecision: lastHasteDecision,
       lastDamageMessage,
     }),
     destroy() {
@@ -372,14 +337,12 @@
       if (aoeScanTimerId != null) window.clearInterval(aoeScanTimerId);
       if (cavebotScanTimerId != null) window.clearInterval(cavebotScanTimerId);
       if (healingScanTimerId != null) window.clearInterval(healingScanTimerId);
-      if (hasteScanTimerId != null) window.clearInterval(hasteScanTimerId);
       creatureScanTimerId = null;
       panicScanTimerId = null;
       attackScanTimerId = null;
       aoeScanTimerId = null;
       cavebotScanTimerId = null;
       healingScanTimerId = null;
-      hasteScanTimerId = null;
       document.getElementById(panelId)?.remove();
     },
   };
@@ -400,9 +363,9 @@
     "box-shadow:0 4px 18px rgba(0,0,0,.45)",
   ].join(";");
   panel.innerHTML = `
-    <div style="font-weight:700">FPS TEST — AUTO HASTE MONITOR</div>
+    <div style="font-weight:700">FPS TEST — AUTO HEAL MONITOR</div>
     <div style="margin-top:4px;font-size:12px">Previous scanners remain active. Reconnect watcher is off.</div>
-    <div style="margin-top:4px;font-size:12px">Haste state, speed, and cast-decision checks run every 100 ms. Nothing is cast.</div>
+    <div style="margin-top:4px;font-size:12px">Health, mana, threshold, and healing-decision checks run every 100 ms. Nothing is used or cast.</div>
     <div style="margin-top:4px;font-size:12px">Visible creatures: <span id="minibia-bot-perf-visible-count">0</span></div>
     <div style="margin-top:4px;font-size:12px">Visible players: <span id="minibia-bot-perf-player-count">0</span></div>
     <div style="margin-top:4px;font-size:12px">Attack candidates: <span id="minibia-bot-perf-attack-count">0</span></div>
@@ -412,10 +375,8 @@
     <div style="margin-top:4px;font-size:12px">Path candidates: <span id="minibia-bot-perf-path-count">0</span>, best step: <span id="minibia-bot-perf-best-step">none</span></div>
     <div style="margin-top:4px;font-size:12px">Health: <span id="minibia-bot-perf-health">0</span>, mana: <span id="minibia-bot-perf-mana">0</span></div>
     <div style="margin-top:4px;font-size:12px">Healing decision: <span id="minibia-bot-perf-heal-decision">none</span></div>
-    <div style="margin-top:4px;font-size:12px">Haste active: <span id="minibia-bot-perf-haste-active">no</span>, speed: <span id="minibia-bot-perf-speed">0</span></div>
-    <div style="margin-top:4px;font-size:12px">Haste decision: <span id="minibia-bot-perf-haste-decision">none</span></div>
   `;
   document.body.appendChild(panel);
 
-  console.log("[PERF TEST] Auto-haste decision monitor added; no spell will be cast.");
+  console.log("[PERF TEST] Auto-healing decision monitor added; no items or spells will be used.");
 })();
