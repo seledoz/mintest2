@@ -294,11 +294,10 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
     state.observer = new MutationObserver((mutations) => {
       if (!config.enabled || !state.running || state.mode !== "watching") return;
       for (const mutation of mutations) {
-        if (mutation.type === "attributes" && inspectAddedNode(mutation.target)) return;
         for (const node of mutation.addedNodes) if (inspectAddedNode(node)) return;
       }
     });
-    state.observer.observe(document.body || document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ["style", "class", "hidden", "aria-hidden"] });
+    state.observer.observe(document.body || document.documentElement, { childList: true, subtree: true });
   }
 
   function stopObserver() {
