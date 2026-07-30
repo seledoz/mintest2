@@ -384,16 +384,21 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     injectPanelControl,
   };
 
-  state.panelTimerId = window.setInterval(injectPanelControl, 1000);
-  bot.addCleanup(() => {
-    stop();
+  start();
+
+  let panelAttempts = 0;
+  state.panelTimerId = window.setInterval(() => {
+    panelAttempts += 1;
+    if (injectPanelControl() || panelAttempts >= 120) {
+      window.clearInterval(state.panelTimerId);
+      state.panelTimerId = null;
+    }
+  }, 250);
+
+  bot.addCleanup?.(() => {
+    if (state.panelTimerId != null) window.clearInterval(state.panelTimerId);
+    if (state.timerId != null) window.clearTimeout(state.timerId);
     for (const timerId of state.pendingReplyTimerIds) window.clearTimeout(timerId);
     state.pendingReplyTimerIds.clear();
-    if (state.panelTimerId != null) window.clearInterval(state.panelTimerId);
-    state.panelTimerId = null;
-    document.getElementById("minibia-bot-gm-kill-switch-section")?.remove();
   });
-
-  injectPanelControl();
-  return bot.gmDefaultChatKillSwitch;
 };
