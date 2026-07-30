@@ -18,6 +18,9 @@
   let healingScanTimerId = null;
   let xrayScanTimerId = null;
   let gfbScanTimerId = null;
+  let autoEatScanTimerId = null;
+  let antiParalyzeScanTimerId = null;
+  let defensiveSpellScanTimerId = null;
 
   let lastVisibleCount = 0;
   let lastVisiblePlayerCount = 0;
@@ -42,8 +45,17 @@
   let lastBestGfbCount = 0;
   let lastBestGfbTargetName = "none";
   let lastBestGfbPosition = "none";
+  let lastFoodCandidateCount = 0;
+  let lastFoodContainerCount = 0;
+  let lastAutoEatDecision = "none";
+  let lastParalyzed = false;
+  let lastNearbyMonsterCount = 0;
+  let lastAntiParalyzeDecision = "none";
+  let lastInvisibleDecision = "none";
+  let lastMagicShieldDecision = "none";
 
   const testWaypointOffset = { x: 6, y: 4 };
+  const commonFoodIds = new Set([2666, 2667, 2668, 2669, 2670, 2671, 2672, 2673, 2674, 2675, 2676, 2677, 2678, 2679, 2680, 2681, 2682, 2683, 2684, 2685, 2686, 2687, 2688, 2689, 2690, 2691, 2695, 2696]);
 
   function getPlayerPosition() {
     return window.gameClient?.player?.getPosition?.() || null;
@@ -294,6 +306,80 @@
     if (positionElement) positionElement.textContent = lastBestGfbPosition;
   }
 
+  function getOpenContainers() {
+    const manager = window.gameClient?.interface?.containerManager || window.gameClient?.containerManager;
+    const raw = manager?.containers || manager?.__containers || window.gameClient?.containers || {};
+    return Array.isArray(raw) ? raw.filter(Boolean) : Object.values(raw || {}).filter(Boolean);
+  }
+
+  function getContainerItems(container) {
+    const raw = container?.items || container?.__items || container?.contents || container?.__contents || [];
+    return Array.isArray(raw) ? raw.filter(Boolean) : Object.values(raw || {}).filter(Boolean);
+  }
+
+  function getItemId(item) {
+    return Number(item?.id ?? item?.typeId ?? item?.itemId ?? item?.type?.id);
+  }
+
+  function runAutoEatMonitor() {
+    const containers = getOpenContainers();
+    let foodCount = 0;
+    containers.forEach((container) => {
+      getContainerItems(container).forEach((item) => {
+        if (commonFoodIds.has(getItemId(item))) foodCount += 1;
+      });
+    });
+    lastFoodContainerCount = containers.length;
+    lastFoodCandidateCount = foodCount;
+    lastAutoEatDecision = foodCount > 0 ? "food available" : "no food found";
+    const containersElement = document.getElementById("minibia-bot-perf-food-containers");
+    const foodElement = document.getElementById("minibia-bot-perf-food-count");
+    const decisionElement = document.getElementById("minibia-bot-perf-auto-eat-decision");
+    if (containersElement) containersElement.textContent = String(lastFoodContainerCount);
+    if (foodElement) foodElement.textContent = String(lastFoodCandidateCount);
+    if (decisionElement) decisionElement.textContent = lastAutoEatDecision;
+  }
+
+  function detectParalyzed() {
+    const player = window.gameClient?.player || {};
+    const state = getPlayerState() || {};
+    const flags = [state.paralyzed, state.isParalyzed, player.paralyzed, player.isParalyzed];
+    if (flags.some((value) => value === true)) return true;
+    const conditions = state.conditions || player.conditions || state.icons || player.icons || [];
+    const values = Array.isArray(conditions) ? conditions : Object.values(conditions || {});
+    return values.some((value) => /paraly/i.test(String(value?.name ?? value?.type ?? value)));
+  }
+
+  function runAntiParalyzeMonitor() {
+    const me = getPlayerPosition();
+    lastParalyzed = detectParalyzed();
+    lastNearbyMonsterCount = me ? getVisibleMonstersSameFloor().filter((monster) => {
+      const pos = getCreaturePosition(monster);
+      return pos && Math.max(Math.abs(pos.x - me.x), Math.abs(pos.y - me.y)) <= 4;
+    }).length : 0;
+    lastAntiParalyzeDecision = lastParalyzed
+      ? (lastNearbyMonsterCount > 0 ? "blocked near monsters" : "would cast anti-paralyze")
+      : "not paralyzed";
+    const paralyzedElement = document.getElementById("minibia-bot-perf-paralyzed");
+    const nearbyElement = document.getElementById("minibia-bot-perf-nearby-monsters");
+    const decisionElement = document.getElementById("minibia-bot-perf-anti-paralyze-decision");
+    if (paralyzedElement) paralyzedElement.textContent = lastParalyzed ? "yes" : "no";
+    if (nearbyElement) nearbyElement.textContent = String(lastNearbyMonsterCount);
+    if (decisionElement) decisionElement.textContent = lastAntiParalyzeDecision;
+  }
+
+  function runDefensiveSpellMonitor() {
+    const hasTarget = !!(window.gameClient?.player?.__target || window.gameClient?.player?.getTarget?.());
+    const nearbyPlayers = lastVisiblePlayerCount;
+    const healthLow = lastHealthPercent !== null && lastHealthPercent <= 70;
+    lastInvisibleDecision = nearbyPlayers > 0 ? "blocked: player visible" : (hasTarget ? "blocked: target active" : "eligible");
+    lastMagicShieldDecision = healthLow || hasTarget ? "eligible" : "not needed";
+    const invisibleElement = document.getElementById("minibia-bot-perf-invisible-decision");
+    const shieldElement = document.getElementById("minibia-bot-perf-shield-decision");
+    if (invisibleElement) invisibleElement.textContent = lastInvisibleDecision;
+    if (shieldElement) shieldElement.textContent = lastMagicShieldDecision;
+  }
+
   creatureScanTimerId = window.setInterval(scanVisibleCreatures, 250);
   panicScanTimerId = window.setInterval(runPanicScanner, 200);
   attackScanTimerId = window.setInterval(runAttackMonitor, 100);
@@ -302,6 +388,9 @@
   healingScanTimerId = window.setInterval(runHealingMonitor, 100);
   xrayScanTimerId = window.setInterval(runXrayMonitor, 100);
   gfbScanTimerId = window.setInterval(runGfbMonitor, 100);
+  autoEatScanTimerId = window.setInterval(runAutoEatMonitor, 100);
+  antiParalyzeScanTimerId = window.setInterval(runAntiParalyzeMonitor, 100);
+  defensiveSpellScanTimerId = window.setInterval(runDefensiveSpellMonitor, 100);
 
   scanVisibleCreatures();
   runPanicScanner();
@@ -311,10 +400,13 @@
   runHealingMonitor();
   runXrayMonitor();
   runGfbMonitor();
+  runAutoEatMonitor();
+  runAntiParalyzeMonitor();
+  runDefensiveSpellMonitor();
 
   window.minibiaBot = {
     status: () => ({
-      mode: "core-creature-panic-attack-aoe-cavebot-healing-xray-and-gfb-monitor-performance-test",
+      mode: "combined-fps-monitor-test-with-auto-eat-anti-paralyze-and-defensive-spells",
       reconnectWatcher: false,
       visibleCreatureScanner: true,
       panicScanner: true,
@@ -324,7 +416,9 @@
       healingMonitor: true,
       xrayMonitor: true,
       gfbMonitor: true,
-      gfbScanIntervalMs: 100,
+      autoEatMonitor: true,
+      antiParalyzeMonitor: true,
+      defensiveSpellMonitor: true,
       visibleCreatureCount: lastVisibleCount,
       visiblePlayerCount: lastVisiblePlayerCount,
       attackCandidateCount: lastAttackCandidateCount,
@@ -347,13 +441,25 @@
       bestGfbCount: lastBestGfbCount,
       bestGfbTargetName: lastBestGfbTargetName,
       bestGfbPosition: lastBestGfbPosition,
+      foodContainerCount: lastFoodContainerCount,
+      foodCandidateCount: lastFoodCandidateCount,
+      autoEatDecision: lastAutoEatDecision,
+      paralyzed: lastParalyzed,
+      nearbyMonsterCount: lastNearbyMonsterCount,
+      antiParalyzeDecision: lastAntiParalyzeDecision,
+      invisibleDecision: lastInvisibleDecision,
+      magicShieldDecision: lastMagicShieldDecision,
       lastDamageMessage,
     }),
     destroy() {
-      [creatureScanTimerId, panicScanTimerId, attackScanTimerId, aoeScanTimerId, cavebotScanTimerId, healingScanTimerId, xrayScanTimerId, gfbScanTimerId]
-        .forEach((timerId) => { if (timerId != null) window.clearInterval(timerId); });
+      [
+        creatureScanTimerId, panicScanTimerId, attackScanTimerId, aoeScanTimerId,
+        cavebotScanTimerId, healingScanTimerId, xrayScanTimerId, gfbScanTimerId,
+        autoEatScanTimerId, antiParalyzeScanTimerId, defensiveSpellScanTimerId,
+      ].forEach((timerId) => { if (timerId != null) window.clearInterval(timerId); });
       creatureScanTimerId = panicScanTimerId = attackScanTimerId = aoeScanTimerId = null;
       cavebotScanTimerId = healingScanTimerId = xrayScanTimerId = gfbScanTimerId = null;
+      autoEatScanTimerId = antiParalyzeScanTimerId = defensiveSpellScanTimerId = null;
       document.getElementById(panelId)?.remove();
     },
   };
@@ -364,28 +470,27 @@
     "position:fixed", "top:12px", "right:12px", "z-index:2147483647",
     "padding:12px 14px", "border:2px solid #f4b400", "border-radius:8px",
     "background:#151515", "color:#fff", "font:14px/1.4 Arial,sans-serif",
-    "box-shadow:0 4px 18px rgba(0,0,0,.45)", "max-width:360px",
+    "box-shadow:0 4px 18px rgba(0,0,0,.45)", "max-width:390px", "max-height:90vh", "overflow:auto",
   ].join(";");
   panel.innerHTML = `
-    <div style="font-weight:700">FPS TEST — GFB TARGETING MONITOR</div>
+    <div style="font-weight:700">FPS TEST — 3 MORE MONITORS</div>
     <div style="margin-top:4px;font-size:12px">Previous scanners remain active. Reconnect watcher is off.</div>
-    <div style="margin-top:4px;font-size:12px">GFB 1-5-5-7-5-5-1 targeting calculations run every 100 ms. No hotkey is pressed and nothing is cast.</div>
-    <div style="margin-top:4px;font-size:12px">Visible creatures: <span id="minibia-bot-perf-visible-count">0</span></div>
-    <div style="margin-top:4px;font-size:12px">Visible players: <span id="minibia-bot-perf-player-count">0</span></div>
-    <div style="margin-top:4px;font-size:12px">Attack candidates: <span id="minibia-bot-perf-attack-count">0</span></div>
-    <div style="margin-top:4px;font-size:12px">Selected target: <span id="minibia-bot-perf-target-name">none</span></div>
+    <div style="margin-top:4px;font-size:12px">Auto-eat, anti-paralyze, and defensive spell decisions run every 100 ms. Nothing is used or cast.</div>
+    <div style="margin-top:4px;font-size:12px">Visible creatures: <span id="minibia-bot-perf-visible-count">0</span>; players: <span id="minibia-bot-perf-player-count">0</span></div>
+    <div style="margin-top:4px;font-size:12px">Attack candidates: <span id="minibia-bot-perf-attack-count">0</span>; target: <span id="minibia-bot-perf-target-name">none</span></div>
     <div style="margin-top:4px;font-size:12px">Square AoE count: <span id="minibia-bot-perf-square-count">0</span></div>
-    <div style="margin-top:4px;font-size:12px">Waypoint distance: <span id="minibia-bot-perf-waypoint-distance">none</span></div>
-    <div style="margin-top:4px;font-size:12px">Path candidates: <span id="minibia-bot-perf-path-count">0</span>, best step: <span id="minibia-bot-perf-best-step">none</span></div>
-    <div style="margin-top:4px;font-size:12px">Health: <span id="minibia-bot-perf-health">0</span>, mana: <span id="minibia-bot-perf-mana">0</span></div>
-    <div style="margin-top:4px;font-size:12px">Healing decision: <span id="minibia-bot-perf-heal-decision">none</span></div>
-    <div style="margin-top:4px;font-size:12px">X-ray total: <span id="minibia-bot-perf-xray-total">0</span>; same floor: <span id="minibia-bot-perf-xray-same-floor">0</span>; other floors: <span id="minibia-bot-perf-xray-other-floors">0</span></div>
+    <div style="margin-top:4px;font-size:12px">Waypoint distance: <span id="minibia-bot-perf-waypoint-distance">none</span>; path candidates: <span id="minibia-bot-perf-path-count">0</span>; best: <span id="minibia-bot-perf-best-step">none</span></div>
+    <div style="margin-top:4px;font-size:12px">Health: <span id="minibia-bot-perf-health">0</span>; mana: <span id="minibia-bot-perf-mana">0</span>; healing: <span id="minibia-bot-perf-heal-decision">none</span></div>
+    <div style="margin-top:4px;font-size:12px">X-ray total: <span id="minibia-bot-perf-xray-total">0</span>; same floor: <span id="minibia-bot-perf-xray-same-floor">0</span>; other: <span id="minibia-bot-perf-xray-other-floors">0</span></div>
     <div style="margin-top:4px;font-size:12px">X-ray players: <span id="minibia-bot-perf-xray-players">0</span>; monsters: <span id="minibia-bot-perf-xray-monsters">0</span></div>
-    <div style="margin-top:4px;font-size:12px">GFB candidates: <span id="minibia-bot-perf-gfb-candidates">0</span></div>
-    <div style="margin-top:4px;font-size:12px">Best GFB hits: <span id="minibia-bot-perf-gfb-best-count">0</span>; target: <span id="minibia-bot-perf-gfb-target">none</span></div>
-    <div style="margin-top:4px;font-size:12px">Best GFB position: <span id="minibia-bot-perf-gfb-position">none</span></div>
+    <div style="margin-top:4px;font-size:12px">GFB candidates: <span id="minibia-bot-perf-gfb-candidates">0</span>; best hits: <span id="minibia-bot-perf-gfb-best-count">0</span></div>
+    <div style="margin-top:4px;font-size:12px">GFB target: <span id="minibia-bot-perf-gfb-target">none</span>; position: <span id="minibia-bot-perf-gfb-position">none</span></div>
+    <hr style="border:0;border-top:1px solid #555;margin:7px 0" />
+    <div style="font-size:12px">Auto-eat containers: <span id="minibia-bot-perf-food-containers">0</span>; food items: <span id="minibia-bot-perf-food-count">0</span>; decision: <span id="minibia-bot-perf-auto-eat-decision">none</span></div>
+    <div style="margin-top:4px;font-size:12px">Paralyzed: <span id="minibia-bot-perf-paralyzed">no</span>; monsters within 4: <span id="minibia-bot-perf-nearby-monsters">0</span>; decision: <span id="minibia-bot-perf-anti-paralyze-decision">none</span></div>
+    <div style="margin-top:4px;font-size:12px">Auto invisible: <span id="minibia-bot-perf-invisible-decision">none</span>; magic shield: <span id="minibia-bot-perf-shield-decision">none</span></div>
   `;
   document.body.appendChild(panel);
 
-  console.log("[PERF TEST] GFB targeting monitor added; no hotkey presses, clicks, items, or spells are used.");
+  console.log("[PERF TEST] Added auto-eat, anti-paralyze, and defensive spell decision monitors; no actions are performed.");
 })();
