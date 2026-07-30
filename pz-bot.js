@@ -161,62 +161,6 @@
     }, 250);
   }
 
-  function addEnergyWaveCastDelay(code) {
-    const triggerPattern = /  function triggerEnergyWave\(now = Date\.now\(\)\) \{[\s\S]*?\n  \}\n\n(?=  function getGfbTiles)/;
-    if (!triggerPattern.test(code)) {
-      console.warn("[minibia-bot] Energy Wave delay patch was not applied: trigger function not found");
-      return code;
-    }
-
-    const delayedTrigger = `  function triggerEnergyWave(now = Date.now()) {
-    if (state.energyWaveCastPending) return true;
-    if (!canCastEnergyWave(now)) return false;
-
-    const slot = normalizeHotbarSlot(config.energyWaveHotbarSlot);
-    const best = getBestEnergyWaveCandidate();
-    if (!slot || !best || best.count < positiveInt(config.energyWaveMinMonsters, 3)) return false;
-
-    if (!setCurrentTarget(best.target)) {
-      bot.log("energy wave target switch failed", { target: best.target?.name || "Mob", id: best.target?.id });
-      return false;
-    }
-
-    const selectedTarget = best.target;
-    state.energyWaveCastPending = true;
-    state.energyWaveCastTimerId = window.setTimeout(() => {
-      state.energyWaveCastPending = false;
-      state.energyWaveCastTimerId = null;
-
-      const castNow = Date.now();
-      if (!canCastEnergyWave(castNow) || !isSameCreature(getCurrentTarget(), selectedTarget)) {
-        refreshUiValues();
-        return;
-      }
-
-      const updated = evaluateEnergyWaveForTarget(selectedTarget);
-      if (!updated || updated.count < positiveInt(config.energyWaveMinMonsters, 3)) {
-        refreshUiValues();
-        return;
-      }
-
-      const clicked = bot.clickHotbar(slot - 1);
-      if (clicked) {
-        state.lastEnergyWaveHotkeyAt = castNow;
-        state.lastEnergyWaveMonsterCount = updated.count;
-        state.lastEnergyWaveTargetName = selectedTarget?.name || "Mob";
-        bot.log("used energy wave hotkey", { slot, monsterCount: updated.count, target: state.lastEnergyWaveTargetName, direction: updated.direction, shape: "1-3-3-3", targetSettleDelayMs: 150 });
-      }
-      refreshUiValues();
-    }, 150);
-
-    return true;
-  }
-
-`;
-
-    return code.replace(triggerPattern, delayedTrigger);
-  }
-
   function addSafeUiPerformanceOptimizations(code, path) {
     if (path === "src/core.js") {
       code = code.replace(
@@ -244,21 +188,6 @@
       );
     }
 
-    if (path === "src/modules/auto-attack-aoe.js") {
-      code = code.replace(
-        `  function status() {\n    const monsters = getCandidateMonsters();\n    const bestWave = getBestEnergyWaveCandidate();\n    const bestGfb = getBestGfbCandidate();`,
-        `  function status() {\n    const monsters = state.running && config.enabled ? getCandidateMonsters() : [];\n    const bestWave = state.running && config.enabled && config.energyWaveEnabled ? getBestEnergyWaveCandidate() : null;\n    const bestGfb = state.running && config.enabled && config.gfbEnabled ? getBestGfbCandidate() : null;`
-      );
-      code = code.replace(
-        `    const bestWave = getBestEnergyWaveCandidate();\n    const bestGfb = getBestGfbCandidate();`,
-        `    const panelCollapsed = document.getElementById("minibia-bot-panel")?.dataset?.collapsed === "true";\n    const shouldScanUi = state.running && config.enabled && !panelCollapsed;\n    const bestWave = shouldScanUi && config.energyWaveEnabled ? getBestEnergyWaveCandidate() : null;\n    const bestGfb = shouldScanUi && config.gfbEnabled ? getBestGfbCandidate() : null;`
-      );
-      code = code.replace(
-        `        ? \`AoE: square \${getCandidateMonsters().length}/\${config.minMonsters}; wave \${bestWave?.count || 0}/\${config.energyWaveMinMonsters}; gfb \${bestGfb?.count || 0}/\${config.gfbMinMonsters}\``,
-        `        ? \`AoE: square \${shouldScanUi ? getCandidateMonsters().length : 0}/\${config.minMonsters}; wave \${bestWave?.count || 0}/\${config.energyWaveMinMonsters}; gfb \${bestGfb?.count || 0}/\${config.gfbMinMonsters}\``
-      );
-    }
-
     return code;
   }
 
@@ -268,9 +197,6 @@
 
     let code = await response.text();
     code = addSafeUiPerformanceOptimizations(code, path);
-    if (path === "src/modules/auto-attack-aoe.js") {
-      code = addEnergyWaveCastDelay(code);
-    }
     if (path === "src/version.js") {
       code = code
         .replaceAll("%%BRANCH%%", ref)
@@ -278,24 +204,37 @@
         .replaceAll("%%DATE%%", new Date().toISOString());
     }
 
-    window.eval(`\n//# sourceURL=${rawBaseUrl}/${path}\n${code}`);
+    const sourceUrl = `${rawBaseUrl}/${path}`;
+    try {
+      (0, eval)(`${code}\n//# sourceURL=${sourceUrl}`);
+    } catch (error) {
+      console.error(`[minibia-bot] Failed to evaluate ${path}`, error);
+      throw error;
+    }
   }
 
-  async function loadBot() {
-    console.log("[minibia-bot] loading source bundle", { repository, ref });
+  async function load() {
+    if (window.minibiaBot?.destroy) {
+      try {
+        window.minibiaBot.destroy();
+      } catch (error) {
+        console.warn("[minibia-bot] Existing bot cleanup failed", error);
+      }
+    }
+
     installUiCompatibilityShim();
+    delete window.__minibiaBotBundle;
     window.__minibiaBotBundle = {};
 
-    for (const file of sourceFiles) {
-      await loadSourceFile(file);
+    for (const path of sourceFiles) {
+      await loadSourceFile(path);
     }
 
     keepPanelTitleBlank();
-    console.log("[minibia-bot] source bundle loaded");
+    console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);
   }
 
-  loadBot().catch((error) => {
-    console.error("[minibia-bot] failed to load source bundle", error);
-    alert(`Minibia bot failed to load: ${error.message || error}`);
+  load().catch((error) => {
+    console.error("[minibia-bot] Source loader failed", error);
   });
 })();
