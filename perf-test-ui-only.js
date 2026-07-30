@@ -21,7 +21,6 @@
   let lastAttackCandidateCount = 0;
   let lastSelectedTargetName = null;
   let lastSquareCount = 0;
-  let lastWaveCount = 0;
   let lastGfbCount = 0;
   let lastHealth = null;
   let lastDamageMessage = null;
@@ -142,31 +141,6 @@
     }).length;
   }
 
-  function countBestWave(me, monsters) {
-    const directions = [
-      { x: 0, y: -1 },
-      { x: 1, y: 0 },
-      { x: 0, y: 1 },
-      { x: -1, y: 0 },
-    ];
-
-    let best = 0;
-    for (const direction of directions) {
-      let count = 0;
-      for (const monster of monsters) {
-        const pos = monster?.__position;
-        if (!pos) continue;
-        const dx = pos.x - me.x;
-        const dy = pos.y - me.y;
-        const forward = (dx * direction.x) + (dy * direction.y);
-        const side = Math.abs((dx * direction.y) - (dy * direction.x));
-        if (forward >= 1 && forward <= 4 && side <= Math.min(3, forward)) count += 1;
-      }
-      if (count > best) best = count;
-    }
-    return best;
-  }
-
   function countBestGfb(monsters) {
     let best = 0;
     for (const center of monsters) {
@@ -187,21 +161,17 @@
     const me = getPlayerPosition();
     if (!me) {
       lastSquareCount = 0;
-      lastWaveCount = 0;
       lastGfbCount = 0;
       return;
     }
 
     const monsters = getVisibleMonstersSameFloor();
     lastSquareCount = countSquareAround(me, monsters);
-    lastWaveCount = countBestWave(me, monsters);
     lastGfbCount = countBestGfb(monsters);
 
     const squareElement = document.getElementById("minibia-bot-perf-square-count");
-    const waveElement = document.getElementById("minibia-bot-perf-wave-count");
     const gfbElement = document.getElementById("minibia-bot-perf-gfb-count");
     if (squareElement) squareElement.textContent = String(lastSquareCount);
-    if (waveElement) waveElement.textContent = String(lastWaveCount);
     if (gfbElement) gfbElement.textContent = String(lastGfbCount);
   }
 
@@ -231,7 +201,6 @@
       attackCandidateCount: lastAttackCandidateCount,
       selectedTargetName: lastSelectedTargetName,
       squareCount: lastSquareCount,
-      waveCount: lastWaveCount,
       gfbCount: lastGfbCount,
       lastHealth,
       lastDamageMessage,
@@ -267,14 +236,14 @@
   panel.innerHTML = `
     <div style="font-weight:700">FPS TEST — AOE SCANNER</div>
     <div style="margin-top:4px;font-size:12px">Previous scanners remain active. Reconnect watcher is off.</div>
-    <div style="margin-top:4px;font-size:12px">Square, Energy Wave, and GFB placement scans run every 100 ms. Nothing is cast.</div>
+    <div style="margin-top:4px;font-size:12px">Square and GFB placement scans run every 100 ms. Nothing is cast.</div>
     <div style="margin-top:4px;font-size:12px">Visible creatures: <span id="minibia-bot-perf-visible-count">0</span></div>
     <div style="margin-top:4px;font-size:12px">Visible players: <span id="minibia-bot-perf-player-count">0</span></div>
     <div style="margin-top:4px;font-size:12px">Attack candidates: <span id="minibia-bot-perf-attack-count">0</span></div>
     <div style="margin-top:4px;font-size:12px">Selected target: <span id="minibia-bot-perf-target-name">none</span></div>
-    <div style="margin-top:4px;font-size:12px">AoE counts — square: <span id="minibia-bot-perf-square-count">0</span>, wave: <span id="minibia-bot-perf-wave-count">0</span>, GFB: <span id="minibia-bot-perf-gfb-count">0</span></div>
+    <div style="margin-top:4px;font-size:12px">AoE counts — square: <span id="minibia-bot-perf-square-count">0</span>, GFB: <span id="minibia-bot-perf-gfb-count">0</span></div>
   `;
   document.body.appendChild(panel);
 
-  console.log("[PERF TEST] AoE scanner added; no attacks or spells will be sent.");
+  console.log("[PERF TEST] AoE scanner added without retired Energy Wave checks; no attacks or spells will be sent.");
 })();
