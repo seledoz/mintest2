@@ -12,11 +12,19 @@
   document.getElementById("minibia-bot-panel")?.remove();
   document.getElementById(panelId)?.remove();
 
-  let scanTimerId = null;
+  let creatureScanTimerId = null;
+  let panicScanTimerId = null;
   let lastVisibleCount = 0;
+  let lastVisiblePlayerCount = 0;
+  let lastHealth = null;
+  let lastDamageMessage = null;
 
   function getPlayerPosition() {
     return window.gameClient?.player?.getPosition?.() || null;
+  }
+
+  function getPlayerState() {
+    return window.gameClient?.player?.state || null;
   }
 
   function isWithinVisibleRange(me, pos) {
@@ -43,20 +51,67 @@
     return creatures;
   }
 
-  scanTimerId = window.setInterval(scanVisibleCreatures, 250);
+  function getLatestDamageMessage() {
+    const channels = window.gameClient?.interface?.channelManager?.channels || [];
+    let latest = null;
+
+    for (const channel of channels) {
+      const entries = channel?.__contents || [];
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const message = String(entries[index]?.message || "");
+        if (/^You lose\s+\d+\s+hitpoints\s+due to an attack by\s+.+?\.$/i.test(message)) {
+          latest = message;
+          break;
+        }
+      }
+      if (latest) break;
+    }
+
+    return latest;
+  }
+
+  function runPanicScanner() {
+    const me = getPlayerPosition();
+    const visibleCreatures = scanVisibleCreatures();
+
+    lastVisiblePlayerCount = visibleCreatures.filter((creature) => {
+      const z = Number(creature?.__position?.z);
+      return creature?.type === 0 && me && Number.isFinite(z) && Math.abs(z - me.z) <= 1;
+    }).length;
+
+    const currentHealth = Number(getPlayerState()?.health ?? 0);
+    if (lastHealth == null) lastHealth = currentHealth;
+    else lastHealth = currentHealth;
+
+    lastDamageMessage = getLatestDamageMessage();
+
+    const playersElement = document.getElementById("minibia-bot-perf-player-count");
+    if (playersElement) playersElement.textContent = String(lastVisiblePlayerCount);
+  }
+
+  creatureScanTimerId = window.setInterval(scanVisibleCreatures, 250);
+  panicScanTimerId = window.setInterval(runPanicScanner, 200);
   scanVisibleCreatures();
+  runPanicScanner();
 
   window.minibiaBot = {
     status: () => ({
-      mode: "core-visible-creature-scanner-performance-test",
+      mode: "core-creature-and-panic-scanner-performance-test",
       reconnectWatcher: false,
       visibleCreatureScanner: true,
-      scanIntervalMs: 250,
+      panicScanner: true,
+      creatureScanIntervalMs: 250,
+      panicScanIntervalMs: 200,
       visibleCreatureCount: lastVisibleCount,
+      visiblePlayerCount: lastVisiblePlayerCount,
+      lastHealth,
+      lastDamageMessage,
     }),
     destroy() {
-      if (scanTimerId != null) window.clearInterval(scanTimerId);
-      scanTimerId = null;
+      if (creatureScanTimerId != null) window.clearInterval(creatureScanTimerId);
+      if (panicScanTimerId != null) window.clearInterval(panicScanTimerId);
+      creatureScanTimerId = null;
+      panicScanTimerId = null;
       document.getElementById(panelId)?.remove();
     },
   };
@@ -77,11 +132,13 @@
     "box-shadow:0 4px 18px rgba(0,0,0,.45)",
   ].join(";");
   panel.innerHTML = `
-    <div style="font-weight:700">FPS TEST — CREATURE SCANNER</div>
-    <div style="margin-top:4px;font-size:12px">Reconnect watcher is off. Visible creatures are scanned every 250 ms.</div>
+    <div style="font-weight:700">FPS TEST — PANIC SCANNER</div>
+    <div style="margin-top:4px;font-size:12px">Reconnect watcher is off. Creature scanning remains active.</div>
+    <div style="margin-top:4px;font-size:12px">Panic-style player, health, and damage-message checks run every 200 ms.</div>
     <div style="margin-top:4px;font-size:12px">Visible creatures: <span id="minibia-bot-perf-visible-count">0</span></div>
+    <div style="margin-top:4px;font-size:12px">Visible players: <span id="minibia-bot-perf-player-count">0</span></div>
   `;
   document.body.appendChild(panel);
 
-  console.log("[PERF TEST] Visible creature scanner loaded; reconnect watcher disabled.");
+  console.log("[PERF TEST] Panic scanner added; reconnect watcher disabled.");
 })();
