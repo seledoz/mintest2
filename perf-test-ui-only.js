@@ -12,12 +12,13 @@
   document.getElementById("minibia-bot-panel")?.remove();
   document.getElementById(panelId)?.remove();
 
-  window.minibiaBot = {
-    status: () => ({ mode: "ui-only-performance-test" }),
-    destroy() {
-      document.getElementById(panelId)?.remove();
-    },
-  };
+  const createBot = window.__minibiaBotBundle?.createBot;
+  if (typeof createBot !== "function") {
+    throw new Error("[PERF TEST] Core module was not loaded.");
+  }
+
+  window.minibiaBot = createBot();
+  window.minibiaBot.status = () => ({ mode: "core-plus-ui-performance-test" });
 
   const panel = document.createElement("div");
   panel.id = panelId;
@@ -35,10 +36,16 @@
     "box-shadow:0 4px 18px rgba(0,0,0,.45)",
   ].join(";");
   panel.innerHTML = `
-    <div style="font-weight:700">FPS TEST — UI ONLY</div>
-    <div style="margin-top:4px;font-size:12px">No bot modules or scanners are running.</div>
+    <div style="font-weight:700">FPS TEST — CORE + UI</div>
+    <div style="margin-top:4px;font-size:12px">Core is running. Feature modules and scanners are not loaded.</div>
   `;
   document.body.appendChild(panel);
 
-  console.log("[PERF TEST] UI-only mode loaded. No feature modules installed.");
+  const originalDestroy = window.minibiaBot.destroy.bind(window.minibiaBot);
+  window.minibiaBot.destroy = function destroyPerfTest() {
+    document.getElementById(panelId)?.remove();
+    originalDestroy();
+  };
+
+  console.log("[PERF TEST] Core + UI stage loaded. No feature modules or scanners installed.");
 })();
