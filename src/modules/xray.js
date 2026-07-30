@@ -338,7 +338,7 @@ window.__minibiaBotBundle.installXrayModule = function installXrayModule(bot) {
     overlayState.running = true;
     ensureOverlayStyle();
     renderOverlay();
-    overlayState.timerId = window.setInterval(renderOverlay, 250);
+    overlayState.timerId = window.setInterval(renderOverlay, 500);
     return true;
   }
 
