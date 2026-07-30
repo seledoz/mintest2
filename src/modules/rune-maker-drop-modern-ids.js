@@ -2,6 +2,10 @@
   const MODERN_BLANK_RUNE_ID = 3147;
   const MODERN_RUNE_ID_MIN = 3148;
   const MODERN_RUNE_ID_MAX = 3200;
+  const SCAN_MS = 500;
+
+  let scanTimerId = null;
+  let attachedBot = null;
 
   function getItem(container, slot) {
     try {
@@ -60,11 +64,84 @@
     }
   }
 
-  markModernRunes();
-  const timer = window.setInterval(markModernRunes, 500);
-  window.minibiaBot?.addCleanup?.(() => window.clearInterval(timer));
+  function scannerEnabled() {
+    return !!attachedBot?.runeMakerDrop?.config?.enabled;
+  }
 
-  console.log("[minibia-bot] modern rune id compatibility enabled", {
+  function stopScanner() {
+    if (scanTimerId != null) window.clearTimeout(scanTimerId);
+    scanTimerId = null;
+  }
+
+  function scheduleScanner() {
+    if (!scannerEnabled() || scanTimerId != null) return;
+
+    scanTimerId = window.setTimeout(() => {
+      scanTimerId = null;
+      if (!scannerEnabled()) return;
+      markModernRunes();
+      scheduleScanner();
+    }, SCAN_MS);
+  }
+
+  function syncScanner() {
+    if (!scannerEnabled()) {
+      stopScanner();
+      return;
+    }
+
+    markModernRunes();
+    scheduleScanner();
+  }
+
+  function attach() {
+    const bot = window.minibiaBot;
+    const runeDrop = bot?.runeMakerDrop;
+    if (!bot || !runeDrop) return false;
+
+    attachedBot = bot;
+
+    if (!runeDrop.__modernRuneScannerGateInstalled) {
+      runeDrop.__modernRuneScannerGateInstalled = true;
+
+      const originalStart = runeDrop.start?.bind(runeDrop);
+      const originalStop = runeDrop.stop?.bind(runeDrop);
+      const originalUpdateConfig = runeDrop.updateConfig?.bind(runeDrop);
+
+      runeDrop.start = (...args) => {
+        const result = originalStart?.(...args);
+        syncScanner();
+        return result;
+      };
+
+      runeDrop.stop = (...args) => {
+        const result = originalStop?.(...args);
+        stopScanner();
+        return result;
+      };
+
+      runeDrop.updateConfig = (...args) => {
+        const result = originalUpdateConfig?.(...args);
+        syncScanner();
+        return result;
+      };
+
+      bot.addCleanup?.(() => stopScanner());
+    }
+
+    syncScanner();
+    return true;
+  }
+
+  let attempts = 0;
+  const attachTimerId = window.setInterval(() => {
+    attempts += 1;
+    if (attach() || attempts >= 40) window.clearInterval(attachTimerId);
+  }, 250);
+
+  attach();
+
+  console.log("[minibia-bot] modern rune scanner runs only while Rune Maker Drop is enabled", {
     blankRune: MODERN_BLANK_RUNE_ID,
     runeRange: [MODERN_RUNE_ID_MIN, MODERN_RUNE_ID_MAX],
   });
