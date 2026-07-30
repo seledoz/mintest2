@@ -85,7 +85,32 @@ Paste the entire code block into the browser console, press Enter, and then past
 
 Do not save your GitHub token anywhere outside your private repository or browser storage.
 
-## Token
+## UI-only FPS test loader
+
+Refresh the Minibia page first, then paste this entire loader into the browser console. This loads only the temporary FPS test panel; normal bot features should not run.
+
 ```js
-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
+(async () => {
+  const token = prompt("Paste your GitHub token:")?.trim();
+  if (!token) return;
+
+  const repository = "seledoz/mintest2";
+  const ref = "main";
+  const apiUrl = `https://api.github.com/repos/${repository}/contents/perf-test-ui-only.js?ref=${encodeURIComponent(ref)}&t=${Date.now()}`;
+
+  const response = await fetch(apiUrl, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github.raw+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    throw new Error(`GitHub fetch failed: ${response.status} ${response.statusText}`);
+  }
+
+  window.eval(await response.text());
+})();
 ```
