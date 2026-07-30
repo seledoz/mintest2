@@ -10,14 +10,12 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     uiTimerId: null,
     lastSpellHotkeyAt: 0,
     lastCastMonsterCount: 0,
-    lastEnergyWaveHotkeyAt: 0,
-    lastEnergyWaveMonsterCount: 0,
-    lastEnergyWaveTargetName: "",
     lastGfbHotkeyAt: 0,
     lastGfbMonsterCount: 0,
     lastGfbTargetName: "",
   };
 
+  const storedConfig = bot.storage.get(configStorageKey, {}) || {};
   const config = Object.assign({
     enabled: false,
     spellHotbarSlot: null,
@@ -27,15 +25,16 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     tickMs: 250,
     requireAutoAttackRunning: true,
     respectTargetFilters: true,
-    energyWaveEnabled: false,
-    energyWaveHotbarSlot: null,
-    energyWaveMinMonsters: 3,
-    energyWaveCooldownMs: 2000,
     gfbEnabled: false,
     gfbHotbarSlot: null,
     gfbMinMonsters: 4,
     gfbCooldownMs: 2000,
-  }, bot.storage.get(configStorageKey, {}) || {});
+  }, storedConfig);
+
+  delete config.energyWaveEnabled;
+  delete config.energyWaveHotbarSlot;
+  delete config.energyWaveMinMonsters;
+  delete config.energyWaveCooldownMs;
 
   config.spellHotbarSlot = normalizeHotbarSlot(config.spellHotbarSlot);
   config.minMonsters = positiveInt(config.minMonsters, 3);
@@ -44,10 +43,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
   config.tickMs = positiveInt(config.tickMs, 250);
   config.requireAutoAttackRunning = config.requireAutoAttackRunning !== false;
   config.respectTargetFilters = config.respectTargetFilters !== false;
-  config.energyWaveEnabled = !!config.energyWaveEnabled;
-  config.energyWaveHotbarSlot = normalizeHotbarSlot(config.energyWaveHotbarSlot);
-  config.energyWaveMinMonsters = positiveInt(config.energyWaveMinMonsters, 3);
-  config.energyWaveCooldownMs = nonNegativeInt(config.energyWaveCooldownMs, 2000);
   config.gfbEnabled = !!config.gfbEnabled;
   config.gfbHotbarSlot = normalizeHotbarSlot(config.gfbHotbarSlot);
   config.gfbMinMonsters = positiveInt(config.gfbMinMonsters, 4);
@@ -85,7 +80,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     const included = new Set((attackConfig.includedCreatureNames || []).map(normalizeName));
     const excluded = new Set((attackConfig.excludedCreatureNames || []).map(normalizeName));
     if (mode === "include") return (!included.size || included.has(monsterName)) && !excluded.has(monsterName);
-    if (mode === "exclude") return !excluded.has(monsterName);
     return !excluded.has(monsterName);
   }
 
@@ -121,117 +115,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
       state.lastSpellHotkeyAt = now;
       state.lastCastMonsterCount = monsters.length;
       bot.log("used auto attack AoE spell hotkey", { slot, monsterCount: monsters.length, squareRange: config.squareRange });
-    }
-    refreshUiValues();
-    return clicked;
-  }
-
-  function getCurrentTarget() {
-    return bot.attack?.getCurrentTarget?.() || window.gameClient?.player?.__target || null;
-  }
-
-  function isSameCreature(left, right) {
-    return !!left && !!right && (left === right || left.id === right.id);
-  }
-
-  function setCurrentTarget(target) {
-    if (!target || isSameCreature(getCurrentTarget(), target)) return true;
-    if (!window.gameClient?.player || typeof window.gameClient.send !== "function" || typeof TargetPacket !== "function") return false;
-    window.gameClient.player.setTarget(target);
-    window.gameClient.send(new TargetPacket(target.id));
-    return true;
-  }
-
-  function getDirectionToTarget(playerPosition, targetPosition) {
-    if (!playerPosition || !targetPosition || playerPosition.z !== targetPosition.z) return null;
-    const dx = targetPosition.x - playerPosition.x;
-    const dy = targetPosition.y - playerPosition.y;
-    if (dx === 0 && dy === 0) return null;
-    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? "east" : "west";
-    return dy > 0 ? "south" : "north";
-  }
-
-  function getEnergyWaveTiles(playerPosition, direction) {
-    if (!playerPosition || !direction) return [];
-    const forward = { north: { x: 0, y: -1 }, south: { x: 0, y: 1 }, east: { x: 1, y: 0 }, west: { x: -1, y: 0 } }[direction];
-    const side = { north: { x: 1, y: 0 }, south: { x: 1, y: 0 }, east: { x: 0, y: 1 }, west: { x: 0, y: 1 } }[direction];
-    if (!forward || !side) return [];
-
-    const tiles = [];
-    tiles.push({ x: playerPosition.x + forward.x, y: playerPosition.y + forward.y, z: playerPosition.z });
-    for (let distance = 2; distance <= 4; distance += 1) {
-      for (let offset = -1; offset <= 1; offset += 1) {
-        tiles.push({
-          x: playerPosition.x + forward.x * distance + side.x * offset,
-          y: playerPosition.y + forward.y * distance + side.y * offset,
-          z: playerPosition.z,
-        });
-      }
-    }
-    return tiles;
-  }
-
-  function evaluateEnergyWaveForTarget(target, monsters = getVisibleMonsters()) {
-    const playerPosition = getPosition(bot.getPlayerPosition?.());
-    const targetPosition = getPosition(target);
-    const direction = getDirectionToTarget(playerPosition, targetPosition);
-    if (!playerPosition || !targetPosition || !direction) return { target, direction, count: 0, monsters: [], tiles: [] };
-
-    const tileKeys = new Set(getEnergyWaveTiles(playerPosition, direction).map(positionKey));
-    const hitMonsters = monsters.filter((monster) => {
-      const position = getPosition(monster);
-      return position && position.z === playerPosition.z && tileKeys.has(positionKey(position));
-    });
-
-    return { target, direction, count: hitMonsters.length, monsters: hitMonsters, tiles: Array.from(tileKeys) };
-  }
-
-  function getBestEnergyWaveCandidate() {
-    const playerPosition = getPosition(bot.getPlayerPosition?.());
-    if (!playerPosition) return null;
-    const monsters = getVisibleMonsters().filter((monster) => {
-      const position = getPosition(monster);
-      return position && position.z === playerPosition.z && tileDistance(playerPosition, position) <= 4;
-    });
-    if (!monsters.length) return null;
-
-    const currentTarget = getCurrentTarget();
-    const evaluations = monsters.map((monster) => evaluateEnergyWaveForTarget(monster, monsters));
-    evaluations.sort((left, right) => {
-      const countDiff = right.count - left.count;
-      if (countDiff) return countDiff;
-      const currentBias = (isSameCreature(right.target, currentTarget) ? 1 : 0) - (isSameCreature(left.target, currentTarget) ? 1 : 0);
-      if (currentBias) return currentBias;
-      return tileDistance(playerPosition, getPosition(left.target)) - tileDistance(playerPosition, getPosition(right.target));
-    });
-    return evaluations[0] || null;
-  }
-
-  function canCastEnergyWave(now = Date.now()) {
-    const slot = normalizeHotbarSlot(config.energyWaveHotbarSlot);
-    if (!config.enabled || !state.running || !config.energyWaveEnabled || !slot) return false;
-    if (now - state.lastEnergyWaveHotkeyAt < nonNegativeInt(config.energyWaveCooldownMs, 2000)) return false;
-    const best = getBestEnergyWaveCandidate();
-    return !!best && best.count >= positiveInt(config.energyWaveMinMonsters, 3);
-  }
-
-  function triggerEnergyWave(now = Date.now()) {
-    if (!canCastEnergyWave(now)) return false;
-    const slot = normalizeHotbarSlot(config.energyWaveHotbarSlot);
-    const best = getBestEnergyWaveCandidate();
-    if (!best || best.count < positiveInt(config.energyWaveMinMonsters, 3)) return false;
-
-    if (!setCurrentTarget(best.target)) {
-      bot.log("energy wave target switch failed", { target: best.target?.name || "Mob", id: best.target?.id });
-      return false;
-    }
-
-    const clicked = bot.clickHotbar(slot - 1);
-    if (clicked) {
-      state.lastEnergyWaveHotkeyAt = now;
-      state.lastEnergyWaveMonsterCount = best.count;
-      state.lastEnergyWaveTargetName = best.target?.name || "Mob";
-      bot.log("used energy wave hotkey", { slot, monsterCount: best.count, target: state.lastEnergyWaveTargetName, direction: best.direction, shape: "1-3-3-3" });
     }
     refreshUiValues();
     return clicked;
@@ -286,7 +169,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
       if (countDiff) return countDiff;
       return tileDistance(playerPosition, left.position) - tileDistance(playerPosition, right.position);
     });
-
     return evaluations[0] || null;
   }
 
@@ -337,7 +219,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     if (!canCastGfb(now)) return false;
     const best = getBestGfbCandidate();
     if (!best || best.count < positiveInt(config.gfbMinMonsters, 4)) return false;
-
     const clicked = clickCrosshairTarget(best);
     if (clicked) {
       state.lastGfbHotkeyAt = now;
@@ -350,7 +231,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
   }
 
   function triggerSpell(now = Date.now()) {
-    return triggerEnergyWave(now) || triggerGfb(now) || triggerSquareSpell(now);
+    return triggerGfb(now) || triggerSquareSpell(now);
   }
 
   function tick() {
@@ -380,55 +261,48 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
   }
 
   function updateConfig(nextConfig = {}, options = {}) {
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "spellHotbarSlot")) nextConfig.spellHotbarSlot = normalizeHotbarSlot(nextConfig.spellHotbarSlot);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "minMonsters")) nextConfig.minMonsters = positiveInt(nextConfig.minMonsters, config.minMonsters || 3);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "squareRange")) nextConfig.squareRange = positiveInt(nextConfig.squareRange, config.squareRange || 3);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "cooldownMs")) nextConfig.cooldownMs = nonNegativeInt(nextConfig.cooldownMs, config.cooldownMs || 2000);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "tickMs")) nextConfig.tickMs = positiveInt(nextConfig.tickMs, config.tickMs || 250);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "requireAutoAttackRunning")) nextConfig.requireAutoAttackRunning = nextConfig.requireAutoAttackRunning !== false;
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "respectTargetFilters")) nextConfig.respectTargetFilters = nextConfig.respectTargetFilters !== false;
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "energyWaveEnabled")) nextConfig.energyWaveEnabled = !!nextConfig.energyWaveEnabled;
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "energyWaveHotbarSlot")) nextConfig.energyWaveHotbarSlot = normalizeHotbarSlot(nextConfig.energyWaveHotbarSlot);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "energyWaveMinMonsters")) nextConfig.energyWaveMinMonsters = positiveInt(nextConfig.energyWaveMinMonsters, config.energyWaveMinMonsters || 3);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "energyWaveCooldownMs")) nextConfig.energyWaveCooldownMs = nonNegativeInt(nextConfig.energyWaveCooldownMs, config.energyWaveCooldownMs || 2000);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "gfbEnabled")) nextConfig.gfbEnabled = !!nextConfig.gfbEnabled;
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "gfbHotbarSlot")) nextConfig.gfbHotbarSlot = normalizeHotbarSlot(nextConfig.gfbHotbarSlot);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "gfbMinMonsters")) nextConfig.gfbMinMonsters = positiveInt(nextConfig.gfbMinMonsters, config.gfbMinMonsters || 4);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "gfbCooldownMs")) nextConfig.gfbCooldownMs = nonNegativeInt(nextConfig.gfbCooldownMs, config.gfbCooldownMs || 2000);
-    Object.assign(config, nextConfig);
+    const cleaned = { ...nextConfig };
+    delete cleaned.energyWaveEnabled;
+    delete cleaned.energyWaveHotbarSlot;
+    delete cleaned.energyWaveMinMonsters;
+    delete cleaned.energyWaveCooldownMs;
+    if (Object.prototype.hasOwnProperty.call(cleaned, "spellHotbarSlot")) cleaned.spellHotbarSlot = normalizeHotbarSlot(cleaned.spellHotbarSlot);
+    if (Object.prototype.hasOwnProperty.call(cleaned, "minMonsters")) cleaned.minMonsters = positiveInt(cleaned.minMonsters, config.minMonsters || 3);
+    if (Object.prototype.hasOwnProperty.call(cleaned, "squareRange")) cleaned.squareRange = positiveInt(cleaned.squareRange, config.squareRange || 3);
+    if (Object.prototype.hasOwnProperty.call(cleaned, "cooldownMs")) cleaned.cooldownMs = nonNegativeInt(cleaned.cooldownMs, config.cooldownMs || 2000);
+    if (Object.prototype.hasOwnProperty.call(cleaned, "tickMs")) cleaned.tickMs = positiveInt(cleaned.tickMs, config.tickMs || 250);
+    if (Object.prototype.hasOwnProperty.call(cleaned, "requireAutoAttackRunning")) cleaned.requireAutoAttackRunning = cleaned.requireAutoAttackRunning !== false;
+    if (Object.prototype.hasOwnProperty.call(cleaned, "respectTargetFilters")) cleaned.respectTargetFilters = cleaned.respectTargetFilters !== false;
+    if (Object.prototype.hasOwnProperty.call(cleaned, "gfbEnabled")) cleaned.gfbEnabled = !!cleaned.gfbEnabled;
+    if (Object.prototype.hasOwnProperty.call(cleaned, "gfbHotbarSlot")) cleaned.gfbHotbarSlot = normalizeHotbarSlot(cleaned.gfbHotbarSlot);
+    if (Object.prototype.hasOwnProperty.call(cleaned, "gfbMinMonsters")) cleaned.gfbMinMonsters = positiveInt(cleaned.gfbMinMonsters, config.gfbMinMonsters || 4);
+    if (Object.prototype.hasOwnProperty.call(cleaned, "gfbCooldownMs")) cleaned.gfbCooldownMs = nonNegativeInt(cleaned.gfbCooldownMs, config.gfbCooldownMs || 2000);
+    Object.assign(config, cleaned);
     persistConfig();
     if (!options.silent) refreshUiValues();
     return { ...config };
   }
 
   function status() {
-    const monsters = getCandidateMonsters();
-    const bestWave = getBestEnergyWaveCandidate();
-    const bestGfb = getBestGfbCandidate();
+    const monsters = state.running && config.enabled ? getCandidateMonsters() : [];
+    const bestGfb = state.running && config.enabled && config.gfbEnabled ? getBestGfbCandidate() : null;
     return {
       running: state.running,
       config: { ...config },
       nearbyMonsterCount: monsters.length,
       lastCastMonsterCount: state.lastCastMonsterCount,
-      lastEnergyWaveMonsterCount: state.lastEnergyWaveMonsterCount,
-      lastEnergyWaveTargetName: state.lastEnergyWaveTargetName,
-      bestEnergyWaveCount: bestWave?.count || 0,
-      bestEnergyWaveTargetName: bestWave?.target?.name || "",
-      bestEnergyWaveDirection: bestWave?.direction || "",
       lastGfbMonsterCount: state.lastGfbMonsterCount,
       lastGfbTargetName: state.lastGfbTargetName,
       bestGfbCount: bestGfb?.count || 0,
       bestGfbTargetName: bestGfb?.target?.name || "",
-      ready: canCastSquare(Date.now()) || canCastEnergyWave(Date.now()) || canCastGfb(Date.now()),
+      ready: canCastSquare(Date.now()) || canCastGfb(Date.now()),
     };
   }
 
   function findAutoAttackAnchor(panel) {
     return document.getElementById("minibia-bot-auto-attack-enabled")?.closest(".mb-section") ||
       document.getElementById("minibia-bot-auto-attack-enabled")?.parentElement ||
-      panel.querySelector(".mb-main-column") ||
-      panel.querySelector(".mb-body") ||
-      panel;
+      panel.querySelector(".mb-main-column") || panel.querySelector(".mb-body") || panel;
   }
 
   function ensureUi() {
@@ -446,16 +320,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
           <label class="mb-field"><span class="mb-field-label">Square Min Monsters</span><input type="number" id="minibia-bot-auto-attack-aoe-monsters" min="1" placeholder="3" /></label>
           <label class="mb-field"><span class="mb-field-label">Square Range</span><input type="number" id="minibia-bot-auto-attack-aoe-range" min="1" placeholder="3" /></label>
           <label class="mb-field"><span class="mb-field-label">Square Cooldown MS</span><input type="number" id="minibia-bot-auto-attack-aoe-cooldown" min="0" placeholder="2000" /></label>
-        </div>
-        <div class="mb-section">
-          <div class="mb-label">Energy Wave 1-3-3-3</div>
-          <label class="mb-toggle"><input type="checkbox" id="minibia-bot-energy-wave-enabled" /><span>Enable Energy Wave</span></label>
-          <div class="mb-field-grid">
-            <label class="mb-field"><span class="mb-field-label">Wave Hotkey</span><input type="number" id="minibia-bot-energy-wave-hotkey" min="1" max="12" placeholder="6" /></label>
-            <label class="mb-field"><span class="mb-field-label">Wave Min Creatures</span><input type="number" id="minibia-bot-energy-wave-monsters" min="1" placeholder="3" /></label>
-            <label class="mb-field"><span class="mb-field-label">Wave Cooldown MS</span><input type="number" id="minibia-bot-energy-wave-cooldown" min="0" placeholder="2000" /></label>
-          </div>
-          <div class="mb-small-note">Works while manually hunting. Switches target if another monster gives a better wave, then uses the hotkey. Pattern: 1 tile forward, then 3 / 3 / 3.</div>
         </div>
         <div class="mb-section">
           <div class="mb-label">Great Fireball 1-5-5-7-5-5-1</div>
@@ -481,10 +345,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     const monsters = section.querySelector("#minibia-bot-auto-attack-aoe-monsters");
     const range = section.querySelector("#minibia-bot-auto-attack-aoe-range");
     const cooldown = section.querySelector("#minibia-bot-auto-attack-aoe-cooldown");
-    const waveEnabled = section.querySelector("#minibia-bot-energy-wave-enabled");
-    const waveHotkey = section.querySelector("#minibia-bot-energy-wave-hotkey");
-    const waveMonsters = section.querySelector("#minibia-bot-energy-wave-monsters");
-    const waveCooldown = section.querySelector("#minibia-bot-energy-wave-cooldown");
     const gfbEnabled = section.querySelector("#minibia-bot-gfb-enabled");
     const gfbHotkey = section.querySelector("#minibia-bot-gfb-hotkey");
     const gfbMonsters = section.querySelector("#minibia-bot-gfb-monsters");
@@ -496,10 +356,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     monsters?.addEventListener("change", () => updateConfig({ minMonsters: monsters.value }));
     range?.addEventListener("change", () => updateConfig({ squareRange: range.value }));
     cooldown?.addEventListener("change", () => updateConfig({ cooldownMs: cooldown.value }));
-    waveEnabled?.addEventListener("change", () => updateConfig({ energyWaveEnabled: waveEnabled.checked }));
-    waveHotkey?.addEventListener("change", () => updateConfig({ energyWaveHotbarSlot: waveHotkey.value }));
-    waveMonsters?.addEventListener("change", () => updateConfig({ energyWaveMinMonsters: waveMonsters.value }));
-    waveCooldown?.addEventListener("change", () => updateConfig({ energyWaveCooldownMs: waveCooldown.value }));
     gfbEnabled?.addEventListener("change", () => updateConfig({ gfbEnabled: gfbEnabled.checked }));
     gfbHotkey?.addEventListener("change", () => updateConfig({ gfbHotbarSlot: gfbHotkey.value }));
     gfbMonsters?.addEventListener("change", () => updateConfig({ gfbMinMonsters: gfbMonsters.value }));
@@ -515,10 +371,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     const monsters = document.getElementById("minibia-bot-auto-attack-aoe-monsters");
     const range = document.getElementById("minibia-bot-auto-attack-aoe-range");
     const cooldown = document.getElementById("minibia-bot-auto-attack-aoe-cooldown");
-    const waveEnabled = document.getElementById("minibia-bot-energy-wave-enabled");
-    const waveHotkey = document.getElementById("minibia-bot-energy-wave-hotkey");
-    const waveMonsters = document.getElementById("minibia-bot-energy-wave-monsters");
-    const waveCooldown = document.getElementById("minibia-bot-energy-wave-cooldown");
     const gfbEnabled = document.getElementById("minibia-bot-gfb-enabled");
     const gfbHotkey = document.getElementById("minibia-bot-gfb-hotkey");
     const gfbMonsters = document.getElementById("minibia-bot-gfb-monsters");
@@ -526,17 +378,14 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     const requireAttack = document.getElementById("minibia-bot-auto-attack-aoe-require-attack");
     const filters = document.getElementById("minibia-bot-auto-attack-aoe-respect-filters");
     const statusLabel = document.getElementById("minibia-bot-auto-attack-aoe-status");
-    const bestWave = getBestEnergyWaveCandidate();
-    const bestGfb = getBestGfbCandidate();
+    const panelCollapsed = document.getElementById("minibia-bot-panel")?.dataset?.collapsed === "true";
+    const shouldScanUi = state.running && config.enabled && !panelCollapsed;
+    const bestGfb = shouldScanUi && config.gfbEnabled ? getBestGfbCandidate() : null;
     if (enabled) enabled.checked = !!state.running;
     if (hotkey) hotkey.value = config.spellHotbarSlot || "";
     if (monsters) monsters.value = config.minMonsters;
     if (range) range.value = config.squareRange;
     if (cooldown) cooldown.value = config.cooldownMs;
-    if (waveEnabled) waveEnabled.checked = !!config.energyWaveEnabled;
-    if (waveHotkey) waveHotkey.value = config.energyWaveHotbarSlot || "";
-    if (waveMonsters) waveMonsters.value = config.energyWaveMinMonsters;
-    if (waveCooldown) waveCooldown.value = config.energyWaveCooldownMs;
     if (gfbEnabled) gfbEnabled.checked = !!config.gfbEnabled;
     if (gfbHotkey) gfbHotkey.value = config.gfbHotbarSlot || "";
     if (gfbMonsters) gfbMonsters.value = config.gfbMinMonsters;
@@ -545,7 +394,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     if (filters) filters.checked = !!config.respectTargetFilters;
     if (statusLabel) {
       statusLabel.textContent = state.running
-        ? `AoE: square ${getCandidateMonsters().length}/${config.minMonsters}; wave ${bestWave?.count || 0}/${config.energyWaveMinMonsters}; gfb ${bestGfb?.count || 0}/${config.gfbMinMonsters}`
+        ? `AoE: square ${shouldScanUi ? getCandidateMonsters().length : 0}/${config.minMonsters}; gfb ${bestGfb?.count || 0}/${config.gfbMinMonsters}`
         : "AoE: off";
     }
   }
@@ -563,11 +412,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     updateConfig,
     triggerSpell,
     triggerSquareSpell,
-    triggerEnergyWave,
     triggerGfb,
-    getBestEnergyWaveCandidate,
-    evaluateEnergyWaveForTarget,
-    getEnergyWaveTiles,
     getBestGfbCandidate,
     evaluateGfbAtPosition,
     getGfbTiles,
