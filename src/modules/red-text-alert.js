@@ -164,6 +164,7 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
   }
 
   function getCaptchaCandidates() {
+    if (!config.enabled || !state.running) return [];
     const candidates = [];
     const roots = Array.from(document.body?.querySelectorAll?.("*") || []).filter(isPopupCandidate).sort((a, b) => getZIndexValue(b) - getZIndexValue(a));
     for (const root of roots) {
@@ -291,7 +292,7 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
   function startObserver() {
     stopObserver();
     state.observer = new MutationObserver((mutations) => {
-      if (state.mode !== "watching") return;
+      if (!config.enabled || !state.running || state.mode !== "watching") return;
       for (const mutation of mutations) {
         if (mutation.type === "attributes" && inspectAddedNode(mutation.target)) return;
         for (const node of mutation.addedNodes) if (inspectAddedNode(node)) return;
@@ -372,14 +373,15 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
   }
 
   function status() {
+    const active = !!config.enabled && !!state.running;
     const now = Date.now();
-    const remainingMs = state.mode === "beeping" && state.alertStartedAt ? Math.max(0, positiveInt(config.alertDurationMs, 60000) - (now - state.alertStartedAt)) : 0;
-    const candidates = getCaptchaCandidates();
+    const remainingMs = active && state.mode === "beeping" && state.alertStartedAt ? Math.max(0, positiveInt(config.alertDurationMs, 60000) - (now - state.alertStartedAt)) : 0;
+    const candidates = active ? getCaptchaCandidates() : [];
     return {
-      running: state.running,
+      running: active,
       config: { ...config },
       mode: state.mode,
-      alertActive: state.mode === "beeping" && remainingMs > 0,
+      alertActive: active && state.mode === "beeping" && remainingMs > 0,
       remainingMs,
       lastSeenText: state.lastSeenText,
       lastSeenAt: state.lastSeenAt,
@@ -417,14 +419,17 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
   function refreshUiValues() {
     const enabled = document.getElementById("k9x-red-text-alert-enabled");
     const label = document.getElementById("k9x-red-text-alert-status");
+    if (!state.running || !config.enabled) {
+      if (enabled) enabled.checked = false;
+      if (label) label.textContent = "Alert: off";
+      return;
+    }
     const current = status();
-    if (enabled) enabled.checked = !!state.running;
+    if (enabled) enabled.checked = true;
     if (label) {
-      label.textContent = !state.running
-        ? "Alert: off"
-        : current.alertActive
-          ? `Alert: CAPTCHA (${Math.ceil(current.remainingMs / 1000)}s left)`
-          : `Alert: watching for popup (${current.captchaCandidateCount} visible)`;
+      label.textContent = current.alertActive
+        ? `Alert: CAPTCHA (${Math.ceil(current.remainingMs / 1000)}s left)`
+        : `Alert: watching for popup (${current.captchaCandidateCount} visible)`;
     }
   }
 
