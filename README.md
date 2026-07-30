@@ -81,9 +81,9 @@ Use a fine-grained GitHub token with read and write access to the repository con
 })();
 ```
 
-Paste the entire code block into the browser console, press Enter, and then paste the token into the popup prompt.
-
-Do not save your GitHub token anywhere outside your private repository or browser storage.
+```js
+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
+```
 
 ## UI-only FPS test loader
 
