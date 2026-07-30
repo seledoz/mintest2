@@ -53,18 +53,13 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
       : null;
   }
 
-  function positionKey(position) {
-    return position ? `${position.x},${position.y},${position.z}` : "";
-  }
+  function positionKey(position) { return position ? `${position.x},${position.y},${position.z}` : ""; }
 
   function getThingDefinition(itemId) {
     if (!itemId) return null;
-    return (
-      window.gameClient?.itemDefinitionsByCid?.[itemId] ||
+    return window.gameClient?.itemDefinitionsByCid?.[itemId] ||
       window.gameClient?.itemDefinitionsBySid?.[itemId] ||
-      window.gameClient?.itemDefinitions?.[itemId] ||
-      null
-    );
+      window.gameClient?.itemDefinitions?.[itemId] || null;
   }
 
   function getThingName(thing) {
@@ -76,24 +71,18 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
     if (!tile) return [];
     const things = [];
     if (tile.id) things.push(tile);
-    if (Array.isArray(tile.items)) {
-      tile.items.forEach((item) => { if (item) things.push(item); });
-    }
+    if (Array.isArray(tile.items)) tile.items.forEach((item) => { if (item) things.push(item); });
     return things;
   }
 
-  function getTilePosition(tile) {
-    return normalizePosition(tile?.__position || tile?.position);
-  }
+  function getTilePosition(tile) { return normalizePosition(tile?.__position || tile?.position); }
 
   function getLoadedTiles() {
     const chunks = window.gameClient?.world?.chunks || [];
     const tiles = [];
     for (const chunk of chunks) {
       if (!chunk?.tiles) continue;
-      for (const tile of chunk.tiles) {
-        if (tile?.__position) tiles.push(tile);
-      }
+      for (const tile of chunk.tiles) if (tile?.__position) tiles.push(tile);
     }
     return tiles;
   }
@@ -125,6 +114,7 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
   }
 
   function getAdjacentRockTiles() {
+    if (!config.enabled || !state.running) return [];
     const origin = normalizePosition(bot.getPlayerPosition?.());
     if (!origin) return [];
     const adjacentKeys = new Set(getAdjacentPositions(origin).map(positionKey));
@@ -147,25 +137,15 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
       if (rect.width < 200 || rect.height < 150) continue;
       if (canvas.closest?.("#minibia-bot-panel")) continue;
       const area = rect.width * rect.height;
-      if (area > bestArea) {
-        best = canvas;
-        bestArea = area;
-      }
+      if (area > bestArea) { best = canvas; bestArea = area; }
     }
     return best;
   }
 
   function dispatchMouseClick(element, clientX, clientY) {
     const options = {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-      button: 0,
-      buttons: 1,
-      clientX,
-      clientY,
-      screenX: window.screenX + clientX,
-      screenY: window.screenY + clientY,
+      bubbles: true, cancelable: true, view: window, button: 0, buttons: 1,
+      clientX, clientY, screenX: window.screenX + clientX, screenY: window.screenY + clientY,
     };
     element.dispatchEvent(new MouseEvent("mousemove", options));
     element.dispatchEvent(new MouseEvent("mousedown", options));
@@ -177,29 +157,22 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
     const canvas = getBestGameCanvas();
     const playerPosition = normalizePosition(bot.getPlayerPosition?.());
     if (!canvas || !playerPosition || !entry?.position) return false;
-
     const rect = canvas.getBoundingClientRect();
     const dx = entry.position.x - playerPosition.x;
     const dy = entry.position.y - playerPosition.y;
-
-    // Minibia/Tibia view is normally 15 x 11 tiles, with the player centered.
     const tileWidth = rect.width / 15;
     const tileHeight = rect.height / 11;
     const clientX = rect.left + rect.width / 2 + dx * tileWidth;
     const clientY = rect.top + rect.height / 2 + dy * tileHeight;
-
     if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return false;
     dispatchMouseClick(canvas, clientX, clientY);
     return true;
   }
 
   function clickCrosshairOnTile(entry) {
-    // Use a real canvas click. Internal handlers were returning success without visibly clicking the tile.
     if (clickCanvasAtTile(entry)) return true;
-
     const mouse = window.gameClient?.mouse;
     const target = { which: entry.tile, index: 0xFF };
-
     if (typeof mouse?.__handleTileClick === "function") {
       try { mouse.__handleTileClick(entry.tile); return true; } catch (error) {}
     }
@@ -213,22 +186,16 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
   }
 
   function usePickOnRock(entry) {
-    if (!entry?.tile || state.using) return false;
+    if (!config.enabled || !state.running || !entry?.tile || state.using) return false;
     const slot = normalizeHotbarSlot(config.pickHotbarSlot);
-    if (!slot) {
-      state.lastResult = "no pick hotkey";
-      return false;
-    }
-
+    if (!slot) { state.lastResult = "no pick hotkey"; return false; }
     const pressed = bot.clickHotbar?.(slot - 1);
-    if (!pressed) {
-      state.lastResult = "hotkey failed";
-      return false;
-    }
+    if (!pressed) { state.lastResult = "hotkey failed"; return false; }
 
     state.using = true;
     window.setTimeout(() => {
       try {
+        if (!config.enabled || !state.running) return;
         const clicked = clickCrosshairOnTile(entry);
         state.lastRockPosition = entry.position;
         state.lastRockName = getMatchingRockName(entry.tile);
@@ -244,7 +211,6 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
         refreshUiValues();
       }
     }, config.crosshairDelayMs);
-
     return true;
   }
 
@@ -258,11 +224,8 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
       refreshUiValues();
       return;
     }
-
     const entry = chooseRandom(rocks);
-    if (usePickOnRock(entry)) {
-      state.lastMineAt = now;
-    }
+    if (usePickOnRock(entry)) state.lastMineAt = now;
     refreshUiValues();
   }
 
@@ -281,14 +244,8 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
     const persistEnabled = options.persistEnabled !== false;
     state.running = false;
     state.using = false;
-    if (state.timerId) {
-      window.clearInterval(state.timerId);
-      state.timerId = null;
-    }
-    if (persistEnabled) {
-      config.enabled = false;
-      persistConfig();
-    }
+    if (state.timerId) { window.clearInterval(state.timerId); state.timerId = null; }
+    if (persistEnabled) { config.enabled = false; persistConfig(); }
     refreshUiValues();
     bot.log("mining stopped");
     return true;
@@ -306,10 +263,11 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
   }
 
   function status() {
-    const rocks = getAdjacentRockTiles();
+    const active = !!config.enabled && !!state.running;
+    const rocks = active ? getAdjacentRockTiles() : [];
     return {
-      running: state.running,
-      using: state.using,
+      running: active,
+      using: active && state.using,
       config: { ...config },
       adjacentRockCount: rocks.length,
       lastRockPosition: state.lastRockPosition,
@@ -342,12 +300,10 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
     const hotkey = document.getElementById(hotkeyId);
     const cooldown = document.getElementById(cooldownId);
     const rockName = document.getElementById(rockNameId);
-
     enabled.addEventListener("change", () => enabled.checked ? start({ enabled: true }) : stop());
     hotkey.addEventListener("input", () => updateConfig({ pickHotbarSlot: hotkey.value }));
     cooldown.addEventListener("input", () => updateConfig({ cooldownMs: cooldown.value }));
     rockName.addEventListener("input", () => updateConfig({ rockNameFilter: rockName.value }));
-
     refreshUiValues();
     return true;
   }
@@ -358,26 +314,26 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
     const cooldown = document.getElementById(cooldownId);
     const rockName = document.getElementById(rockNameId);
     const statusLabel = document.getElementById(statusId);
+    const active = !!config.enabled && !!state.running;
 
-    if (enabled) enabled.checked = !!config.enabled && !!state.running;
+    if (enabled) enabled.checked = active;
     if (hotkey && document.activeElement !== hotkey) hotkey.value = config.pickHotbarSlot == null ? "" : String(config.pickHotbarSlot);
     if (cooldown && document.activeElement !== cooldown) cooldown.value = String(config.cooldownMs);
     if (rockName && document.activeElement !== rockName) rockName.value = config.rockNameFilter;
     if (statusLabel) {
+      if (!active) {
+        statusLabel.textContent = "Status: idle";
+        return;
+      }
       const rocks = getAdjacentRockTiles();
       const last = state.lastRockPosition ? ` last ${state.lastRockName || "rock"} at ${state.lastRockPosition.x},${state.lastRockPosition.y},${state.lastRockPosition.z}` : "";
-      statusLabel.textContent = state.running
-        ? `Status: running, ${rocks.length} adjacent rock${rocks.length === 1 ? "" : "s"}, ${state.lastResult}${state.using ? "..." : ""}${last}`
-        : `Status: idle, ${rocks.length} adjacent rock${rocks.length === 1 ? "" : "s"}`;
+      statusLabel.textContent = `Status: running, ${rocks.length} adjacent rock${rocks.length === 1 ? "" : "s"}, ${state.lastResult}${state.using ? "..." : ""}${last}`;
     }
   }
 
   function destroy() {
     stop({ persistEnabled: false });
-    if (state.uiTimerId) {
-      window.clearInterval(state.uiTimerId);
-      state.uiTimerId = null;
-    }
+    if (state.uiTimerId) { window.clearInterval(state.uiTimerId); state.uiTimerId = null; }
     document.getElementById(sectionId)?.remove();
   }
 
@@ -390,6 +346,5 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
 
   if (config.enabled) start({ enabled: true });
   ensurePanelSection();
-
   return bot.mining;
 };
