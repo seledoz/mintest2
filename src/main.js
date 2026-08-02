@@ -124,7 +124,7 @@
 
   function installPauseBreakToggle(bot) {
     let paused = false;
-    let resumeSnapshot = { cave: false, attack: false, greatFireballV2: false };
+    let resumeSnapshot = { cave: false, attack: false, greatFireballV2: false, lureMode: false };
 
     function isTypingTarget(target) {
       if (!(target instanceof Element)) return false;
@@ -137,7 +137,7 @@
       if (!panel) return;
       panel.dataset.pauseBreakPaused = paused ? "true" : "false";
       panel.style.outline = paused ? "3px solid #d93025" : "";
-      panel.title = paused ? "PAUSED — press Pause/Break to resume Cavebot, Auto Attack, and GFB" : "";
+      panel.title = paused ? "PAUSED — press Pause/Break to resume Cavebot, Auto Attack, GFB, and Lure Mode" : "";
     }
 
     function pause() {
@@ -147,15 +147,17 @@
         cave: !!bot.cave?.status?.().running,
         attack: !!bot.attack?.status?.().running,
         greatFireballV2: !!bot.greatFireballV2?.status?.().running,
+        lureMode: !!bot.lureMode?.status?.().running,
       };
 
       if (resumeSnapshot.cave) bot.cave.stop({ persistEnabled: false });
       if (resumeSnapshot.attack) bot.attack.stop({ persistEnabled: false });
       if (resumeSnapshot.greatFireballV2) bot.greatFireballV2.stop({ persistEnabled: false });
+      if (resumeSnapshot.lureMode) bot.lureMode.stop({ persistEnabled: false });
 
       paused = true;
       updatePanelState();
-      bot.log("Pause/Break paused Cavebot, Auto Attack, and GFB", { ...resumeSnapshot });
+      bot.log("Pause/Break paused Cavebot, Auto Attack, GFB, and Lure Mode", { ...resumeSnapshot });
       return true;
     }
 
@@ -163,12 +165,13 @@
       if (!paused) return false;
       const snapshot = { ...resumeSnapshot };
       paused = false;
-      resumeSnapshot = { cave: false, attack: false, greatFireballV2: false };
+      resumeSnapshot = { cave: false, attack: false, greatFireballV2: false, lureMode: false };
       if (snapshot.cave) bot.cave?.start?.();
       if (snapshot.attack) bot.attack?.start?.();
       if (snapshot.greatFireballV2) bot.greatFireballV2?.start?.();
+      if (snapshot.lureMode) bot.lureMode?.start?.();
       updatePanelState();
-      bot.log("Pause/Break resumed Cavebot, Auto Attack, and GFB", snapshot);
+      bot.log("Pause/Break resumed Cavebot, Auto Attack, GFB, and Lure Mode", snapshot);
       return true;
     }
 
