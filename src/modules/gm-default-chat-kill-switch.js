@@ -4,6 +4,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   const configStorageKey = "minibiaBot.gmKillSwitch.config";
   const config = Object.assign(
     {
+      killSwitchEnabled: true,
       responderEnabled: false,
       responderMessage: "",
       responderDelayMs: 2000,
@@ -12,7 +13,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   );
 
   const state = {
-    running: false,
+    watcherRunning: false,
     timerId: null,
     seenEntryKeys: new Set(),
     panelTimerId: null,
@@ -20,6 +21,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   };
 
   function persistConfig() {
+    config.killSwitchEnabled = !!config.killSwitchEnabled;
     config.responderEnabled = !!config.responderEnabled;
     config.responderMessage = String(config.responderMessage || "").trim();
     config.responderDelayMs = 2000;
@@ -133,12 +135,16 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     }
   }
 
+  function shouldWatch() {
+    return !!config.killSwitchEnabled || !!config.responderEnabled;
+  }
+
   function refreshPanelControls() {
     const killToggle = document.getElementById("minibia-bot-gm-kill-switch-enabled");
     const responderToggle = document.getElementById("minibia-bot-gm-responder-enabled");
     const responderMessage = document.getElementById("minibia-bot-gm-responder-message");
 
-    if (killToggle) killToggle.checked = state.running;
+    if (killToggle) killToggle.checked = !!config.killSwitchEnabled;
     if (responderToggle) responderToggle.checked = !!config.responderEnabled;
     if (responderMessage && responderMessage !== document.activeElement) {
       responderMessage.value = config.responderMessage;
@@ -212,14 +218,27 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     return true;
   }
 
-  function stopAutomationForGmChat(speaker, message) {
-    scheduleResponder(speaker, message);
+  function handleGameMasterChat(speaker, message) {
+    const responderScheduled = scheduleResponder(speaker, message);
+
+    if (!config.killSwitchEnabled) {
+      bot.log("game master detected by responder", {
+        players: [speaker],
+        speaker,
+        message,
+        source: "default-chat",
+        responderScheduled,
+      });
+      return true;
+    }
+
     bot.playAlarm?.();
     bot.log("game master kill switch triggered from Default chat", {
       players: [speaker],
       speaker,
       message,
       source: "default-chat",
+      responderScheduled,
     });
 
     bot.cave?.stop?.();
@@ -228,7 +247,10 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     bot.ui?.refreshAutoAttackStatus?.();
     bot.ui?.refreshCaveStatus?.();
 
-    stop();
+    config.killSwitchEnabled = false;
+    persistConfig();
+    syncWatcher();
+    refreshPanelControls();
     return true;
   }
 
@@ -246,7 +268,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   }
 
   function tick() {
-    if (!state.running) return;
+    if (!state.watcherRunning || !shouldWatch()) return;
 
     const gmNames = new Set((bot.panic?.getGameMasterNames?.() || []).map(normalizeName));
 
@@ -258,35 +280,57 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
       const speaker = getEntrySpeaker(item.entry, item.message);
       if (!speaker || !isConfiguredGameMaster(item.entry, speaker, gmNames)) continue;
 
-      stopAutomationForGmChat(speaker, item.message);
-      return;
+      handleGameMasterChat(speaker, item.message);
+      if (!state.watcherRunning || !shouldWatch()) return;
     }
 
     state.timerId = window.setTimeout(tick, 1000);
   }
 
-  function start() {
-    if (state.running) return false;
-    state.running = true;
+  function startWatcher() {
+    if (state.watcherRunning) return false;
+    state.watcherRunning = true;
     rememberExistingEntries();
     tick();
-    refreshPanelControls();
-    bot.log("GM Default chat kill switch watcher started");
+    bot.log("GM Default chat watcher started");
     return true;
   }
 
-  function stop() {
-    if (!state.running && state.timerId == null) {
-      refreshPanelControls();
-      return false;
-    }
-    state.running = false;
+  function stopWatcher() {
+    if (!state.watcherRunning && state.timerId == null) return false;
+    state.watcherRunning = false;
     if (state.timerId != null) {
       window.clearTimeout(state.timerId);
       state.timerId = null;
     }
+    bot.log("GM Default chat watcher stopped");
+    return true;
+  }
+
+  function syncWatcher() {
+    if (shouldWatch()) startWatcher();
+    else stopWatcher();
     refreshPanelControls();
-    bot.log("GM Default chat kill switch watcher stopped");
+  }
+
+  function start() {
+    if (config.killSwitchEnabled) return false;
+    config.killSwitchEnabled = true;
+    persistConfig();
+    syncWatcher();
+    bot.log("GM kill switch enabled");
+    return true;
+  }
+
+  function stop() {
+    if (!config.killSwitchEnabled) {
+      refreshPanelControls();
+      return false;
+    }
+    config.killSwitchEnabled = false;
+    persistConfig();
+    syncWatcher();
+    bot.log("GM kill switch disabled");
     return true;
   }
 
@@ -298,7 +342,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
       config.responderMessage = String(nextConfig.responderMessage || "").trim();
     }
     persistConfig();
-    refreshPanelControls();
+    syncWatcher();
     return { ...config };
   }
 
@@ -392,12 +436,16 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     start,
     stop,
     stopAlarm: stopGmAlarm,
-    status: () => ({ running: state.running, config: { ...config } }),
+    status: () => ({
+      running: !!config.killSwitchEnabled,
+      watcherRunning: state.watcherRunning,
+      config: { ...config },
+    }),
     updateResponderConfig,
     injectPanelControl,
   };
 
-  start();
+  syncWatcher();
 
   let panelAttempts = 0;
   state.panelTimerId = window.setInterval(() => {
