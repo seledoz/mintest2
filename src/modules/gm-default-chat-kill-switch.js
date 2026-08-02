@@ -18,6 +18,8 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     seenEntryKeys: new Set(),
     panelTimerId: null,
     pendingReplyTimerIds: new Set(),
+    responderPending: false,
+    responderNextAvailableAt: 0,
   };
 
   function persistConfig() {
@@ -173,21 +175,29 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
 
   function scheduleResponder(speaker, message) {
     const reply = String(config.responderMessage || "").trim();
-    if (!config.responderEnabled || !reply) return false;
+    if (!config.responderEnabled || !reply || state.responderPending) return false;
+
+    const now = Date.now();
+    const cooldownDelay = Math.max(0, state.responderNextAvailableAt - now);
+    const delayMs = Math.max(2000, cooldownDelay);
+    state.responderPending = true;
 
     const timerId = window.setTimeout(() => {
       state.pendingReplyTimerIds.delete(timerId);
+      state.responderPending = false;
       const sent = sendReply(reply);
+      if (sent) state.responderNextAvailableAt = Date.now() + 5000;
       bot.log(sent ? "GM responder sent reply" : "GM responder failed to send reply", {
         speaker,
         message,
         reply,
-        delayMs: 2000,
+        delayMs,
+        cooldownMs: 5000,
       });
-    }, 2000);
+    }, delayMs);
 
     state.pendingReplyTimerIds.add(timerId);
-    bot.log("GM responder scheduled reply", { speaker, reply, delayMs: 2000 });
+    bot.log("GM responder scheduled reply", { speaker, reply, delayMs, cooldownMs: 5000 });
     return true;
   }
 
@@ -354,7 +364,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
             <span class="mb-field-label">GM Auto Reply</span>
             <textarea id="minibia-bot-gm-responder-message" placeholder="Message sent 2 seconds after a GM speaks"></textarea>
           </label>
-          <div class="mb-small-note">Responder delay: 2 seconds</div>
+          <div class="mb-small-note">First reply: 2 seconds • following replies: at least 5 seconds apart</div>
         </div>
       `;
       githubSection.insertAdjacentElement("afterend", section);
@@ -402,6 +412,8 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     status: () => ({
       running: !!config.killSwitchEnabled,
       watcherRunning: state.watcherRunning,
+      responderPending: state.responderPending,
+      responderNextAvailableAt: state.responderNextAvailableAt,
       config: { ...config },
     }),
     updateResponderConfig,
@@ -424,5 +436,6 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     if (state.timerId != null) window.clearTimeout(state.timerId);
     for (const timerId of state.pendingReplyTimerIds) window.clearTimeout(timerId);
     state.pendingReplyTimerIds.clear();
+    state.responderPending = false;
   });
 };
