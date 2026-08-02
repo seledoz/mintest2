@@ -2,16 +2,13 @@
   const MODERN_BLANK_RUNE_ID = 3147;
   const MODERN_RUNE_ID_MIN = 3148;
   const MODERN_RUNE_ID_MAX = 3200;
-  const SCAN_MS = 500;
-
-  let scanTimerId = null;
-  let attachedBot = null;
 
   function getItem(container, slot) {
     try {
       return container?.peekItem?.(slot) ||
         container?.getSlotItem?.(slot) ||
         container?.slots?.[slot]?.item ||
+        container?.slots?.[slot] ||
         null;
     } catch (_) {
       return null;
@@ -40,108 +37,72 @@
         ? opened
         : typeof opened.values === "function"
           ? Array.from(opened.values())
-          : Object.values(opened);
+          : typeof opened[Symbol.iterator] === "function"
+            ? Array.from(opened)
+            : Object.values(opened);
       values.forEach(add);
     }
 
     return containers;
   }
 
+  function ensureContainerCompatibility(container) {
+    if (!container || typeof container.getSlotItem === "function" || typeof container.peekItem !== "function") return;
+    try {
+      container.getSlotItem = (slot) => container.peekItem(slot);
+    } catch (_) {}
+  }
+
   function markModernRunes() {
     for (const container of getContainers()) {
-      const slotCount = Number(container?.slots?.length ?? container?.size ?? 0);
+      ensureContainerCompatibility(container);
+      const slotCount = Number(
+        container?.slots?.length ??
+        container?.size ??
+        container?.capacity ??
+        container?.slotCount ??
+        container?.getSize?.() ??
+        40
+      );
+
       for (let slot = 0; slot < slotCount; slot += 1) {
         const item = getItem(container, slot);
-        const id = Number(item?.id);
+        const id = Number(
+          item?.getId?.() ??
+          item?.getID?.() ??
+          item?.id ??
+          item?.itemId ??
+          item?.itemID ??
+          item?.type?.id ??
+          item?.data?.id
+        );
         if (!item || !Number.isFinite(id)) continue;
 
         if (id === MODERN_BLANK_RUNE_ID) {
-          item.name = "blank rune";
+          try { item.name = "blank rune"; } catch (_) {}
         } else if (id >= MODERN_RUNE_ID_MIN && id <= MODERN_RUNE_ID_MAX) {
-          item.name = item.name || "rune";
+          try { item.name = item.name || "rune"; } catch (_) {}
         }
       }
     }
   }
 
-  function scannerEnabled() {
-    return !!attachedBot?.runeMakerDrop?.config?.enabled;
-  }
+  markModernRunes();
+  const timerId = window.setInterval(markModernRunes, 500);
 
-  function stopScanner() {
-    if (scanTimerId != null) window.clearTimeout(scanTimerId);
-    scanTimerId = null;
-  }
-
-  function scheduleScanner() {
-    if (!scannerEnabled() || scanTimerId != null) return;
-
-    scanTimerId = window.setTimeout(() => {
-      scanTimerId = null;
-      if (!scannerEnabled()) return;
-      markModernRunes();
-      scheduleScanner();
-    }, SCAN_MS);
-  }
-
-  function syncScanner() {
-    if (!scannerEnabled()) {
-      stopScanner();
+  let cleanupAttempts = 0;
+  const cleanupTimerId = window.setInterval(() => {
+    cleanupAttempts += 1;
+    const bot = window.minibiaBot;
+    if (!bot?.addCleanup) {
+      if (cleanupAttempts >= 40) window.clearInterval(cleanupTimerId);
       return;
     }
-
-    markModernRunes();
-    scheduleScanner();
-  }
-
-  function attach() {
-    const bot = window.minibiaBot;
-    const runeDrop = bot?.runeMakerDrop;
-    if (!bot || !runeDrop) return false;
-
-    attachedBot = bot;
-
-    if (!runeDrop.__modernRuneScannerGateInstalled) {
-      runeDrop.__modernRuneScannerGateInstalled = true;
-
-      const originalStart = runeDrop.start?.bind(runeDrop);
-      const originalStop = runeDrop.stop?.bind(runeDrop);
-      const originalUpdateConfig = runeDrop.updateConfig?.bind(runeDrop);
-
-      runeDrop.start = (...args) => {
-        const result = originalStart?.(...args);
-        syncScanner();
-        return result;
-      };
-
-      runeDrop.stop = (...args) => {
-        const result = originalStop?.(...args);
-        stopScanner();
-        return result;
-      };
-
-      runeDrop.updateConfig = (...args) => {
-        const result = originalUpdateConfig?.(...args);
-        syncScanner();
-        return result;
-      };
-
-      bot.addCleanup?.(() => stopScanner());
-    }
-
-    syncScanner();
-    return true;
-  }
-
-  let attempts = 0;
-  const attachTimerId = window.setInterval(() => {
-    attempts += 1;
-    if (attach() || attempts >= 40) window.clearInterval(attachTimerId);
+    window.clearInterval(cleanupTimerId);
+    bot.addCleanup(() => window.clearInterval(timerId));
   }, 250);
 
-  attach();
-
-  console.log("[minibia-bot] modern rune scanner runs only while Rune Maker Drop is enabled", {
+  console.log("[minibia-bot] Rune Maker Drop container compatibility enabled", {
     blankRune: MODERN_BLANK_RUNE_ID,
     runeRange: [MODERN_RUNE_ID_MIN, MODERN_RUNE_ID_MAX],
   });
