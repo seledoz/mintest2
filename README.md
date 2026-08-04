@@ -80,3 +80,26 @@ Use a fine-grained GitHub token with read and write access to the repository con
   window.eval(await response.text());
 })();
 ```
+
+## GitHub token identity test
+
+Run this in the browser developer console. The token is entered only into the prompt and is not saved by this code.
+
+```js
+(async () => {
+  const token = prompt("Paste the new token")?.trim();
+  if (!token) return;
+
+  const response = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    cache: "no-store",
+  });
+
+  console.log("Status:", response.status, response.statusText);
+  console.log(await response.text());
+})();
+```
