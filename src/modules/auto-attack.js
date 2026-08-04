@@ -26,7 +26,8 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       runeHotbarSlot: null,
       targetCooldownMs: 1200,
       runeCooldownMs: 1200,
-      maxTargetDistance: 5,
+      maxTargetDistanceX: 7,
+      maxTargetDistanceY: 5,
       meleeMode: true,
       enabled: false,
     },
@@ -100,6 +101,18 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       Math.abs(Number(from.x) - Number(to.x)),
       Math.abs(Number(from.y) - Number(to.y))
     );
+  }
+
+  function isInTargetRange(from, to) {
+    if (!from || !to || Number(from.z) !== Number(to.z)) {
+      return false;
+    }
+
+    const maxTargetDistanceX = Math.max(1, Number(config.maxTargetDistanceX) || 7);
+    const maxTargetDistanceY = Math.max(1, Number(config.maxTargetDistanceY) || 5);
+    const dx = Math.abs(Number(from.x) - Number(to.x));
+    const dy = Math.abs(Number(from.y) - Number(to.y));
+    return dx <= maxTargetDistanceX && dy <= maxTargetDistanceY;
   }
 
   function isSameCreature(left, right) {
@@ -317,7 +330,13 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
 
     const playerPosition = normalizePosition(bot.getPlayerPosition());
     return getNearbyMonsters()
-      .filter((monster) => !isTargetSkipped(monster, now))
+      .filter((monster) => {
+        if (isTargetSkipped(monster, now)) {
+          return false;
+        }
+        const monsterPosition = normalizePosition(monster?.getPosition?.() || monster?.__position);
+        return isInTargetRange(playerPosition, monsterPosition);
+      })
       .sort((left, right) => {
         const leftDistance = getTileDistance(playerPosition, normalizePosition(left?.getPosition?.() || left?.__position));
         const rightDistance = getTileDistance(playerPosition, normalizePosition(right?.getPosition?.() || right?.__position));
@@ -326,37 +345,38 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function shouldGiveUpTarget(target) {
-    const maxTargetDistance = Math.max(1, Number(config.maxTargetDistance) || 5);
     const playerPosition = normalizePosition(bot.getPlayerPosition());
     const targetPosition = normalizePosition(target?.getPosition?.() || target?.__position);
     if (!playerPosition || !targetPosition) {
       return false;
     }
 
-    return getTileDistance(playerPosition, targetPosition) > maxTargetDistance;
+    return !isInTargetRange(playerPosition, targetPosition);
   }
 
   function resetTargetIfTooFar() {
     const currentTarget = getCurrentTarget();
     if (currentTarget && shouldGiveUpTarget(currentTarget)) {
-      skipTarget(currentTarget, "target too far", Date.now(), 2500);
+      skipTarget(currentTarget, "target outside rectangular range", Date.now(), 2500);
       bot.log("gave up distant auto attack target", {
         id: currentTarget.id,
         name: currentTarget.name || "Mob",
         position: normalizePosition(currentTarget.getPosition?.() || currentTarget.__position),
-        maxTargetDistance: Math.max(1, Number(config.maxTargetDistance) || 5),
+        maxTargetDistanceX: Math.max(1, Number(config.maxTargetDistanceX) || 7),
+        maxTargetDistanceY: Math.max(1, Number(config.maxTargetDistanceY) || 5),
       });
       return true;
     }
 
     const engagedTarget = getEngagedTarget();
     if (engagedTarget && shouldGiveUpTarget(engagedTarget)) {
-      skipTarget(engagedTarget, "engaged target too far", Date.now(), 2500);
+      skipTarget(engagedTarget, "engaged target outside rectangular range", Date.now(), 2500);
       bot.log("gave up distant auto attack target", {
         id: engagedTarget.id,
         name: engagedTarget.name || "Mob",
         position: normalizePosition(engagedTarget.getPosition?.() || engagedTarget.__position),
-        maxTargetDistance: Math.max(1, Number(config.maxTargetDistance) || 5),
+        maxTargetDistanceX: Math.max(1, Number(config.maxTargetDistanceX) || 7),
+        maxTargetDistanceY: Math.max(1, Number(config.maxTargetDistanceY) || 5),
       });
       return true;
     }
@@ -541,7 +561,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       return getMonsterCandidates(now).length > 0 && !getCurrentTarget();
     }
 
-    return getNearbyMonsters().length > 0;
+    return getMonsterCandidates(now).length > 0;
   }
 
   function triggerAttack(now = Date.now()) {
@@ -550,7 +570,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
     }
 
     const engagedTarget = getEngagedTarget();
-    const preferredTarget = engagedTarget && !isTargetSkipped(engagedTarget, now)
+    const preferredTarget = engagedTarget && !isTargetSkipped(engagedTarget, now) && !shouldGiveUpTarget(engagedTarget)
       ? engagedTarget
       : (getMonsterCandidates(now)[0] || null);
     if (preferredTarget && setCurrentTarget(preferredTarget)) {
@@ -571,7 +591,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
     const slot = normalizeHotbarSlot(config.targetHotbarSlot);
     const clicked = bot.clickHotbar(slot - 1);
     if (clicked) {
-      const monsters = getNearbyMonsters();
+      const monsters = getMonsterCandidates(now);
       state.lastTargetHotkeyAt = now;
       markCombatActive(now);
       bot.log("used auto attack target hotkey", {
@@ -624,7 +644,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
     const playerPos = normalizePosition(bot.getPlayerPosition());
 
     if (resetTargetIfTooFar()) {
-      bot.logDebug("auto attack no valid targets near enough");
+      bot.logDebug("auto attack no valid targets in rectangular range");
       return true;
     }
 
@@ -647,7 +667,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       return triggerRune(now);
     }
 
-    const nearbyCount = getNearbyMonsters().length;
+    const nearbyCount = getMonsterCandidates(now).length;
     const attacked = triggerAttack(now);
     bot.logDebug("auto attack trigger", {
       attacked,
@@ -745,7 +765,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
             position: getCurrentTarget().__position || null,
           }
         : null,
-      nearbyMonsters: getNearbyMonsters().map((creature) => ({
+      nearbyMonsters: getMonsterCandidates().map((creature) => ({
         id: creature.id,
         name: creature.name,
         type: creature.type,
@@ -764,7 +784,18 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
     }
 
     if (Object.prototype.hasOwnProperty.call(nextConfig, "maxTargetDistance")) {
-      nextConfig.maxTargetDistance = Math.max(1, Math.trunc(Number(nextConfig.maxTargetDistance) || config.maxTargetDistance || 8));
+      const legacyDistance = Math.max(1, Math.trunc(Number(nextConfig.maxTargetDistance) || 0));
+      nextConfig.maxTargetDistanceX = legacyDistance;
+      nextConfig.maxTargetDistanceY = legacyDistance;
+      delete nextConfig.maxTargetDistance;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "maxTargetDistanceX")) {
+      nextConfig.maxTargetDistanceX = Math.max(1, Math.trunc(Number(nextConfig.maxTargetDistanceX) || config.maxTargetDistanceX || 7));
+    }
+
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "maxTargetDistanceY")) {
+      nextConfig.maxTargetDistanceY = Math.max(1, Math.trunc(Number(nextConfig.maxTargetDistanceY) || config.maxTargetDistanceY || 5));
     }
 
     Object.assign(config, nextConfig);
