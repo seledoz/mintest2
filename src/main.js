@@ -150,10 +150,14 @@
         lureMode: !!bot.lureMode?.status?.().running,
       };
 
-      if (resumeSnapshot.cave) bot.cave.stop({ persistEnabled: false });
-      if (resumeSnapshot.attack) bot.attack.stop({ persistEnabled: false });
-      if (resumeSnapshot.greatFireballV2) bot.greatFireballV2.stop({ persistEnabled: false });
+      // Stop Lure Mode first because its cleanup may resume Cavebot.
       if (resumeSnapshot.lureMode) bot.lureMode.stop({ persistEnabled: false });
+      if (resumeSnapshot.greatFireballV2) bot.greatFireballV2.stop({ persistEnabled: false });
+      if (resumeSnapshot.attack) bot.attack.stop({ persistEnabled: false });
+      // Keep Cavebot last so nothing can restart it after Pause/Break.
+      if (resumeSnapshot.cave || bot.cave?.status?.().running) {
+        bot.cave.stop({ persistEnabled: false });
+      }
 
       paused = true;
       updatePanelState();
