@@ -103,3 +103,29 @@ Run this in the browser developer console. The token is entered only into the pr
   console.log(await response.text());
 })();
 ```
+
+## Private repository access test
+
+Run this in the browser developer console using the same token.
+
+```js
+(async () => {
+  const token = prompt("Paste the same token")?.trim();
+  if (!token) return;
+
+  const response = await fetch(
+    "https://api.github.com/repos/seledoz/mintest2/contents/pz-bot.js?ref=main",
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github.raw+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+      cache: "no-store",
+    }
+  );
+
+  console.log("Status:", response.status, response.statusText);
+  console.log(await response.text());
+})();
+```
