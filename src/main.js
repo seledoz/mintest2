@@ -221,7 +221,12 @@
     currentBundle.installAutoInvisibleModule(bot);
     currentBundle.installAutoMagicShieldModule(bot);
     currentBundle.installAutoAttackModule(bot);
-    bot.attack?.updateConfig?.({ enabled: false, maxTargetDistance: 7, runeCooldownMs: 2000 });
+    bot.attack?.updateConfig?.({
+      enabled: false,
+      maxTargetDistanceX: 7,
+      maxTargetDistanceY: 5,
+      runeCooldownMs: 2000,
+    });
     bot.attack?.stop?.();
     currentBundle.installAutoAttackExcludeModule?.(bot);
     currentBundle.installAutoAttackAoeModule?.(bot);
@@ -281,7 +286,7 @@
       caveForwardLoop: bot.caveForwardLoop?.status?.() || null,
       caveArrowKeys: bot.caveArrowKeys?.status?.() || null,
       githubWaypointLibrary: bot.githubWaypointLibrary ? { path: bot.githubWaypointLibrary.path } : null,
-      equipRing: bot.equipRing.status(),
+      equipRing: bot.ring?.status?.() || bot.equipRing?.status?.() || null,
       mining: bot.mining?.status?.() || null,
       eat: bot.eat.status(),
       talk: bot.talk.status(),
