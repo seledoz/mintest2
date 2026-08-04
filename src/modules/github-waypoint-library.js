@@ -2,7 +2,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
 window.__minibiaBotBundle.installGithubWaypointLibraryModule = function installGithubWaypointLibraryModule(bot) {
   const repoOwner = "seledoz";
-  const repoName = "Min-new";
+  const repoName = "mintest2";
   const branch = "main";
   const waypointDirectory = "waypoints";
   const tokenStorageKey = "minibiaBot.github.token";
