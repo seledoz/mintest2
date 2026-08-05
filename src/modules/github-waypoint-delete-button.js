@@ -50,11 +50,7 @@
     const response = await fetch(`${API_BASE}/${encodePath(path)}`, {
       method: "DELETE",
       headers: headers(token),
-      body: JSON.stringify({
-        message: `Delete waypoint script: ${name}`,
-        sha,
-        branch: BRANCH,
-      }),
+      body: JSON.stringify({ message: `Delete waypoint script: ${name}`, sha, branch: BRANCH }),
     });
     if (!response.ok) {
       let detail = "";
@@ -84,9 +80,7 @@
     if (refreshButton) refreshButton.insertAdjacentElement("beforebegin", button);
     else section.querySelector(".mb-stack")?.appendChild(button);
 
-    const syncDisabled = () => {
-      button.disabled = !select.value || select.disabled;
-    };
+    const syncDisabled = () => { button.disabled = !select.value || select.disabled; };
     select.addEventListener("change", syncDisabled);
     syncDisabled();
 
@@ -94,13 +88,8 @@
       const path = String(select.value || "").trim();
       const name = selectedName(select);
       if (!path) return;
-
       const token = getToken();
-      if (!token) {
-        setStatus("Save GitHub Setup first");
-        return;
-      }
-
+      if (!token) { setStatus("Save GitHub Setup first"); return; }
       if (!window.confirm(`Delete GitHub waypoint script “${name}”?\n\nThis cannot be undone.`)) return;
 
       button.disabled = true;
@@ -118,7 +107,6 @@
         syncDisabled();
       }
     });
-
     return true;
   }
 
@@ -132,34 +120,69 @@
 
 (() => {
   let attempts = 0;
-  let lastBot = null;
+  let installedBot = null;
+
+  function findCaveSection(panel) {
+    const caveControl =
+      document.getElementById("minibia-bot-cave-status") ||
+      document.getElementById("minibia-bot-cave-start") ||
+      document.getElementById("minibia-bot-cave-enabled");
+    const directSection = caveControl?.closest?.(".mb-section");
+    if (directSection) return directSection;
+
+    const caveLabel = Array.from(panel.querySelectorAll(".mb-label")).find((label) =>
+      /cavebot|cave bot|cave/i.test(String(label.textContent || "").trim())
+    );
+    return caveLabel?.closest?.(".mb-section") || null;
+  }
+
+  function positionBelowCavebot(panel) {
+    const profilesSection = document.getElementById("minibia-bot-profiles-section");
+    if (!profilesSection) return false;
+    const caveSection = findCaveSection(panel);
+    if (caveSection && caveSection.nextElementSibling !== profilesSection) {
+      caveSection.insertAdjacentElement("afterend", profilesSection);
+    }
+    profilesSection.style.display = "";
+    profilesSection.hidden = false;
+    return true;
+  }
 
   function installProfilesPanel() {
     const bot = window.minibiaBot;
     const panel = document.getElementById("minibia-bot-panel");
     const installer = window.__minibiaBotBundle?.installProfilesModule;
-
     if (!bot || !panel || typeof installer !== "function") return false;
 
-    if (bot !== lastBot || !bot.profiles || !document.getElementById("minibia-bot-profiles-section")) {
-      lastBot = bot;
+    let section = document.getElementById("minibia-bot-profiles-section");
+    if (!section) {
+      // A previous failed install can leave bot.profiles set, which makes the
+      // installer return early without creating the panel. Clear only that
+      // runtime reference and reinstall; saved profiles remain in localStorage.
+      if (bot.profiles) delete bot.profiles;
       try {
         installer(bot);
+        installedBot = bot;
       } catch (error) {
-        console.error("[minibia-bot] profiles panel post-main install failed", error);
+        console.error("[minibia-bot] profiles panel forced install failed", error);
         return false;
       }
+      section = document.getElementById("minibia-bot-profiles-section");
     }
 
-    return !!document.getElementById("minibia-bot-profiles-section");
+    if (section) return positionBelowCavebot(panel);
+    return false;
   }
 
-  if (installProfilesPanel()) return;
+  const observer = new MutationObserver(() => installProfilesPanel());
+  observer.observe(document.documentElement, { childList: true, subtree: true });
 
   const timer = window.setInterval(() => {
     attempts += 1;
-    if (installProfilesPanel() || attempts >= 200) {
+    const ready = installProfilesPanel();
+    if (ready || attempts >= 300) {
       window.clearInterval(timer);
+      observer.disconnect();
     }
   }, 100);
 })();
