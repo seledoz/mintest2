@@ -43,6 +43,7 @@
     "src/ui/panel.js",
     "src/modules/panel-scroll.js",
     "src/modules/github-waypoint-library.js",
+    "src/modules/profiles.js",
     "src/main.js",
     "src/modules/remove-legacy-great-fireball.js",
     "src/modules/anti-paralyze-toggle-fix.js",
