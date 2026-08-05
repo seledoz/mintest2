@@ -178,6 +178,34 @@
         );
     }
 
+    if (path === "src/modules/lure-mode.js") {
+      code = code
+        .replace(
+          "    nextMode2StepAt: 0,\n",
+          "    nextMode2StepAt: 0,\n    mode2StepStartPosition: null,\n    mode2WaitingForStep: false,\n"
+        )
+        .replace(
+          `      if (status.mode === 2 && status.luring) {\n        state.nextMode2StepAt = Date.now() + status.stepDelayMs;\n        return limitPathToOneStep(path);\n      }`,
+          `      if (status.mode === 2 && status.luring) {\n        const startPosition = playerPos();\n        state.mode2StepStartPosition = startPosition;\n        state.mode2WaitingForStep = !!startPosition;\n        return limitPathToOneStep(path);\n      }`
+        )
+        .replace(
+          `    state.lastStatus = status;\n\n    if (state.clearingPack`,
+          `    state.lastStatus = status;\n\n    if (status.mode === 2 && status.luring && state.mode2WaitingForStep) {\n      const currentPosition = playerPos();\n      const startPosition = state.mode2StepStartPosition;\n      if (currentPosition && startPosition && dist(currentPosition, startPosition) >= 1) {\n        stopCurrentPath();\n        state.nextMode2StepAt = Date.now() + status.stepDelayMs;\n        state.mode2WaitingForStep = false;\n        state.mode2StepStartPosition = null;\n        status = getLureStatus();\n        state.lastStatus = status;\n        bot.log?.(\"lure mode 2 completed paced step\", {\n          stepDelayMs: status.stepDelayMs,\n          nextStepAt: state.nextMode2StepAt,\n          farthestDistance: status.farthestDistance,\n          maxDistance: status.maxDistance,\n        });\n      }\n    }\n\n    if (state.clearingPack`
+        )
+        .replace(
+          `    state.nextMode2StepAt = 0;\n    patchPathfinder();`,
+          `    state.nextMode2StepAt = 0;\n    state.mode2StepStartPosition = null;\n    state.mode2WaitingForStep = false;\n    patchPathfinder();`
+        )
+        .replace(
+          `    state.nextMode2StepAt = 0;\n    state.lastStatus = getOffStatus();`,
+          `    state.nextMode2StepAt = 0;\n    state.mode2StepStartPosition = null;\n    state.mode2WaitingForStep = false;\n    state.lastStatus = getOffStatus();`
+        )
+        .replace(
+          `      state.nextMode2StepAt = 0;\n    }`,
+          `      state.nextMode2StepAt = 0;\n      state.mode2StepStartPosition = null;\n      state.mode2WaitingForStep = false;\n    }`
+        );
+    }
+
     if (path === "src/ui/panel.js") {
       code = code.replace(
         `  function refreshVisibleCreatures() {\n    const list = document.getElementById("minibia-bot-visible-creatures-list");\n    if (!list) return;`,
