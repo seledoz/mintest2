@@ -54,6 +54,7 @@
     "src/modules/xray-overlay-floor-mode.js",
     "src/modules/rune-maker-drop-inspector.js",
     "src/modules/github-waypoint-delete-button.js",
+    "src/modules/profile-dropdown-selection-fix.js",
   ];
 
   function installUiCompatibilityShim() {
