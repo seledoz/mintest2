@@ -129,3 +129,37 @@
     if (injectDeleteButton() || attempts >= 80) window.clearInterval(timer);
   }, 250);
 })();
+
+(() => {
+  let attempts = 0;
+  let lastBot = null;
+
+  function installProfilesPanel() {
+    const bot = window.minibiaBot;
+    const panel = document.getElementById("minibia-bot-panel");
+    const installer = window.__minibiaBotBundle?.installProfilesModule;
+
+    if (!bot || !panel || typeof installer !== "function") return false;
+
+    if (bot !== lastBot || !bot.profiles || !document.getElementById("minibia-bot-profiles-section")) {
+      lastBot = bot;
+      try {
+        installer(bot);
+      } catch (error) {
+        console.error("[minibia-bot] profiles panel post-main install failed", error);
+        return false;
+      }
+    }
+
+    return !!document.getElementById("minibia-bot-profiles-section");
+  }
+
+  if (installProfilesPanel()) return;
+
+  const timer = window.setInterval(() => {
+    attempts += 1;
+    if (installProfilesPanel() || attempts >= 200) {
+      window.clearInterval(timer);
+    }
+  }, 100);
+})();
