@@ -3,7 +3,6 @@
   const SECTION_ID = "minibia-bot-github-waypoints-section";
   const SELECT_ID = "minibia-bot-github-waypoints-select";
   const STATUS_ID = "minibia-bot-github-waypoints-status";
-  const TOKEN_KEY = "minibiaBot.github.token";
   const REPO_OWNER = "seledoz";
   const REPO_NAME = "mintest2";
   const BRANCH = "main";
@@ -14,14 +13,25 @@
     if (label) label.textContent = `GitHub: ${message}`;
   }
 
+  function getLibrary() {
+    return window.minibiaBot?.githubWaypointLibrary || null;
+  }
+
   function getToken() {
-    try {
-      const raw = window.localStorage.getItem(TOKEN_KEY);
-      if (!raw) return "";
-      try { return String(JSON.parse(raw) || "").trim(); } catch (error) { return String(raw || "").trim(); }
-    } catch (error) {
-      return "";
+    return String(getLibrary()?.getToken?.() || "").trim();
+  }
+
+  function requireFreshSetup(message) {
+    const library = getLibrary();
+    library?.setToken?.("");
+    const setup = document.getElementById("minibia-bot-github-waypoints-setup");
+    if (setup) setup.hidden = false;
+    const input = document.getElementById("minibia-bot-github-waypoints-token");
+    if (input) {
+      input.value = "";
+      input.focus();
     }
+    setStatus(message);
   }
 
   function encodePath(path) {
@@ -37,12 +47,25 @@
     };
   }
 
+  async function responseDetail(response) {
+    try {
+      return String((await response.json())?.message || "").trim();
+    } catch (error) {
+      return "";
+    }
+  }
+
   async function readFile(path, token) {
     const response = await fetch(`${API_BASE}/${encodePath(path)}?ref=${encodeURIComponent(BRANCH)}`, {
       headers: headers(token),
       cache: "no-store",
     });
-    if (!response.ok) throw new Error(`read failed (${response.status})`);
+    if (!response.ok) {
+      const detail = await responseDetail(response);
+      const error = new Error(`read failed (${response.status})${detail ? ` - ${detail}` : ""}`);
+      error.status = response.status;
+      throw error;
+    }
     return response.json();
   }
 
@@ -53,9 +76,10 @@
       body: JSON.stringify({ message: `Delete waypoint script: ${name}`, sha, branch: BRANCH }),
     });
     if (!response.ok) {
-      let detail = "";
-      try { detail = (await response.json())?.message || ""; } catch (error) {}
-      throw new Error(`delete failed (${response.status})${detail ? ` - ${detail}` : ""}`);
+      const detail = await responseDetail(response);
+      const error = new Error(`delete failed (${response.status})${detail ? ` - ${detail}` : ""}`);
+      error.status = response.status;
+      throw error;
     }
   }
 
@@ -89,7 +113,10 @@
       const name = selectedName(select);
       if (!path) return;
       const token = getToken();
-      if (!token) { setStatus("Save GitHub Setup first"); return; }
+      if (!token) {
+        requireFreshSetup("Save GitHub Setup first");
+        return;
+      }
       if (!window.confirm(`Delete GitHub waypoint script “${name}”?\n\nThis cannot be undone.`)) return;
 
       button.disabled = true;
@@ -99,9 +126,15 @@
         if (!file?.sha) throw new Error("file SHA missing");
         await deleteFile(path, name, file.sha, token);
         setStatus(`deleted ${name}`);
-        await window.minibiaBot?.githubWaypointLibrary?.refreshUi?.();
+        await getLibrary()?.refreshUi?.();
       } catch (error) {
-        setStatus(error?.message || String(error));
+        if (error?.status === 401) {
+          requireFreshSetup("token rejected (401) — enter a new GitHub token");
+        } else if (error?.status === 403) {
+          setStatus("token needs Contents read/write permission (403)");
+        } else {
+          setStatus(error?.message || String(error));
+        }
         console.error("[minibia-bot] GitHub waypoint delete failed", error);
       } finally {
         syncDisabled();
