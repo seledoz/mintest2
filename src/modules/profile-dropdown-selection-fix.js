@@ -1,74 +1,28 @@
 (() => {
   const SELECT_ID = "minibia-bot-profile-select";
-
-  function installFix() {
-    const select = document.getElementById(SELECT_ID);
-    if (!select) return false;
-    if (select.dataset.profileSelectionFix === "true") return true;
-
-    select.dataset.profileSelectionFix = "true";
-
-    select.addEventListener("change", (event) => {
-      event.stopImmediatePropagation();
-
-      const selected = String(select.value || "").trim();
-      const disabled = !selected;
-      ["save", "load", "delete"].forEach((action) => {
-        const button = document.getElementById(`minibia-bot-profile-${action}`);
-        if (button) button.disabled = disabled;
-      });
-
-      const status = document.getElementById("minibia-bot-profile-status");
-      const active = window.localStorage.getItem("minibiaBot.profiles.active") || "";
-      if (status) {
-        status.textContent = selected
-          ? selected === active
-            ? `Active profile: ${selected}`
-            : `Selected profile: ${selected} — press Load to activate`
-          : "Select a profile, then Load or Save.";
-      }
-    }, true);
-
-    return true;
-  }
-
-  installFix();
-  let attempts = 0;
-  const timer = window.setInterval(() => {
-    attempts += 1;
-    if (installFix() || attempts >= 600) window.clearInterval(timer);
-  }, 100);
-})();
-
-(() => {
-  const SELECT_ID = "minibia-bot-profile-select";
   const LOAD_ID = "minibia-bot-profile-load";
   const STATUS_ID = "minibia-bot-profile-status";
   const PROFILES_KEY = "minibiaBot.profiles.v2";
   const ACTIVE_KEY = "minibiaBot.profiles.active";
 
-  function isLayoutKey(key) {
-    const value = String(key || "");
-    return value.startsWith("minibiaBot.ui.") ||
-      value.includes("panelPosition") ||
-      value.includes("panelCollapsed") ||
-      value.includes("panelScroll") ||
-      value.includes("scrollPosition") ||
-      value.includes("sectionOrder") ||
-      value.includes("columnOrder");
-  }
-
-  function isProfileControlKey(key) {
-    return key === PROFILES_KEY ||
-      key === "minibiaBot.profiles.v1" ||
-      key === ACTIVE_KEY ||
-      key === "minibiaBot.github.token";
-  }
-
-  function isFeatureSettingKey(key) {
-    return String(key || "").startsWith("minibiaBot.") &&
-      !isProfileControlKey(key) &&
-      !isLayoutKey(key);
+  function isLayoutOrRuntimeKey(key) {
+    const value = String(key || "").toLowerCase();
+    return (
+      value === PROFILES_KEY.toLowerCase() ||
+      value === "minibiabot.profiles.v1" ||
+      value === ACTIVE_KEY.toLowerCase() ||
+      value === "minibiabot.github.token" ||
+      value.includes("minibiabot.ui") ||
+      value.includes("panel") ||
+      value.includes("layout") ||
+      value.includes("position") ||
+      value.includes("scroll") ||
+      value.includes("collapse") ||
+      value.includes("column") ||
+      value.includes("sectionorder") ||
+      value.includes("moduleorder") ||
+      value.includes("laststatus")
+    );
   }
 
   function readProfiles() {
@@ -80,22 +34,36 @@
     }
   }
 
-  function loadWithoutMovingPanel(name) {
+  function updateSelectionStatus(select) {
+    const selected = String(select?.value || "").trim();
+    const disabled = !selected;
+    ["save", "load", "delete"].forEach((action) => {
+      const button = document.getElementById(`minibia-bot-profile-${action}`);
+      if (button) button.disabled = disabled;
+    });
+
+    const status = document.getElementById(STATUS_ID);
+    const active = window.localStorage.getItem(ACTIVE_KEY) || "";
+    if (status) {
+      status.textContent = selected
+        ? selected === active
+          ? `Active profile: ${selected}`
+          : `Selected profile: ${selected} — press Load to activate`
+        : "Select a profile, then Load or Save.";
+    }
+  }
+
+  function loadProfileNonDestructively(name) {
     const profileName = String(name || "").trim();
     const profile = readProfiles()[profileName];
     if (!profile) throw new Error("Profile was not found");
 
-    const keysToRemove = [];
-    for (let index = 0; index < window.localStorage.length; index += 1) {
-      const key = window.localStorage.key(index);
-      if (isFeatureSettingKey(key)) keysToRemove.push(key);
-    }
-    keysToRemove.forEach((key) => window.localStorage.removeItem(key));
-
+    // Never remove current settings. Removing missing keys resets modules to
+    // defaults, makes hidden/legacy sections reappear, and changes the panel.
+    // Only overwrite feature values explicitly saved in the selected profile.
     Object.entries(profile.settings || {}).forEach(([key, value]) => {
-      if (isFeatureSettingKey(key) && typeof value === "string") {
-        window.localStorage.setItem(key, value);
-      }
+      if (isLayoutOrRuntimeKey(key)) return;
+      if (typeof value === "string") window.localStorage.setItem(key, value);
     });
 
     window.localStorage.setItem(ACTIVE_KEY, profile.name || profileName);
@@ -103,31 +71,42 @@
     else window.location.reload();
   }
 
-  function installStableLoad() {
+  function installFix() {
     const select = document.getElementById(SELECT_ID);
     const loadButton = document.getElementById(LOAD_ID);
     if (!select || !loadButton) return false;
-    if (loadButton.dataset.layoutStableProfileLoad === "true") return true;
 
-    loadButton.dataset.layoutStableProfileLoad = "true";
-    loadButton.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      try {
-        const status = document.getElementById(STATUS_ID);
-        if (status) status.textContent = `Loading profile: ${select.value}...`;
-        loadWithoutMovingPanel(select.value);
-      } catch (error) {
-        window.alert(error?.message || String(error));
-      }
-    }, true);
+    if (select.dataset.profileSelectionFix !== "true") {
+      select.dataset.profileSelectionFix = "true";
+      select.addEventListener("change", (event) => {
+        event.stopImmediatePropagation();
+        updateSelectionStatus(select);
+      }, true);
+    }
+
+    if (loadButton.dataset.profileSafeLoadFix !== "true") {
+      loadButton.dataset.profileSafeLoadFix = "true";
+      loadButton.addEventListener("click", (event) => {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        try {
+          const status = document.getElementById(STATUS_ID);
+          if (status) status.textContent = `Loading profile: ${select.value}...`;
+          loadProfileNonDestructively(select.value);
+        } catch (error) {
+          window.alert(error?.message || String(error));
+          console.error("[minibia-bot] safe profile load failed", error);
+        }
+      }, true);
+    }
+
     return true;
   }
 
-  installStableLoad();
+  installFix();
   let attempts = 0;
   const timer = window.setInterval(() => {
     attempts += 1;
-    if (installStableLoad() || attempts >= 600) window.clearInterval(timer);
+    if (installFix() || attempts >= 600) window.clearInterval(timer);
   }, 100);
 })();
