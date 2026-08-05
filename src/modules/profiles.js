@@ -165,11 +165,18 @@ window.__minibiaBotBundle.installProfilesModule = function installProfilesModule
 
 (() => {
   let attempts = 0;
+  let lastBot = null;
   const timer = setInterval(() => {
     attempts += 1;
     const bot = window.minibiaBot;
     const installer = window.__minibiaBotBundle?.installProfilesModule;
-    if (bot && typeof installer === "function") installer(bot);
-    if (bot?.profiles || attempts >= 100) clearInterval(timer);
+
+    if (bot && bot !== lastBot && typeof installer === "function") {
+      lastBot = bot;
+      installer(bot);
+    }
+
+    const sectionReady = !!document.getElementById("minibia-bot-profiles-section");
+    if (sectionReady || attempts >= 200) clearInterval(timer);
   }, 100);
 })();
