@@ -3,6 +3,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 window.__minibiaBotBundle.installLureModeModule = function installLureModeModule(bot) {
   const configStorageKey = "minibiaBot.lure.config";
   const COUNT_RANGE = 7;
+  const COUNT_RANGE_Y = 5;
   const TICK_MS = 150;
   const DEFAULT_STEP_DELAY_MS = 450;
 
@@ -42,6 +43,11 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
     if (!a || !b || Number(a.z) !== Number(b.z)) return Infinity;
     return Math.max(Math.abs(Number(a.x) - Number(b.x)), Math.abs(Number(a.y) - Number(b.y)));
   }
+  function isWithinDetectionRange(a, b) {
+    if (!a || !b || Number(a.z) !== Number(b.z)) return false;
+    return Math.abs(Number(a.x) - Number(b.x)) <= COUNT_RANGE
+      && Math.abs(Number(a.y) - Number(b.y)) <= COUNT_RANGE_Y;
+  }
   function playerPos() { return pos(bot.getPlayerPosition?.() || window.gameClient?.player?.__position); }
   function monsterPos(monster) { return pos(monster?.getPosition?.() || monster?.__position); }
   function currentTarget() { return bot.attack?.getCurrentTarget?.() || window.gameClient?.player?.__target || null; }
@@ -74,7 +80,7 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
     return visibleMonsters()
       .map((monster) => ({ monster, position: monsterPos(monster) }))
       .map((entry) => ({ ...entry, distance: dist(me, entry.position) }))
-      .filter((entry) => entry.position && entry.distance <= COUNT_RANGE)
+      .filter((entry) => entry.position && isWithinDetectionRange(me, entry.position))
       .sort((a, b) => a.distance - b.distance || Number(a.monster?.id || 0) - Number(b.monster?.id || 0));
   }
 
