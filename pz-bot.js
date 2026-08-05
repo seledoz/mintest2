@@ -169,6 +169,15 @@
       );
     }
 
+    if (path === "src/modules/auto-attack.js") {
+      code = code
+        .replace("      maxTargetDistanceX: 7,", "      maxTargetDistanceX: 5,")
+        .replace(
+          "    return dx <= maxTargetDistanceX && dy <= maxTargetDistanceY;",
+          "    return dx <= Math.min(5, maxTargetDistanceX) && dy <= Math.min(5, maxTargetDistanceY) && Math.max(dx, dy) <= 5;"
+        );
+    }
+
     if (path === "src/ui/panel.js") {
       code = code.replace(
         `  function refreshVisibleCreatures() {\n    const list = document.getElementById("minibia-bot-visible-creatures-list");\n    if (!list) return;`,
