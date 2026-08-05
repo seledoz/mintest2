@@ -159,3 +159,100 @@ if (!window.__minNewLureMode2StepGuardInstalled) {
     pf.findPath = wrappedFindPath;
   }, 100);
 }
+
+// Add a Delete Selected action to the GitHub Waypoints section.
+if (!window.__minNewGithubWaypointDeleteInstalled) {
+  window.__minNewGithubWaypointDeleteInstalled = true;
+
+  const installGithubWaypointDeleteButton = () => {
+    const bot = window.minibiaBot;
+    const library = bot?.githubWaypointLibrary;
+    const section = document.getElementById("minibia-bot-github-waypoints-section");
+    const select = document.getElementById("minibia-bot-github-waypoints-select");
+    const refreshButton = document.getElementById("minibia-bot-github-waypoints-refresh");
+    if (!bot || !library || !section || !select || !refreshButton) return false;
+    if (document.getElementById("minibia-bot-github-waypoints-delete")) return true;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "mb-small-button";
+    button.id = "minibia-bot-github-waypoints-delete";
+    button.textContent = "Delete Selected";
+    refreshButton.insertAdjacentElement("beforebegin", button);
+
+    button.addEventListener("click", async () => {
+      const path = String(select.value || "").trim();
+      const optionText = select.options[select.selectedIndex]?.textContent || path;
+      const scriptName = optionText.replace(/\s*\(\d+\)\s*$/, "").trim() || path;
+      const status = document.getElementById("minibia-bot-github-waypoints-status");
+      const setStatus = (message) => { if (status) status.textContent = message; };
+
+      try {
+        if (!path) throw new Error("Choose a script to delete");
+        const token = String(library.getToken?.() || "").trim();
+        if (!token) throw new Error("Save GitHub Setup first");
+        if (!window.confirm(`Delete GitHub waypoint script "${scriptName}"?\n\nThis cannot be undone.`)) return;
+
+        button.disabled = true;
+        setStatus(`GitHub: deleting ${scriptName}...`);
+
+        const owner = "seledoz";
+        const repo = "mintest2";
+        const branch = "main";
+        const encodedPath = path.split("/").map((part) => encodeURIComponent(part)).join("/");
+        const url = `https://api.github.com/repos/${owner}/${repo}/contents/${encodedPath}`;
+        const headers = {
+          Authorization: `Bearer ${token}`,
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28",
+        };
+
+        const readResponse = await fetch(`${url}?ref=${encodeURIComponent(branch)}`, {
+          headers,
+          cache: "no-store",
+        });
+        if (!readResponse.ok) throw new Error(`GitHub read failed: HTTP ${readResponse.status}`);
+        const file = await readResponse.json();
+        if (!file?.sha) throw new Error("Selected script SHA missing");
+
+        const deleteResponse = await fetch(url, {
+          method: "DELETE",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: `Delete waypoint script: ${scriptName}`,
+            sha: file.sha,
+            branch,
+          }),
+        });
+
+        if (!deleteResponse.ok) {
+          let details = "";
+          try {
+            const data = await deleteResponse.json();
+            details = data?.message ? ` - ${data.message}` : "";
+          } catch (error) {}
+          throw new Error(`GitHub delete failed: HTTP ${deleteResponse.status}${details}`);
+        }
+
+        await library.refreshUi?.();
+        setStatus(`GitHub: deleted ${scriptName}`);
+        bot.log?.("GitHub waypoint script deleted", { name: scriptName, path });
+      } catch (error) {
+        setStatus(`GitHub: ${error?.message || error}`);
+        bot.log?.("GitHub waypoint delete failed", error?.message || error);
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    return true;
+  };
+
+  let deleteButtonAttempts = 0;
+  const deleteButtonTimer = window.setInterval(() => {
+    deleteButtonAttempts += 1;
+    if (installGithubWaypointDeleteButton() || deleteButtonAttempts >= 120) {
+      window.clearInterval(deleteButtonTimer);
+    }
+  }, 250);
+}
