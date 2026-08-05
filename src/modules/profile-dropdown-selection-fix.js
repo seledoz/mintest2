@@ -4,25 +4,30 @@
   const STATUS_ID = "minibia-bot-profile-status";
   const PROFILES_KEY = "minibiaBot.profiles.v2";
   const ACTIVE_KEY = "minibiaBot.profiles.active";
+  const FULL_LOADER_URL = "https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js";
 
-  function isLayoutOrRuntimeKey(key) {
-    const value = String(key || "").toLowerCase();
-    return (
-      value === PROFILES_KEY.toLowerCase() ||
-      value === "minibiabot.profiles.v1" ||
-      value === ACTIVE_KEY.toLowerCase() ||
-      value === "minibiabot.github.token" ||
-      value.includes("minibiabot.ui") ||
-      value.includes("panel") ||
-      value.includes("layout") ||
-      value.includes("position") ||
-      value.includes("scroll") ||
-      value.includes("collapse") ||
-      value.includes("column") ||
-      value.includes("sectionorder") ||
-      value.includes("moduleorder") ||
-      value.includes("laststatus")
-    );
+  function isProtectedKey(key) {
+    const value = String(key || "");
+    const lower = value.toLowerCase();
+
+    return value === PROFILES_KEY ||
+      value === "minibiaBot.profiles.v1" ||
+      value === ACTIVE_KEY ||
+      value === "minibiaBot.github.token" ||
+      lower.startsWith("minibiabot.ui.") ||
+      lower.includes("panel") ||
+      lower.includes("layout") ||
+      lower.includes("columnorder") ||
+      lower.includes("sectionorder") ||
+      lower.includes("scroll") ||
+      lower.includes("collapsed") ||
+      lower.includes("position") ||
+      lower.includes("laststatus") ||
+      lower.includes("runtime");
+  }
+
+  function isFeatureSettingKey(key) {
+    return String(key || "").startsWith("minibiaBot.") && !isProtectedKey(key);
   }
 
   function readProfiles() {
@@ -37,6 +42,7 @@
   function updateSelectionStatus(select) {
     const selected = String(select?.value || "").trim();
     const disabled = !selected;
+
     ["save", "load", "delete"].forEach((action) => {
       const button = document.getElementById(`minibia-bot-profile-${action}`);
       if (button) button.disabled = disabled;
@@ -53,28 +59,39 @@
     }
   }
 
-  function loadProfileNonDestructively(name) {
-    const profileName = String(name || "").trim();
+  function applyProfileNonDestructively(profile) {
+    Object.entries(profile?.settings || {}).forEach(([key, value]) => {
+      if (isFeatureSettingKey(key) && typeof value === "string") {
+        window.localStorage.setItem(key, value);
+      }
+    });
+  }
+
+  async function runFullBotReload() {
+    const response = await fetch(`${FULL_LOADER_URL}?t=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Full bot reload failed: HTTP ${response.status}`);
+    const code = await response.text();
+    (0, eval)(`${code}\n//# sourceURL=${FULL_LOADER_URL}`);
+  }
+
+  async function loadSelectedProfile(select, button) {
+    const profileName = String(select?.value || "").trim();
     const profile = readProfiles()[profileName];
     if (!profile) throw new Error("Profile was not found");
 
-    // Never remove current settings. Removing missing keys resets modules to
-    // defaults, makes hidden/legacy sections reappear, and changes the panel.
-    // Only overwrite feature values explicitly saved in the selected profile.
-    Object.entries(profile.settings || {}).forEach(([key, value]) => {
-      if (isLayoutOrRuntimeKey(key)) return;
-      if (typeof value === "string") window.localStorage.setItem(key, value);
-    });
+    const status = document.getElementById(STATUS_ID);
+    if (status) status.textContent = `Loading profile: ${profileName}...`;
+    if (button) button.disabled = true;
 
+    applyProfileNonDestructively(profile);
     window.localStorage.setItem(ACTIVE_KEY, profile.name || profileName);
-    if (typeof window.minibiaBotReload === "function") window.minibiaBotReload();
-    else window.location.reload();
+    await runFullBotReload();
   }
 
   function installFix() {
     const select = document.getElementById(SELECT_ID);
-    const loadButton = document.getElementById(LOAD_ID);
-    if (!select || !loadButton) return false;
+    const oldLoadButton = document.getElementById(LOAD_ID);
+    if (!select || !oldLoadButton) return false;
 
     if (select.dataset.profileSelectionFix !== "true") {
       select.dataset.profileSelectionFix = "true";
@@ -84,29 +101,35 @@
       }, true);
     }
 
-    if (loadButton.dataset.profileSafeLoadFix !== "true") {
-      loadButton.dataset.profileSafeLoadFix = "true";
-      loadButton.addEventListener("click", (event) => {
+    if (oldLoadButton.dataset.fullProfileReload !== "true") {
+      // Replace the button node to remove every older destructive Load handler.
+      const loadButton = oldLoadButton.cloneNode(true);
+      loadButton.dataset.fullProfileReload = "true";
+      oldLoadButton.replaceWith(loadButton);
+
+      loadButton.addEventListener("click", async (event) => {
         event.preventDefault();
         event.stopImmediatePropagation();
         try {
-          const status = document.getElementById(STATUS_ID);
-          if (status) status.textContent = `Loading profile: ${select.value}...`;
-          loadProfileNonDestructively(select.value);
+          await loadSelectedProfile(select, loadButton);
         } catch (error) {
+          loadButton.disabled = false;
           window.alert(error?.message || String(error));
-          console.error("[minibia-bot] safe profile load failed", error);
+          updateSelectionStatus(select);
         }
       }, true);
     }
 
+    updateSelectionStatus(select);
     return true;
   }
 
+  if (window.__minNewProfileLoadObserver) {
+    try { window.__minNewProfileLoadObserver.disconnect(); } catch (error) {}
+  }
+
   installFix();
-  let attempts = 0;
-  const timer = window.setInterval(() => {
-    attempts += 1;
-    if (installFix() || attempts >= 600) window.clearInterval(timer);
-  }, 100);
+  const observer = new MutationObserver(() => installFix());
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+  window.__minNewProfileLoadObserver = observer;
 })();
