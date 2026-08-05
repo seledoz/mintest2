@@ -119,70 +119,218 @@
 })();
 
 (() => {
-  let attempts = 0;
-  let installedBot = null;
+  const SECTION_ID = "minibia-bot-profiles-section";
+  const PROFILES_KEY = "minibiaBot.profiles.v2";
+  const ACTIVE_KEY = "minibiaBot.profiles.active";
+  const excludedKeys = new Set([
+    PROFILES_KEY,
+    "minibiaBot.profiles.v1",
+    ACTIVE_KEY,
+    "minibiaBot.github.token",
+  ]);
 
-  function findCaveSection(panel) {
-    const caveControl =
-      document.getElementById("minibia-bot-cave-status") ||
-      document.getElementById("minibia-bot-cave-start") ||
-      document.getElementById("minibia-bot-cave-enabled");
-    const directSection = caveControl?.closest?.(".mb-section");
-    if (directSection) return directSection;
-
-    const caveLabel = Array.from(panel.querySelectorAll(".mb-label")).find((label) =>
-      /cavebot|cave bot|cave/i.test(String(label.textContent || "").trim())
-    );
-    return caveLabel?.closest?.(".mb-section") || null;
+  function readProfiles() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(PROFILES_KEY) || "{}");
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+    } catch (error) {
+      console.error("[minibia-bot] profiles read failed", error);
+      return {};
+    }
   }
 
-  function positionBelowCavebot(panel) {
-    const profilesSection = document.getElementById("minibia-bot-profiles-section");
-    if (!profilesSection) return false;
-    const caveSection = findCaveSection(panel);
-    if (caveSection && caveSection.nextElementSibling !== profilesSection) {
-      caveSection.insertAdjacentElement("afterend", profilesSection);
+  function writeProfiles(profiles) {
+    localStorage.setItem(PROFILES_KEY, JSON.stringify(profiles));
+  }
+
+  function profileNames() {
+    return Object.keys(readProfiles()).sort((a, b) => a.localeCompare(b));
+  }
+
+  function isBotSettingKey(key) {
+    return String(key || "").startsWith("minibiaBot.") && !excludedKeys.has(key);
+  }
+
+  function captureSettings() {
+    const settings = {};
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (isBotSettingKey(key)) settings[key] = localStorage.getItem(key);
     }
-    profilesSection.style.display = "";
-    profilesSection.hidden = false;
+    return settings;
+  }
+
+  function applySettings(settings) {
+    const removeKeys = [];
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index);
+      if (isBotSettingKey(key)) removeKeys.push(key);
+    }
+    removeKeys.forEach((key) => localStorage.removeItem(key));
+    Object.entries(settings || {}).forEach(([key, value]) => {
+      if (isBotSettingKey(key) && typeof value === "string") localStorage.setItem(key, value);
+    });
+  }
+
+  function findCaveSection(panel) {
+    const knownControl =
+      document.getElementById("minibia-bot-cave-status") ||
+      document.getElementById("minibia-bot-cave-start") ||
+      document.getElementById("minibia-bot-cave-pathfinder-mode") ||
+      document.getElementById("minibia-bot-cave-preset-select");
+    const knownSection = knownControl?.closest?.(".mb-section");
+    if (knownSection) return knownSection;
+
+    const label = Array.from(panel.querySelectorAll(".mb-label")).find((element) =>
+      String(element.textContent || "").trim().toLowerCase() === "cavebot"
+    );
+    return label?.closest?.(".mb-section") || null;
+  }
+
+  function updateStatus(message) {
+    const status = document.getElementById("minibia-bot-profile-status");
+    if (status) status.textContent = message;
+  }
+
+  function refresh() {
+    const select = document.getElementById("minibia-bot-profile-select");
+    if (!select) return;
+    const names = profileNames();
+    const previous = select.value;
+    const active = localStorage.getItem(ACTIVE_KEY) || "";
+    select.innerHTML = "";
+
+    if (!names.length) {
+      select.appendChild(new Option("No saved profiles", ""));
+      select.disabled = true;
+    } else {
+      names.forEach((name) => select.appendChild(new Option(name, name)));
+      select.disabled = false;
+      select.value = names.includes(active) ? active : names.includes(previous) ? previous : names[0];
+    }
+
+    const disabled = !select.value;
+    ["save", "load", "delete"].forEach((action) => {
+      const button = document.getElementById(`minibia-bot-profile-${action}`);
+      if (button) button.disabled = disabled;
+    });
+    updateStatus(active && names.includes(active)
+      ? `Active profile: ${active}`
+      : names.length ? "Select a profile, then Load or Save." : "Create a profile to save all bot settings.");
+  }
+
+  function saveProfile(name, mustBeNew = false) {
+    name = String(name || "").trim();
+    if (!name) throw new Error("Profile name is required");
+    const profiles = readProfiles();
+    if (mustBeNew && profiles[name]) throw new Error(`Profile “${name}” already exists`);
+    profiles[name] = {
+      name,
+      savedAt: new Date().toISOString(),
+      settings: captureSettings(),
+    };
+    writeProfiles(profiles);
+    localStorage.setItem(ACTIVE_KEY, name);
+    refresh();
+    return profiles[name];
+  }
+
+  function loadProfile(name) {
+    const profile = readProfiles()[String(name || "").trim()];
+    if (!profile) throw new Error("Profile was not found");
+    applySettings(profile.settings);
+    localStorage.setItem(ACTIVE_KEY, profile.name);
+    if (typeof window.minibiaBotReload === "function") window.minibiaBotReload();
+    else window.location.reload();
+  }
+
+  function deleteProfile(name) {
+    name = String(name || "").trim();
+    const profiles = readProfiles();
+    if (!profiles[name]) return false;
+    delete profiles[name];
+    writeProfiles(profiles);
+    if (localStorage.getItem(ACTIVE_KEY) === name) localStorage.removeItem(ACTIVE_KEY);
+    refresh();
     return true;
   }
 
-  function installProfilesPanel() {
-    const bot = window.minibiaBot;
+  function injectProfiles() {
     const panel = document.getElementById("minibia-bot-panel");
-    const installer = window.__minibiaBotBundle?.installProfilesModule;
-    if (!bot || !panel || typeof installer !== "function") return false;
+    if (!panel) return false;
+    const caveSection = findCaveSection(panel);
+    if (!caveSection) return false;
 
-    let section = document.getElementById("minibia-bot-profiles-section");
+    let section = document.getElementById(SECTION_ID);
     if (!section) {
-      // A previous failed install can leave bot.profiles set, which makes the
-      // installer return early without creating the panel. Clear only that
-      // runtime reference and reinstall; saved profiles remain in localStorage.
-      if (bot.profiles) delete bot.profiles;
-      try {
-        installer(bot);
-        installedBot = bot;
-      } catch (error) {
-        console.error("[minibia-bot] profiles panel forced install failed", error);
-        return false;
-      }
-      section = document.getElementById("minibia-bot-profiles-section");
+      section = document.createElement("div");
+      section.id = SECTION_ID;
+      section.className = "mb-section mb-column-section";
+      section.innerHTML = `
+        <div class="mb-label">Profiles</div>
+        <div class="mb-stack">
+          <select id="minibia-bot-profile-select"></select>
+          <div class="mb-actions" style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" class="mb-small-button" id="minibia-bot-profile-new">New</button>
+            <button type="button" class="mb-small-button" id="minibia-bot-profile-save">Save</button>
+            <button type="button" class="mb-small-button" id="minibia-bot-profile-load">Load</button>
+            <button type="button" class="mb-small-button" id="minibia-bot-profile-delete">Delete</button>
+          </div>
+          <div class="mb-small-note" id="minibia-bot-profile-status"></div>
+        </div>`;
+
+      const select = section.querySelector("#minibia-bot-profile-select");
+      section.querySelector("#minibia-bot-profile-new").addEventListener("click", () => {
+        const name = window.prompt("New profile name:")?.trim();
+        if (!name) return;
+        try {
+          saveProfile(name, true);
+          select.value = name;
+          refresh();
+        } catch (error) {
+          window.alert(error?.message || String(error));
+        }
+      });
+      section.querySelector("#minibia-bot-profile-save").addEventListener("click", () => {
+        try { saveProfile(select.value); }
+        catch (error) { window.alert(error?.message || String(error)); }
+      });
+      section.querySelector("#minibia-bot-profile-load").addEventListener("click", () => {
+        try { loadProfile(select.value); }
+        catch (error) { window.alert(error?.message || String(error)); }
+      });
+      section.querySelector("#minibia-bot-profile-delete").addEventListener("click", () => {
+        const name = select.value;
+        if (name && window.confirm(`Delete profile “${name}”?`)) deleteProfile(name);
+      });
+      select.addEventListener("change", refresh);
     }
 
-    if (section) return positionBelowCavebot(panel);
-    return false;
+    if (caveSection.nextElementSibling !== section) {
+      caveSection.insertAdjacentElement("afterend", section);
+    }
+    section.hidden = false;
+    section.style.display = "";
+    refresh();
+
+    const bot = window.minibiaBot;
+    if (bot) {
+      bot.profiles = {
+        create: (name) => saveProfile(name, true),
+        save: saveProfile,
+        load: loadProfile,
+        delete: deleteProfile,
+        list: profileNames,
+        refreshPanel: refresh,
+      };
+    }
+    return true;
   }
 
-  const observer = new MutationObserver(() => installProfilesPanel());
-  observer.observe(document.documentElement, { childList: true, subtree: true });
-
+  injectProfiles();
+  let attempts = 0;
   const timer = window.setInterval(() => {
     attempts += 1;
-    const ready = installProfilesPanel();
-    if (ready || attempts >= 300) {
-      window.clearInterval(timer);
-      observer.disconnect();
-    }
+    if (injectProfiles() || attempts >= 600) window.clearInterval(timer);
   }, 100);
 })();
