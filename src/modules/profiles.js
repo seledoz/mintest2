@@ -3,6 +3,7 @@
   const PROFILES_KEY = "minibiaBot.profiles.v2";
   const ACTIVE_KEY = "minibiaBot.profiles.active";
   const TOKEN_KEY = "minibiaBot.github.token";
+  const SOURCE_LOADER_URL = "https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js";
 
   const excludedExact = new Set([
     PROFILES_KEY,
@@ -64,6 +65,13 @@
     });
   }
 
+  async function reloadCompleteBot() {
+    const response = await fetch(`${SOURCE_LOADER_URL}?profileReload=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`Bot reload failed: HTTP ${response.status}`);
+    const code = await response.text();
+    (0, eval)(`${code}\n//# sourceURL=${SOURCE_LOADER_URL}`);
+  }
+
   function findCaveSection(panel) {
     const knownControl =
       document.getElementById("minibia-bot-cave-status") ||
@@ -112,15 +120,10 @@
       if (button) button.disabled = disabled;
     });
 
-    if (!names.length) {
-      updateStatus("Create a profile to save all bot settings.");
-    } else if (select.value && select.value !== active) {
-      updateStatus(`Selected profile: ${select.value} — press Load to activate`);
-    } else if (active) {
-      updateStatus(`Active profile: ${active}`);
-    } else {
-      updateStatus("Select a profile, then Load or Save.");
-    }
+    if (!names.length) updateStatus("Create a profile to save all bot settings.");
+    else if (select.value && select.value !== active) updateStatus(`Selected profile: ${select.value} — press Load to activate`);
+    else if (active) updateStatus(`Active profile: ${active}`);
+    else updateStatus("Select a profile, then Load or Save.");
   }
 
   function saveProfile(name, mustBeNew = false) {
@@ -128,9 +131,7 @@
     if (!normalized) throw new Error("Profile name is required");
 
     const profiles = readProfiles();
-    if (mustBeNew && profiles[normalized]) {
-      throw new Error(`Profile “${normalized}” already exists`);
-    }
+    if (mustBeNew && profiles[normalized]) throw new Error(`Profile “${normalized}” already exists`);
 
     profiles[normalized] = {
       name: normalized,
@@ -143,20 +144,15 @@
     return profiles[normalized];
   }
 
-  function loadProfile(name) {
+  async function loadProfile(name) {
     const normalized = String(name || "").trim();
     const profile = readProfiles()[normalized];
     if (!profile) throw new Error("Profile was not found");
 
+    updateStatus(`Loading profile: ${normalized}...`);
     applySettings(profile.settings);
     window.localStorage.setItem(ACTIVE_KEY, normalized);
-    refreshPanel(normalized);
-
-    window.dispatchEvent(new CustomEvent("minibia-bot-profile-loaded", {
-      detail: { name: normalized },
-    }));
-
-    updateStatus(`Loaded profile: ${normalized}`);
+    await reloadCompleteBot();
     return true;
   }
 
@@ -167,9 +163,7 @@
 
     delete profiles[normalized];
     writeProfiles(profiles);
-    if (window.localStorage.getItem(ACTIVE_KEY) === normalized) {
-      window.localStorage.removeItem(ACTIVE_KEY);
-    }
+    if (window.localStorage.getItem(ACTIVE_KEY) === normalized) window.localStorage.removeItem(ACTIVE_KEY);
     refreshPanel();
     return true;
   }
@@ -202,25 +196,19 @@
       section.querySelector("#minibia-bot-profile-new").addEventListener("click", () => {
         const name = window.prompt("New profile name:")?.trim();
         if (!name) return;
-        try {
-          saveProfile(name, true);
-        } catch (error) {
-          window.alert(error?.message || String(error));
-        }
+        try { saveProfile(name, true); }
+        catch (error) { window.alert(error?.message || String(error)); }
       });
 
       section.querySelector("#minibia-bot-profile-save").addEventListener("click", () => {
-        try {
-          saveProfile(select.value);
-        } catch (error) {
-          window.alert(error?.message || String(error));
-        }
+        try { saveProfile(select.value); }
+        catch (error) { window.alert(error?.message || String(error)); }
       });
 
-      section.querySelector("#minibia-bot-profile-load").addEventListener("click", () => {
-        try {
-          loadProfile(select.value);
-        } catch (error) {
+      section.querySelector("#minibia-bot-profile-load").addEventListener("click", async () => {
+        try { await loadProfile(select.value); }
+        catch (error) {
+          updateStatus("Profile load failed.");
           window.alert(error?.message || String(error));
         }
       });
@@ -233,9 +221,7 @@
       select.addEventListener("change", () => refreshPanel(select.value));
     }
 
-    if (caveSection.nextElementSibling !== section) {
-      caveSection.insertAdjacentElement("afterend", section);
-    }
+    if (caveSection.nextElementSibling !== section) caveSection.insertAdjacentElement("afterend", section);
     section.hidden = false;
     section.style.display = "";
     refreshPanel();
