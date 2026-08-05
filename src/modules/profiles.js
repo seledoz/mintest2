@@ -3,6 +3,7 @@
   const PROFILES_KEY = "minibiaBot.profiles.v2";
   const ACTIVE_KEY = "minibiaBot.profiles.active";
   const TOKEN_KEY = "minibiaBot.github.token";
+  const SOURCE_LOADER_URL = "https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js";
 
   const excludedExact = new Set([
     PROFILES_KEY,
@@ -66,6 +67,51 @@
       }
     });
     return applied;
+  }
+
+  function capturePanelState() {
+    const panel = document.getElementById("minibia-bot-panel");
+    const content = panel?.querySelector?.(".mb-content");
+    if (!panel) return null;
+
+    const rect = panel.getBoundingClientRect();
+    return {
+      left: panel.style.left || `${Math.round(rect.left)}px`,
+      top: panel.style.top || `${Math.round(rect.top)}px`,
+      right: panel.style.right || "auto",
+      bottom: panel.style.bottom || "auto",
+      scrollTop: content?.scrollTop || 0,
+      collapsed: panel.dataset.collapsed || "false",
+    };
+  }
+
+  function restorePanelState(state) {
+    if (!state) return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      attempts += 1;
+      const panel = document.getElementById("minibia-bot-panel");
+      const content = panel?.querySelector?.(".mb-content");
+      if (panel) {
+        panel.style.left = state.left;
+        panel.style.top = state.top;
+        panel.style.right = state.right;
+        panel.style.bottom = state.bottom;
+        panel.dataset.collapsed = state.collapsed;
+        if (content) content.scrollTop = state.scrollTop;
+      }
+      if (panel || attempts >= 200) window.clearInterval(timer);
+    }, 25);
+  }
+
+  async function reloadBotInPage(panelState) {
+    const response = await fetch(`${SOURCE_LOADER_URL}?profileReload=${Date.now()}`, {
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Bot reload failed: HTTP ${response.status}`);
+    const code = await response.text();
+    (0, eval)(`${code}\n//# sourceURL=${SOURCE_LOADER_URL}`);
+    restorePanelState(panelState);
   }
 
   function findCaveSection(panel) {
@@ -142,7 +188,7 @@
     return profiles[normalized];
   }
 
-  function loadProfile(name) {
+  async function loadProfile(name) {
     const normalized = String(name || "").trim();
     const profile = readProfiles()[normalized];
     if (!profile) throw new Error("Profile was not found");
@@ -152,14 +198,15 @@
       throw new Error("This profile contains no saved settings. Select it, configure the bot, and press Save again.");
     }
 
+    const panelState = capturePanelState();
     const appliedCount = applySettings(profile.settings);
     if (!appliedCount) {
       throw new Error("No compatible settings were found in this profile. Save the profile again with the current bot version.");
     }
 
     window.localStorage.setItem(ACTIVE_KEY, normalized);
-    updateStatus(`Loaded ${appliedCount} settings from ${normalized}. Reloading...`);
-    window.setTimeout(() => window.location.reload(), 100);
+    updateStatus(`Loading ${appliedCount} settings from ${normalized}...`);
+    await reloadBotInPage(panelState);
     return true;
   }
 
@@ -212,8 +259,8 @@
         catch (error) { window.alert(error?.message || String(error)); }
       });
 
-      section.querySelector("#minibia-bot-profile-load").addEventListener("click", () => {
-        try { loadProfile(select.value); }
+      section.querySelector("#minibia-bot-profile-load").addEventListener("click", async () => {
+        try { await loadProfile(select.value); }
         catch (error) {
           updateStatus("Profile load failed.");
           window.alert(error?.message || String(error));
