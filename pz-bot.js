@@ -53,6 +53,7 @@
     "src/modules/great-fireball-v2-screen-click-fix.js",
     "src/modules/xray-overlay-floor-mode.js",
     "src/modules/rune-maker-drop-inspector.js",
+    "src/modules/github-waypoint-delete-button.js",
   ];
 
   function installUiCompatibilityShim() {
@@ -79,7 +80,6 @@
   function syncCollapseButtons() {
     const panel = document.getElementById("minibia-bot-panel");
     if (!panel) return;
-
     const collapsed = panel.dataset.collapsed === "true";
     panel.querySelectorAll("#minibia-bot-collapse, #minibia-bot-collapse-left").forEach((button) => {
       button.textContent = collapsed ? "+" : "−";
@@ -93,7 +93,6 @@
     const titlebar = panel?.querySelector?.(".mb-titlebar");
     const rightButton = panel?.querySelector?.("#minibia-bot-collapse");
     if (!panel || !titlebar || !rightButton) return;
-
     let leftButton = panel.querySelector("#minibia-bot-collapse-left");
     if (!leftButton) {
       leftButton = rightButton.cloneNode(true);
@@ -106,16 +105,12 @@
         window.setTimeout(syncCollapseButtons, 0);
       });
     }
-
     if (!document.__minNewCollapseButtonSyncInstalled) {
       document.__minNewCollapseButtonSyncInstalled = true;
       document.addEventListener("click", (event) => {
-        if (event.target?.closest?.("#minibia-bot-collapse")) {
-          window.setTimeout(syncCollapseButtons, 0);
-        }
+        if (event.target?.closest?.("#minibia-bot-collapse")) window.setTimeout(syncCollapseButtons, 0);
       });
     }
-
     syncCollapseButtons();
   }
 
@@ -126,7 +121,6 @@
       debugSection.remove();
       return;
     }
-
     const labels = Array.from(document.querySelectorAll("#minibia-bot-panel .mb-label"));
     const debugLabel = labels.find((label) => String(label.textContent || "").trim().toLowerCase() === "debug");
     debugLabel?.closest?.(".mb-section")?.remove();
@@ -139,7 +133,6 @@
       panicSection.remove();
       return;
     }
-
     document.getElementById("minibia-bot-home")?.closest?.(".mb-section")?.remove();
     document.getElementById("minibia-bot-panic-unknown")?.closest?.(".mb-section")?.remove();
     document.getElementById("minibia-bot-panic-health")?.closest?.(".mb-section")?.remove();
@@ -164,84 +157,39 @@
 
   function addSafeUiPerformanceOptimizations(code, path) {
     if (path === "src/core.js") {
-      code = code.replace(
-        "  startReconnectWatcher();",
-        "  // Reconnect watcher temporarily disabled for FPS testing."
-      );
+      code = code.replace("  startReconnectWatcher();", "  // Reconnect watcher temporarily disabled for FPS testing.");
     }
-
     if (path === "src/modules/auto-attack.js") {
       code = code
         .replace("      maxTargetDistanceX: 7,", "      maxTargetDistanceX: 5,")
-        .replace(
-          "    return dx <= maxTargetDistanceX && dy <= maxTargetDistanceY;",
-          "    return dx <= Math.min(5, maxTargetDistanceX) && dy <= Math.min(5, maxTargetDistanceY) && Math.max(dx, dy) <= 5;"
-        );
+        .replace("    return dx <= maxTargetDistanceX && dy <= maxTargetDistanceY;", "    return dx <= Math.min(5, maxTargetDistanceX) && dy <= Math.min(5, maxTargetDistanceY) && Math.max(dx, dy) <= 5;");
     }
-
     if (path === "src/modules/lure-mode.js") {
       code = code
-        .replace(
-          "    nextMode2StepAt: 0,\n",
-          "    nextMode2StepAt: 0,\n    mode2StepStartPosition: null,\n    mode2WaitingForStep: false,\n"
-        )
-        .replace(
-          `      if (status.mode === 2 && status.luring) {\n        state.nextMode2StepAt = Date.now() + status.stepDelayMs;\n        return limitPathToOneStep(path);\n      }`,
-          `      if (status.mode === 2 && status.luring) {\n        const startPosition = playerPos();\n        state.mode2StepStartPosition = startPosition;\n        state.mode2WaitingForStep = !!startPosition;\n        return limitPathToOneStep(path);\n      }`
-        )
-        .replace(
-          `    state.lastStatus = status;\n\n    if (state.clearingPack`,
-          `    state.lastStatus = status;\n\n    if (status.mode === 2 && status.luring && state.mode2WaitingForStep) {\n      const currentPosition = playerPos();\n      const startPosition = state.mode2StepStartPosition;\n      if (currentPosition && startPosition && dist(currentPosition, startPosition) >= 1) {\n        stopCurrentPath();\n        state.nextMode2StepAt = Date.now() + status.stepDelayMs;\n        state.mode2WaitingForStep = false;\n        state.mode2StepStartPosition = null;\n        status = getLureStatus();\n        state.lastStatus = status;\n        bot.log?.(\"lure mode 2 completed paced step\", {\n          stepDelayMs: status.stepDelayMs,\n          nextStepAt: state.nextMode2StepAt,\n          farthestDistance: status.farthestDistance,\n          maxDistance: status.maxDistance,\n        });\n      }\n    }\n\n    if (state.clearingPack`
-        )
-        .replace(
-          `    state.nextMode2StepAt = 0;\n    patchPathfinder();`,
-          `    state.nextMode2StepAt = 0;\n    state.mode2StepStartPosition = null;\n    state.mode2WaitingForStep = false;\n    patchPathfinder();`
-        )
-        .replace(
-          `    state.nextMode2StepAt = 0;\n    state.lastStatus = getOffStatus();`,
-          `    state.nextMode2StepAt = 0;\n    state.mode2StepStartPosition = null;\n    state.mode2WaitingForStep = false;\n    state.lastStatus = getOffStatus();`
-        )
-        .replace(
-          `      state.nextMode2StepAt = 0;\n    }`,
-          `      state.nextMode2StepAt = 0;\n      state.mode2StepStartPosition = null;\n      state.mode2WaitingForStep = false;\n    }`
-        );
+        .replace("    nextMode2StepAt: 0,\n", "    nextMode2StepAt: 0,\n    mode2StepStartPosition: null,\n    mode2WaitingForStep: false,\n")
+        .replace(`      if (status.mode === 2 && status.luring) {\n        state.nextMode2StepAt = Date.now() + status.stepDelayMs;\n        return limitPathToOneStep(path);\n      }`, `      if (status.mode === 2 && status.luring) {\n        const startPosition = playerPos();\n        state.mode2StepStartPosition = startPosition;\n        state.mode2WaitingForStep = !!startPosition;\n        return limitPathToOneStep(path);\n      }`)
+        .replace(`    state.lastStatus = status;\n\n    if (state.clearingPack`, `    state.lastStatus = status;\n\n    if (status.mode === 2 && status.luring && state.mode2WaitingForStep) {\n      const currentPosition = playerPos();\n      const startPosition = state.mode2StepStartPosition;\n      if (currentPosition && startPosition && dist(currentPosition, startPosition) >= 1) {\n        stopCurrentPath();\n        state.nextMode2StepAt = Date.now() + status.stepDelayMs;\n        state.mode2WaitingForStep = false;\n        state.mode2StepStartPosition = null;\n        status = getLureStatus();\n        state.lastStatus = status;\n        bot.log?.("lure mode 2 completed paced step", { stepDelayMs: status.stepDelayMs, nextStepAt: state.nextMode2StepAt, farthestDistance: status.farthestDistance, maxDistance: status.maxDistance });\n      }\n    }\n\n    if (state.clearingPack`)
+        .replace(`    state.nextMode2StepAt = 0;\n    patchPathfinder();`, `    state.nextMode2StepAt = 0;\n    state.mode2StepStartPosition = null;\n    state.mode2WaitingForStep = false;\n    patchPathfinder();`)
+        .replace(`    state.nextMode2StepAt = 0;\n    state.lastStatus = getOffStatus();`, `    state.nextMode2StepAt = 0;\n    state.mode2StepStartPosition = null;\n    state.mode2WaitingForStep = false;\n    state.lastStatus = getOffStatus();`)
+        .replace(`      state.nextMode2StepAt = 0;\n    }`, `      state.nextMode2StepAt = 0;\n      state.mode2StepStartPosition = null;\n      state.mode2WaitingForStep = false;\n    }`);
     }
-
     if (path === "src/ui/panel.js") {
-      code = code.replace(
-        `  function refreshVisibleCreatures() {\n    const list = document.getElementById("minibia-bot-visible-creatures-list");\n    if (!list) return;`,
-        `  function refreshVisibleCreatures() {\n    const list = document.getElementById("minibia-bot-visible-creatures-list");\n    if (!list || isPanelCollapsed()) return;`
-      );
-      code = code.replace(
-        `    const visibleCreaturesTimerId = window.setInterval(refreshVisibleCreatures, 1000);`,
-        `    const visibleCreaturesTimerId = window.setInterval(() => {\n      if (!isPanelCollapsed()) refreshVisibleCreatures();\n    }, 1000);`
-      );
-      code = code.replace(
-        `    const talkStatusTimerId = window.setInterval(refreshTalkStatus, 1000);`,
-        `    const talkStatusTimerId = window.setInterval(() => {\n      if (!isPanelCollapsed()) refreshTalkStatus();\n    }, 1000);`
-      );
-      code = code.replace(
-        `    const caveStatusTimerId = window.setInterval(() => {\n      refreshCaveStatus();`,
-        `    const caveStatusTimerId = window.setInterval(() => {\n      if (isPanelCollapsed()) return;\n      refreshCaveStatus();`
-      );
+      code = code.replace(`  function refreshVisibleCreatures() {\n    const list = document.getElementById("minibia-bot-visible-creatures-list");\n    if (!list) return;`, `  function refreshVisibleCreatures() {\n    const list = document.getElementById("minibia-bot-visible-creatures-list");\n    if (!list || isPanelCollapsed()) return;`);
+      code = code.replace(`    const visibleCreaturesTimerId = window.setInterval(refreshVisibleCreatures, 1000);`, `    const visibleCreaturesTimerId = window.setInterval(() => {\n      if (!isPanelCollapsed()) refreshVisibleCreatures();\n    }, 1000);`);
+      code = code.replace(`    const talkStatusTimerId = window.setInterval(refreshTalkStatus, 1000);`, `    const talkStatusTimerId = window.setInterval(() => {\n      if (!isPanelCollapsed()) refreshTalkStatus();\n    }, 1000);`);
+      code = code.replace(`    const caveStatusTimerId = window.setInterval(() => {\n      refreshCaveStatus();`, `    const caveStatusTimerId = window.setInterval(() => {\n      if (isPanelCollapsed()) return;\n      refreshCaveStatus();`);
     }
-
     return code;
   }
 
   async function loadSourceFile(path) {
     const response = await fetch(`${rawBaseUrl}/${path}?t=${Date.now()}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`Failed to load ${path}: HTTP ${response.status}`);
-
     let code = await response.text();
     code = addSafeUiPerformanceOptimizations(code, path);
     if (path === "src/version.js") {
-      code = code
-        .replaceAll("%%BRANCH%%", ref)
-        .replaceAll("%%COMMIT%%", "source-loader")
-        .replaceAll("%%DATE%%", new Date().toISOString());
+      code = code.replaceAll("%%BRANCH%%", ref).replaceAll("%%COMMIT%%", "source-loader").replaceAll("%%DATE%%", new Date().toISOString());
     }
-
     const sourceUrl = `${rawBaseUrl}/${path}`;
     try {
       (0, eval)(`${code}\n//# sourceURL=${sourceUrl}`);
@@ -253,26 +201,15 @@
 
   async function load() {
     if (window.minibiaBot?.destroy) {
-      try {
-        window.minibiaBot.destroy();
-      } catch (error) {
-        console.warn("[minibia-bot] Existing bot cleanup failed", error);
-      }
+      try { window.minibiaBot.destroy(); } catch (error) { console.warn("[minibia-bot] Existing bot cleanup failed", error); }
     }
-
     installUiCompatibilityShim();
     delete window.__minibiaBotBundle;
     window.__minibiaBotBundle = {};
-
-    for (const path of sourceFiles) {
-      await loadSourceFile(path);
-    }
-
+    for (const path of sourceFiles) await loadSourceFile(path);
     keepPanelTitleBlank();
     console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);
   }
 
-  load().catch((error) => {
-    console.error("[minibia-bot] Source loader failed", error);
-  });
+  load().catch((error) => console.error("[minibia-bot] Source loader failed", error));
 })();
