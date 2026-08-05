@@ -3,7 +3,6 @@
   const PROFILES_KEY = "minibiaBot.profiles.v2";
   const ACTIVE_KEY = "minibiaBot.profiles.active";
   const TOKEN_KEY = "minibiaBot.github.token";
-  const SOURCE_LOADER_URL = "https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js";
 
   const excludedExact = new Set([
     PROFILES_KEY,
@@ -14,15 +13,16 @@
 
   function isProtectedKey(key) {
     const value = String(key || "");
+    const lower = value.toLowerCase();
     return excludedExact.has(value) ||
       value.startsWith("minibiaBot.ui.") ||
-      value.includes("panel") ||
-      value.includes("scroll") ||
-      value.includes("layout") ||
-      value.includes("sectionOrder") ||
-      value.includes("columnOrder") ||
-      value.includes("runtime") ||
-      value.includes("status");
+      lower.includes("panelposition") ||
+      lower.includes("panelcollapsed") ||
+      lower.includes("panelscroll") ||
+      lower.includes("scrollposition") ||
+      lower.includes("sectionorder") ||
+      lower.includes("columnorder") ||
+      lower.includes("layoutorder");
   }
 
   function isProfileSettingKey(key) {
@@ -58,18 +58,14 @@
   }
 
   function applySettings(settings) {
+    let applied = 0;
     Object.entries(settings || {}).forEach(([key, value]) => {
       if (isProfileSettingKey(key) && typeof value === "string") {
         window.localStorage.setItem(key, value);
+        applied += 1;
       }
     });
-  }
-
-  async function reloadCompleteBot() {
-    const response = await fetch(`${SOURCE_LOADER_URL}?profileReload=${Date.now()}`, { cache: "no-store" });
-    if (!response.ok) throw new Error(`Bot reload failed: HTTP ${response.status}`);
-    const code = await response.text();
-    (0, eval)(`${code}\n//# sourceURL=${SOURCE_LOADER_URL}`);
+    return applied;
   }
 
   function findCaveSection(panel) {
@@ -133,26 +129,37 @@
     const profiles = readProfiles();
     if (mustBeNew && profiles[normalized]) throw new Error(`Profile “${normalized}” already exists`);
 
+    const settings = captureSettings();
     profiles[normalized] = {
       name: normalized,
       savedAt: new Date().toISOString(),
-      settings: captureSettings(),
+      settings,
     };
     writeProfiles(profiles);
     window.localStorage.setItem(ACTIVE_KEY, normalized);
     refreshPanel(normalized);
+    updateStatus(`Saved profile: ${normalized} (${Object.keys(settings).length} settings)`);
     return profiles[normalized];
   }
 
-  async function loadProfile(name) {
+  function loadProfile(name) {
     const normalized = String(name || "").trim();
     const profile = readProfiles()[normalized];
     if (!profile) throw new Error("Profile was not found");
 
-    updateStatus(`Loading profile: ${normalized}...`);
-    applySettings(profile.settings);
+    const savedCount = Object.keys(profile.settings || {}).length;
+    if (!savedCount) {
+      throw new Error("This profile contains no saved settings. Select it, configure the bot, and press Save again.");
+    }
+
+    const appliedCount = applySettings(profile.settings);
+    if (!appliedCount) {
+      throw new Error("No compatible settings were found in this profile. Save the profile again with the current bot version.");
+    }
+
     window.localStorage.setItem(ACTIVE_KEY, normalized);
-    await reloadCompleteBot();
+    updateStatus(`Loaded ${appliedCount} settings from ${normalized}. Reloading...`);
+    window.setTimeout(() => window.location.reload(), 100);
     return true;
   }
 
@@ -205,8 +212,8 @@
         catch (error) { window.alert(error?.message || String(error)); }
       });
 
-      section.querySelector("#minibia-bot-profile-load").addEventListener("click", async () => {
-        try { await loadProfile(select.value); }
+      section.querySelector("#minibia-bot-profile-load").addEventListener("click", () => {
+        try { loadProfile(select.value); }
         catch (error) {
           updateStatus("Profile load failed.");
           window.alert(error?.message || String(error));
