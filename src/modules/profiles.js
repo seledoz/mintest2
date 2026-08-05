@@ -11,6 +11,33 @@
     TOKEN_KEY,
   ]);
 
+  const moduleByStorageKey = {
+    "minibiaBot.rune.config": "rune",
+    "minibiaBot.heal.config": "heal",
+    "minibiaBot.antiParalyzeV2.config": "antiParalyze",
+    "minibiaBot.damageTtsAlert.config": "damageTtsAlert",
+    "minibiaBot.invisible.config": "invisible",
+    "minibiaBot.magicShield.config": "magicShield",
+    "minibiaBot.attack.config": "attack",
+    "minibiaBot.attackAoe.config": "attackAoe",
+    "minibiaBot.greatFireballV2.config": "greatFireballV2",
+    "minibiaBot.lure.config": "lureMode",
+    "minibiaBot.attackExclude.config": "attackExclude",
+    "minibiaBot.attackPriority.config": "attackPriority",
+    "minibiaBot.redTextAlert.config": "redTextAlert",
+    "minibiaBot.cave.config": "cave",
+    "minibiaBot.caveForwardLoop.config": "caveForwardLoop",
+    "minibiaBot.equipRing.config": "equipRing",
+    "minibiaBot.mining.config": "mining",
+    "minibiaBot.eat.config": "eat",
+    "minibiaBot.talk.config": "talk",
+    "minibiaBot.runeMakerDrop.config": "runeMakerDrop",
+    "minibiaBot.maxLight.config": "maxLight",
+    "minibiaBot.lowCapAlarm.config": "lowCapAlarm",
+    "minibiaBot.playerScreenAlert.config": "playerScreenAlert",
+    "minibiaBot.gmDefaultChatKillSwitch.config": "gmDefaultChatKillSwitch",
+  };
+
   function isProtectedKey(key) {
     const value = String(key || "");
     const lower = value.toLowerCase();
@@ -57,71 +84,49 @@
     return settings;
   }
 
-  function applySettings(settings) {
-    let applied = 0;
-    Object.entries(settings || {}).forEach(([key, value]) => {
-      if (isProfileSettingKey(key) && typeof value === "string") {
-        window.localStorage.setItem(key, value);
-        applied += 1;
-      }
+  function parseStoredValue(value) {
+    try { return JSON.parse(value); } catch (error) { return value; }
+  }
+
+  function applyModuleConfig(module, config) {
+    if (!module || !config || typeof config !== "object" || Array.isArray(config)) return false;
+
+    if (typeof module.updateConfig === "function") {
+      module.updateConfig({ ...config });
+    } else if (typeof module.setConfig === "function") {
+      module.setConfig({ ...config });
+    }
+
+    if (typeof config.enabled === "boolean") {
+      if (config.enabled && typeof module.start === "function") module.start({ ...config });
+      if (!config.enabled && typeof module.stop === "function") module.stop({ persistEnabled: false });
+    }
+    return true;
+  }
+
+  function applyLiveSettings(settings) {
+    const bot = window.minibiaBot;
+    let stored = 0;
+    let liveModules = 0;
+
+    Object.entries(settings || {}).forEach(([key, rawValue]) => {
+      if (!isProfileSettingKey(key) || typeof rawValue !== "string") return;
+      window.localStorage.setItem(key, rawValue);
+      stored += 1;
+
+      const moduleName = moduleByStorageKey[key];
+      const module = moduleName ? bot?.[moduleName] : null;
+      if (module && applyModuleConfig(module, parseStoredValue(rawValue))) liveModules += 1;
     });
-    return applied;
-  }
 
-  function capturePanelState() {
-    const panel = document.getElementById("minibia-bot-panel");
-    const content = panel?.querySelector?.(".mb-content");
-    if (!panel) return null;
-    const rect = panel.getBoundingClientRect();
-    return {
-      left: panel.style.left || `${Math.round(rect.left)}px`,
-      top: panel.style.top || `${Math.round(rect.top)}px`,
-      right: panel.style.right || "auto",
-      bottom: panel.style.bottom || "auto",
-      scrollTop: content?.scrollTop || 0,
-      collapsed: panel.dataset.collapsed || "false",
-    };
-  }
+    window.dispatchEvent(new CustomEvent("minibia-bot-profile-loaded", {
+      detail: { settings: { ...(settings || {}) }, stored, liveModules },
+    }));
+    document.dispatchEvent(new CustomEvent("minibia-bot-settings-changed", {
+      detail: { source: "profile" },
+    }));
 
-  function restorePanelState(state) {
-    if (!state) return;
-    let attempts = 0;
-    const timer = window.setInterval(() => {
-      attempts += 1;
-      const panel = document.getElementById("minibia-bot-panel");
-      const content = panel?.querySelector?.(".mb-content");
-      if (panel) {
-        panel.style.left = state.left;
-        panel.style.top = state.top;
-        panel.style.right = state.right;
-        panel.style.bottom = state.bottom;
-        panel.dataset.collapsed = state.collapsed;
-        if (content) content.scrollTop = state.scrollTop;
-        window.clearInterval(timer);
-      } else if (attempts >= 200) {
-        window.clearInterval(timer);
-      }
-    }, 25);
-  }
-
-  function reloadBotInPlace(panelState) {
-    const reload = window.minibiaBotReload;
-    if (typeof reload !== "function") {
-      throw new Error("Internal bot reload is not available");
-    }
-
-    const oldBot = window.minibiaBot;
-    try {
-      oldBot?.destroy?.();
-    } catch (error) {
-      console.warn("[minibia-bot] profile cleanup failed", error);
-    }
-
-    // Prevent main.js from copying the old live enabled states back over the
-    // profile values that were just written to localStorage.
-    window.minibiaBot = null;
-    reload();
-    restorePanelState(panelState);
+    return { stored, liveModules };
   }
 
   function findCaveSection(panel) {
@@ -132,7 +137,6 @@
       document.getElementById("minibia-bot-cave-preset-select");
     const knownSection = knownControl?.closest?.(".mb-section");
     if (knownSection) return knownSection;
-
     const label = Array.from(panel.querySelectorAll(".mb-label")).find((element) =>
       String(element.textContent || "").trim().toLowerCase() === "cavebot"
     );
@@ -147,7 +151,6 @@
   function refreshPanel(preferredSelection = "") {
     const select = document.getElementById("minibia-bot-profile-select");
     if (!select) return;
-
     const names = profileNames();
     const currentSelection = preferredSelection || select.value;
     const active = window.localStorage.getItem(ACTIVE_KEY) || "";
@@ -159,11 +162,7 @@
     } else {
       names.forEach((name) => select.appendChild(new Option(name, name)));
       select.disabled = false;
-      select.value = names.includes(currentSelection)
-        ? currentSelection
-        : names.includes(active)
-          ? active
-          : names[0];
+      select.value = names.includes(currentSelection) ? currentSelection : names.includes(active) ? active : names[0];
     }
 
     const disabled = !select.value;
@@ -181,16 +180,10 @@
   function saveProfile(name, mustBeNew = false) {
     const normalized = String(name || "").trim();
     if (!normalized) throw new Error("Profile name is required");
-
     const profiles = readProfiles();
     if (mustBeNew && profiles[normalized]) throw new Error(`Profile “${normalized}” already exists`);
-
     const settings = captureSettings();
-    profiles[normalized] = {
-      name: normalized,
-      savedAt: new Date().toISOString(),
-      settings,
-    };
+    profiles[normalized] = { name: normalized, savedAt: new Date().toISOString(), settings };
     writeProfiles(profiles);
     window.localStorage.setItem(ACTIVE_KEY, normalized);
     refreshPanel(normalized);
@@ -202,21 +195,15 @@
     const normalized = String(name || "").trim();
     const profile = readProfiles()[normalized];
     if (!profile) throw new Error("Profile was not found");
-
     const savedCount = Object.keys(profile.settings || {}).length;
-    if (!savedCount) {
-      throw new Error("This profile contains no saved settings. Select it, configure the bot, and press Save again.");
-    }
+    if (!savedCount) throw new Error("This profile contains no saved settings. Save it again after configuring the bot.");
 
-    const panelState = capturePanelState();
-    const appliedCount = applySettings(profile.settings);
-    if (!appliedCount) {
-      throw new Error("No compatible settings were found in this profile. Save the profile again with the current bot version.");
-    }
+    const result = applyLiveSettings(profile.settings);
+    if (!result.stored) throw new Error("No compatible settings were found in this profile.");
 
     window.localStorage.setItem(ACTIVE_KEY, normalized);
-    updateStatus(`Loading ${appliedCount} settings from ${normalized}...`);
-    reloadBotInPlace(panelState);
+    refreshPanel(normalized);
+    updateStatus(`Loaded profile: ${normalized} (${result.liveModules} live modules updated)`);
     return true;
   }
 
@@ -224,7 +211,6 @@
     const normalized = String(name || "").trim();
     const profiles = readProfiles();
     if (!profiles[normalized]) return false;
-
     delete profiles[normalized];
     writeProfiles(profiles);
     if (window.localStorage.getItem(ACTIVE_KEY) === normalized) window.localStorage.removeItem(ACTIVE_KEY);
@@ -260,28 +246,19 @@
       section.querySelector("#minibia-bot-profile-new").addEventListener("click", () => {
         const name = window.prompt("New profile name:")?.trim();
         if (!name) return;
-        try { saveProfile(name, true); }
-        catch (error) { window.alert(error?.message || String(error)); }
+        try { saveProfile(name, true); } catch (error) { window.alert(error?.message || String(error)); }
       });
-
       section.querySelector("#minibia-bot-profile-save").addEventListener("click", () => {
-        try { saveProfile(select.value); }
-        catch (error) { window.alert(error?.message || String(error)); }
+        try { saveProfile(select.value); } catch (error) { window.alert(error?.message || String(error)); }
       });
-
       section.querySelector("#minibia-bot-profile-load").addEventListener("click", () => {
         try { loadProfile(select.value); }
-        catch (error) {
-          updateStatus("Profile load failed.");
-          window.alert(error?.message || String(error));
-        }
+        catch (error) { updateStatus("Profile load failed."); window.alert(error?.message || String(error)); }
       });
-
       section.querySelector("#minibia-bot-profile-delete").addEventListener("click", () => {
         const name = select.value;
         if (name && window.confirm(`Delete profile “${name}”?`)) deleteProfile(name);
       });
-
       select.addEventListener("change", () => refreshPanel(select.value));
     }
 
