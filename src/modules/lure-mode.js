@@ -24,6 +24,8 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
     clearingPack: false,
     resumeCaveAfterClear: false,
     nextMode2StepAt: 0,
+    mode2StepOrigin: null,
+    mode2StepInProgress: false,
   };
 
   function persistConfig() { bot.storage.set(configStorageKey, { ...config }); }
@@ -52,6 +54,11 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
   function monsterPos(monster) { return pos(monster?.getPosition?.() || monster?.__position); }
   function currentTarget() { return bot.attack?.getCurrentTarget?.() || window.gameClient?.player?.__target || null; }
   function visibleMonsters() { return bot.attack?.getNearbyMonsters?.() || bot.xray?.getVisibleMonsters?.({ sameFloorOnly: true }) || []; }
+
+  function resetMode2Step() {
+    state.mode2StepOrigin = null;
+    state.mode2StepInProgress = false;
+  }
 
   function getOffStatus() {
     return {
@@ -99,7 +106,11 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
     const clearingPack = !!state.clearingPack;
     const luring = monsters.length > 0 && !readyToEngage && !clearingPack && !hasTarget && !combatActive;
     const mode1Hold = luring && closestDistance > maxDistance;
-    const mode2Hold = luring && (farthestDistance > maxDistance || Date.now() < state.nextMode2StepAt);
+    const mode2Hold = luring && (
+      farthestDistance > maxDistance
+      || state.mode2StepInProgress
+      || Date.now() < state.nextMode2StepAt
+    );
 
     return {
       enabled: true,
@@ -152,6 +163,7 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
   }
 
   function pauseCaveForFight() {
+    resetMode2Step();
     stopCurrentPath();
     try {
       const caveStatus = bot.cave?.status?.();
@@ -166,13 +178,6 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
     if (!state.resumeCaveAfterClear) return;
     state.resumeCaveAfterClear = false;
     try { bot.cave?.start?.(); } catch (error) {}
-  }
-
-  function limitPathToOneStep(path) {
-    if (Array.isArray(path)) return path.length > 1 ? path.slice(0, 1) : path;
-    if (Array.isArray(path?.path)) return { ...path, path: path.path.length > 1 ? path.path.slice(0, 1) : path.path };
-    if (Array.isArray(path?.steps)) return { ...path, steps: path.steps.length > 1 ? path.steps.slice(0, 1) : path.steps };
-    return path;
   }
 
   function patchPathfinder() {
@@ -207,12 +212,12 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
         return null;
       }
 
-      const path = state.originalFindPath(...args);
       if (status.mode === 2 && status.luring) {
-        state.nextMode2StepAt = Date.now() + status.stepDelayMs;
-        return limitPathToOneStep(path);
+        state.mode2StepOrigin = playerPos();
+        state.mode2StepInProgress = !!state.mode2StepOrigin;
       }
-      return path;
+
+      return state.originalFindPath(...args);
     };
     return true;
   }
@@ -243,6 +248,21 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
   function tick() {
     if (!config.enabled) return getOffStatus();
     patchPathfinder();
+
+    if (modeValue(config.mode) === 2 && state.mode2StepInProgress) {
+      const current = playerPos();
+      if (current && state.mode2StepOrigin && dist(current, state.mode2StepOrigin) >= 1) {
+        stopCurrentPath();
+        resetMode2Step();
+        state.nextMode2StepAt = Date.now() + intValue(
+          config.stepDelayMs,
+          DEFAULT_STEP_DELAY_MS,
+          100,
+          2000
+        );
+      }
+    }
+
     let status = getLureStatus();
     state.lastStatus = status;
 
@@ -285,6 +305,7 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
     }
 
     if (status.hasTarget || status.combatActive) {
+      resetMode2Step();
       setAttackSuppressed(false);
       updateStatusUi(status);
       return status;
@@ -299,6 +320,7 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
   function startRuntime() {
     if (!config.enabled || state.timerId != null) return false;
     state.nextMode2StepAt = 0;
+    resetMode2Step();
     patchPathfinder();
     tick();
     state.timerId = window.setInterval(() => {
@@ -312,6 +334,7 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
     state.timerId = null;
     state.clearingPack = false;
     state.nextMode2StepAt = 0;
+    resetMode2Step();
     state.lastStatus = getOffStatus();
     setAttackSuppressed(false);
     resumeCaveIfNeeded();
@@ -326,6 +349,7 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
     if (Object.prototype.hasOwnProperty.call(nextConfig, "mode")) {
       config.mode = modeValue(nextConfig.mode);
       state.nextMode2StepAt = 0;
+      resetMode2Step();
     }
     if (Object.prototype.hasOwnProperty.call(nextConfig, "minMonsters")) config.minMonsters = intValue(nextConfig.minMonsters, config.minMonsters || 3, 1, 20);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "maxDistance")) config.maxDistance = intValue(nextConfig.maxDistance, config.maxDistance || 4, 1, COUNT_RANGE);
@@ -361,124 +385,80 @@ window.__minibiaBotBundle.installLureModeModule = function installLureModeModule
       document.head.appendChild(style);
     }
     style.textContent = `
-      #minibia-bot-panel { width: min(98vw, 1260px) !important; max-width: calc(100vw - 12px) !important; }
-      #minibia-bot-panel .mb-body:not([hidden]) { grid-template-columns: minmax(0, 1fr) 280px 240px 280px !important; }
-      #minibia-bot-panel .mb-aoe-column { display: grid !important; gap: 10px !important; align-content: start !important; min-width: 0 !important; }
-      #minibia-bot-lure-section .mb-field-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      #minibia-bot-lure-standalone { display: none !important; }
-      @media (max-width: 760px) { #minibia-bot-panel .mb-body:not([hidden]) { grid-template-columns: 1fr !important; } }
+      #minibia-bot-lure-section .mb-row-three { grid-template-columns: 1fr 72px 38px; }
+      #minibia-bot-lure-section select,
+      #minibia-bot-lure-section input[type="number"] { min-width: 0; width: 100%; box-sizing: border-box; }
     `;
   }
 
-  function makeSection() {
-    const section = document.createElement("div");
-    section.className = "mb-section mb-column-section";
-    section.id = "minibia-bot-lure-section";
-    section.innerHTML = `
-      <div class="mb-label">Lure Mode</div>
-      <div class="mb-stack">
-        <label class="mb-toggle"><input type="checkbox" id="minibia-bot-lure-enabled" /><span>Enable Lure Mode</span></label>
-        <label class="mb-field" for="minibia-bot-lure-mode"><span class="mb-field-label">Mode</span>
-          <select id="minibia-bot-lure-mode">
-            <option value="1">Lure Mode 1 (Current)</option>
-            <option value="2">Lure Mode 2 (Paced)</option>
-          </select>
-        </label>
-        <div class="mb-field-grid">
-          <label class="mb-field" for="minibia-bot-lure-min-monsters"><span class="mb-field-label">Min Monsters</span><input type="number" id="minibia-bot-lure-min-monsters" min="1" max="20" step="1" /></label>
-          <label class="mb-field" for="minibia-bot-lure-max-distance"><span class="mb-field-label">Max Distance</span><input type="number" id="minibia-bot-lure-max-distance" min="1" max="7" step="1" /></label>
-          <label class="mb-field" for="minibia-bot-lure-step-delay"><span class="mb-field-label">Mode 2 Step Delay (ms)</span><input type="number" id="minibia-bot-lure-step-delay" min="100" max="2000" step="50" /></label>
-        </div>
-        <div class="mb-small-note">Mode 1 is unchanged. Mode 2 waits until every tracked monster is within Max Distance, then allows one path step and checks the pack again.</div>
-        <div class="mb-small-note">After Min Monsters is reached, both modes stay in kill mode until the pack is cleared.</div>
-        <div class="mb-small-note" id="minibia-bot-lure-status">Lure 1: off</div>
-      </div>
-    `;
-    section.querySelector("#minibia-bot-lure-enabled")?.addEventListener("change", (event) => updateConfig({ enabled: event.target.checked }));
-    section.querySelector("#minibia-bot-lure-mode")?.addEventListener("change", (event) => updateConfig({ mode: event.target.value }));
-    section.querySelector("#minibia-bot-lure-min-monsters")?.addEventListener("input", (event) => updateConfig({ minMonsters: event.target.value }));
-    section.querySelector("#minibia-bot-lure-max-distance")?.addEventListener("input", (event) => updateConfig({ maxDistance: event.target.value }));
-    section.querySelector("#minibia-bot-lure-step-delay")?.addEventListener("input", (event) => updateConfig({ stepDelayMs: event.target.value }));
-    return section;
-  }
-
-  function cleanupDuplicateLurePanels() {
-    document.querySelectorAll("#minibia-bot-lure-standalone").forEach((node) => node.remove());
-    const sections = Array.from(document.querySelectorAll("#minibia-bot-lure-section"));
-    sections.slice(1).forEach((node) => node.remove());
-    return sections[0] || null;
-  }
-
-  function getOrCreateLureSection() {
-    const existing = cleanupDuplicateLurePanels();
-    if (existing) {
-      existing.remove();
-    }
-    return makeSection();
-  }
-
-  function getFourthColumn() {
-    const panel = document.getElementById("minibia-bot-panel") || document.getElementById("k9x-panel");
-    const body = panel?.querySelector?.(".mb-body");
-    if (!panel || !body) return null;
-    let column = document.getElementById("minibia-bot-aoe-column");
-    if (!column) {
-      column = document.createElement("div");
-      column.id = "minibia-bot-aoe-column";
-      column.className = "mb-aoe-column";
-      body.appendChild(column);
-    }
-    return column;
-  }
-
-  function injectUi() {
+  function installUi() {
+    const section = document.getElementById("minibia-bot-lure-section");
+    if (!section) return false;
     installLureStyle();
-    let section = document.getElementById("minibia-bot-lure-section");
-    if (!section || !document.getElementById("minibia-bot-lure-mode")) section = getOrCreateLureSection();
-    const column = getFourthColumn();
-    if (column && section.parentElement !== column) column.appendChild(section);
-    cleanupDuplicateLurePanels();
+    const stack = section.querySelector(".mb-stack");
+    if (!stack) return false;
+
+    let mode = document.getElementById("minibia-bot-lure-mode");
+    if (!mode) {
+      const row = document.createElement("div");
+      row.className = "mb-row-three";
+      row.innerHTML = `<span>Mode</span><select id="minibia-bot-lure-mode"><option value="1">1</option><option value="2">2</option></select><span></span>`;
+      const minRow = document.getElementById("minibia-bot-lure-min-monsters")?.closest?.(".mb-row-three");
+      if (minRow) stack.insertBefore(row, minRow);
+      else stack.appendChild(row);
+      mode = row.querySelector("select");
+      mode.addEventListener("change", (event) => updateConfig({ mode: Number(event.target.value) }));
+    }
+
+    let delay = document.getElementById("minibia-bot-lure-step-delay");
+    if (!delay) {
+      const row = document.createElement("div");
+      row.className = "mb-row-three";
+      row.innerHTML = `<span>Step Delay</span><input type="number" id="minibia-bot-lure-step-delay" min="100" max="2000" step="50" /><span>ms</span>`;
+      const statusLabel = document.getElementById("minibia-bot-lure-status");
+      if (statusLabel) stack.insertBefore(row, statusLabel);
+      else stack.appendChild(row);
+      delay = row.querySelector("input");
+      delay.addEventListener("change", (event) => updateConfig({ stepDelayMs: Number(event.target.value) }));
+    }
+
     updateUiValues();
     updateStatusUi();
-    return !!document.getElementById("minibia-bot-lure-section");
+    return true;
   }
 
-  function startUiInjector() {
-    let attempts = 0;
+  function startUiWatcher() {
+    if (state.uiTimerId != null) return;
+    installUi();
     state.uiTimerId = window.setInterval(() => {
-      attempts += 1;
-      injectUi();
-      const section = document.getElementById("minibia-bot-lure-section");
-      const column = document.getElementById("minibia-bot-aoe-column");
-      const correctlyPlaced = !!section && !!column && section.parentElement === column;
-      if (correctlyPlaced || attempts >= 120) {
-        window.clearInterval(state.uiTimerId);
-        state.uiTimerId = null;
-      }
-    }, 250);
-    injectUi();
+      try { installUi(); } catch (error) {}
+    }, 1000);
   }
 
-  function start() { config.enabled = true; persistConfig(); updateUiValues(); return startRuntime(); }
-  function stop() { config.enabled = false; persistConfig(); updateUiValues(); return stopRuntime(); }
-  function destroy() {
-    stopRuntime();
+  function stopUiWatcher() {
     if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
     state.uiTimerId = null;
   }
-  function status() {
-    return {
-      running: config.enabled && state.timerId != null,
-      config: { ...config, countRange: COUNT_RANGE },
-      lure: config.enabled ? getLureStatus() : getOffStatus(),
-      clearingPack: config.enabled && state.clearingPack,
-      resumeCaveAfterClear: config.enabled && state.resumeCaveAfterClear,
-      suppressingAttack: config.enabled && state.suppressingAttack,
-    };
-  }
 
-  bot.lureMode = { start, stop, status, updateConfig, getLureStatus, config };
-  if (config.enabled) startRuntime(); else state.lastStatus = getOffStatus();
-  startUiInjector();
-  bot.addCleanup?.(destroy);
+  bot.lureMode = {
+    config,
+    status: () => state.lastStatus || (config.enabled ? getLureStatus() : getOffStatus()),
+    updateConfig,
+    start: (overrides = {}) => updateConfig({ ...overrides, enabled: true }),
+    stop: (options = {}) => {
+      const persistEnabled = options.persistEnabled !== false;
+      if (persistEnabled) return updateConfig({ enabled: false });
+      config.enabled = false;
+      stopRuntime();
+      updateUiValues();
+      return { ...config };
+    },
+  };
+
+  startUiWatcher();
+  if (config.enabled) startRuntime();
+  bot.addCleanup?.(() => {
+    stopRuntime();
+    stopUiWatcher();
+  });
 };

@@ -60,13 +60,13 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
   }
 
   function getGateStatus(now = Date.now()) {
-    const { hp, mana, food } = readStats();
+    const { hp, mana } = readStats();
     if (!hp || !mana) {
       return {
         hasStats: false,
         enoughHp: false,
         enoughMana: false,
-        enoughFood: false,
+        enoughFood: true,
         cooldownReady: false,
         cooldownRemainingMs: config.runeCooldownMs,
         canMakeRune: false,
@@ -76,7 +76,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     const hpPercent = hp.max > 0 ? (hp.current / hp.max) * 100 : 0;
     const enoughHp = hpPercent >= config.minHpPercent;
     const enoughMana = mana.current >= config.runeManaCost;
-    const enoughFood = food?.seconds == null || food.seconds >= config.minFoodSeconds;
+    const enoughFood = true;
     const cooldownElapsedMs = now - state.lastRuneAt;
     const cooldownRemainingMs = Math.max(0, config.runeCooldownMs - cooldownElapsedMs);
     const cooldownReady = cooldownRemainingMs === 0;
@@ -88,7 +88,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
       enoughFood,
       cooldownReady,
       cooldownRemainingMs,
-      canMakeRune: enoughHp && enoughMana && enoughFood && cooldownReady,
+      canMakeRune: enoughHp && enoughMana && cooldownReady,
     };
   }
 
