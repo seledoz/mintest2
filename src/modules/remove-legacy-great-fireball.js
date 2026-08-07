@@ -193,3 +193,91 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     console.error("[minibia-bot] failed to load Rune Maker hotkey UI", error);
   }
 })();
+
+(function installInlineRuneHotkeyUiFallback() {
+  const WRAPPER_ID = "minibia-bot-rune-hotkey-inline";
+  let attempts = 0;
+
+  function removeLegacyRows(section) {
+    section?.querySelectorAll?.(".mb-field").forEach((field) => {
+      const label = String(field.querySelector?.(".mb-field-label")?.textContent || "").trim().toLowerCase();
+      if (label === "rune spell" || label === "rune mana cost") field.remove();
+    });
+    document.getElementById("minibia-bot-rune-settings")?.remove();
+  }
+
+  function install() {
+    const bot = window.minibiaBot;
+    const toggle = document.getElementById("minibia-bot-rune-enabled");
+    const section = toggle?.closest?.(".mb-section");
+    const stack = section?.querySelector?.(".mb-stack");
+    if (!bot?.rune || !toggle || !stack) return false;
+
+    removeLegacyRows(section);
+
+    let wrapper = document.getElementById(WRAPPER_ID);
+    if (!wrapper) {
+      document.getElementById("minibia-bot-rune-hotkey-settings")?.remove();
+      wrapper = document.createElement("div");
+      wrapper.id = WRAPPER_ID;
+      wrapper.className = "mb-stack";
+      wrapper.innerHTML = `
+        <label class="mb-field">
+          <span class="mb-field-label">Rune Hotbar Slot</span>
+          <input type="number" id="minibia-bot-rune-inline-slot" min="1" max="12" step="1" />
+        </label>
+        <div class="mb-field">
+          <span class="mb-field-label">Rune Mana Cost</span>
+          <div class="mb-row">
+            <input type="text" inputmode="numeric" autocomplete="off" id="minibia-bot-rune-inline-mana" />
+            <button type="button" id="minibia-bot-rune-inline-save">Save</button>
+          </div>
+        </div>
+        <div class="mb-small-note" id="minibia-bot-rune-inline-saved"></div>
+      `;
+      toggle.closest("label")?.insertAdjacentElement("afterend", wrapper);
+
+      const cfg = bot.rune.status?.()?.config || bot.rune.config || {};
+      const slotInput = wrapper.querySelector("#minibia-bot-rune-inline-slot");
+      const manaInput = wrapper.querySelector("#minibia-bot-rune-inline-mana");
+      const saveButton = wrapper.querySelector("#minibia-bot-rune-inline-save");
+      const saved = wrapper.querySelector("#minibia-bot-rune-inline-saved");
+
+      slotInput.value = String(Math.min(12, Math.max(1, Math.trunc(Number(cfg.runeHotbarSlot) || 1))));
+      manaInput.value = String(Math.max(0, Math.trunc(Number(cfg.runeManaCost) || 0)));
+      saved.textContent = `Saved mana cost: ${manaInput.value}`;
+
+      slotInput.addEventListener("change", () => {
+        const value = Math.min(12, Math.max(1, Math.trunc(Number(slotInput.value) || 1)));
+        slotInput.value = String(value);
+        bot.rune.updateConfig?.({ runeHotbarSlot: value });
+      });
+
+      manaInput.addEventListener("input", () => {
+        manaInput.value = String(manaInput.value || "").replace(/\D+/g, "");
+      });
+
+      saveButton.addEventListener("click", () => {
+        const raw = String(manaInput.value || "").trim();
+        if (!/^\d+$/.test(raw)) {
+          saved.textContent = "Enter a whole-number mana cost.";
+          return;
+        }
+        const value = Math.max(0, Math.trunc(Number(raw)));
+        bot.rune.updateConfig?.({ runeManaCost: value });
+        manaInput.value = String(value);
+        saved.textContent = `Saved mana cost: ${value}`;
+      });
+    }
+
+    removeLegacyRows(section);
+    return true;
+  }
+
+  const timer = window.setInterval(() => {
+    attempts += 1;
+    install();
+    if (attempts >= 120) window.clearInterval(timer);
+  }, 250);
+  install();
+})();
