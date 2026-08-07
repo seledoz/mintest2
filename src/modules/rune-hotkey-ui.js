@@ -1,34 +1,27 @@
 (() => {
   const SECTION_MARKER_ID = "minibia-bot-rune-hotkey-settings";
+  const MANA_INPUT_ID = "minibia-bot-rune-hotbar-mana-cost";
 
   function purgeLegacyRuneUi() {
     const wrapper = document.getElementById(SECTION_MARKER_ID);
 
-    // Remove the legacy settings wrapper if an older Quick Controls instance recreated it.
     document.getElementById("minibia-bot-rune-settings")?.remove();
 
-    // Remove any legacy Rune Spell row, regardless of which module injected it.
     document.querySelectorAll("#minibia-bot-panel .mb-field").forEach((field) => {
       if (wrapper?.contains(field)) return;
       const caption = field.querySelector(".mb-field-label");
       const text = String(caption?.textContent || "").trim().toLowerCase();
-      if (text === "rune spell") field.remove();
+      if (text === "rune spell" || text === "rune mana cost") field.remove();
     });
 
-    // Keep exactly one Rune Mana Cost field: the one inside the new hotkey wrapper.
-    document.querySelectorAll("#minibia-bot-panel .mb-field").forEach((field) => {
-      if (wrapper?.contains(field)) return;
-      const caption = field.querySelector(".mb-field-label");
-      const text = String(caption?.textContent || "").trim().toLowerCase();
-      if (text === "rune mana cost") field.remove();
-    });
-
-    // Also remove duplicate legacy inputs by id in case their label markup differs.
     document.querySelectorAll("#minibia-bot-rune-spell-words").forEach((input) => {
       if (!wrapper?.contains(input)) (input.closest("label") || input).remove();
     });
+
+    // The old Rune Maker used this id. The hotkey Rune Maker intentionally uses
+    // a different id so no legacy refresh/listener can overwrite the editable field.
     document.querySelectorAll("#minibia-bot-rune-mana-cost").forEach((input) => {
-      if (!wrapper?.contains(input)) (input.closest("label") || input).remove();
+      (input.closest("label") || input).remove();
     });
   }
 
@@ -58,7 +51,7 @@
       </label>
       <label class="mb-field">
         <span class="mb-field-label">Rune Mana Cost</span>
-        <input type="number" id="minibia-bot-rune-mana-cost" min="0" step="1" />
+        <input type="number" id="${MANA_INPUT_ID}" min="0" step="1" />
       </label>
       <div class="mb-small-note" id="minibia-bot-rune-hotkey-status">Rune Maker: idle</div>
     `;
@@ -67,29 +60,26 @@
     purgeLegacyRuneUi();
 
     const slotInput = wrapper.querySelector("#minibia-bot-rune-hotbar-slot");
-    const manaInput = wrapper.querySelector("#minibia-bot-rune-mana-cost");
+    const manaInput = wrapper.querySelector(`#${MANA_INPUT_ID}`);
     const statusLabel = wrapper.querySelector("#minibia-bot-rune-hotkey-status");
 
     function normalizeSlot(value) {
       return Math.min(12, Math.max(1, Math.trunc(Number(value) || 1)));
     }
 
-    function refresh() {
+    // Populate editable fields once. Status refreshes must never write into them;
+    // otherwise clearing/retyping a number can be interrupted by a timer or an old UI listener.
+    const initialConfig = bot.rune.status?.()?.config || bot.rune.config || {};
+    slotInput.value = String(normalizeSlot(initialConfig.runeHotbarSlot));
+    manaInput.value = String(Math.max(0, Math.trunc(Number(initialConfig.runeManaCost) || 0)));
+
+    function refreshStatus() {
       purgeLegacyRuneUi();
 
       const status = bot.rune.status?.();
       const cfg = status?.config || bot.rune.config || {};
       const gates = status?.gates || {};
       const mana = Number(status?.stats?.mana?.current ?? 0);
-
-      // Do not overwrite a field while the user is typing in it. Previously the
-      // 250 ms refresh made it impossible to clear the existing value first.
-      if (document.activeElement !== slotInput) {
-        slotInput.value = String(normalizeSlot(cfg.runeHotbarSlot));
-      }
-      if (document.activeElement !== manaInput) {
-        manaInput.value = String(Math.max(0, Math.trunc(Number(cfg.runeManaCost) || 0)));
-      }
 
       if (!status?.running) statusLabel.textContent = "Rune Maker: idle";
       else if (!gates.validHotbarSlot) statusLabel.textContent = "Rune Maker: invalid hotbar slot";
@@ -104,19 +94,28 @@
       const runeHotbarSlot = normalizeSlot(slotInput.value);
       slotInput.value = String(runeHotbarSlot);
       bot.rune.updateConfig?.({ runeHotbarSlot });
-      refresh();
+      refreshStatus();
     });
 
     manaInput.addEventListener("change", () => {
-      const runeManaCost = Math.max(0, Math.trunc(Number(manaInput.value) || 0));
+      const raw = String(manaInput.value || "").trim();
+      if (raw === "") return;
+      const runeManaCost = Math.max(0, Math.trunc(Number(raw) || 0));
       manaInput.value = String(runeManaCost);
       bot.rune.updateConfig?.({ runeManaCost });
-      refresh();
+      refreshStatus();
     });
 
-    const timerId = window.setInterval(refresh, 250);
+    // Enter saves without requiring a mouse click elsewhere.
+    manaInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        manaInput.blur();
+      }
+    });
+
+    const timerId = window.setInterval(refreshStatus, 250);
     bot.addCleanup?.(() => window.clearInterval(timerId));
-    refresh();
+    refreshStatus();
     return true;
   }
 
@@ -126,7 +125,6 @@
     if (install() || attempts >= 80) window.clearInterval(timerId);
   }, 250);
 
-  // Keep a lightweight cleanup running briefly to catch late legacy injectors.
   let cleanupAttempts = 0;
   const cleanupTimer = window.setInterval(() => {
     cleanupAttempts += 1;
