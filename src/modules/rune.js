@@ -9,8 +9,8 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     lastTickAt: 0,
     tickInProgress: false,
     lastRuneAt: 0,
-    lastSendFailureAt: 0,
-    consecutiveSendFailures: 0,
+    lastAttemptAt: 0,
+    pendingAttempt: null,
   };
   let resumeListenersAttached = false;
 
@@ -19,9 +19,11 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
       tickMs: 100,
       minHpPercent: 50,
       minFoodSeconds: 30,
-      runeSpellWords: "adori vita vis",
+      runeHotbarSlot: 1,
       runeManaCost: 600,
       runeCooldownMs: 3500,
+      runeRetryMs: 500,
+      runeConfirmMs: 1200,
       enabled: false,
     },
     bot.storage.get(configStorageKey, {})
@@ -29,7 +31,13 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
   config.tickMs = 100;
 
   function persistConfig() {
+    delete config.runeSpellWords;
     bot.storage.set(configStorageKey, { ...config });
+  }
+
+  function normalizeHotbarSlot(value = config.runeHotbarSlot) {
+    const slot = Math.trunc(Number(value));
+    return Number.isFinite(slot) && slot >= 1 && slot <= 12 ? slot : null;
   }
 
   function readStats() {
@@ -61,15 +69,47 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     return { hp, mana, food };
   }
 
+  function resolvePendingAttempt(now = Date.now()) {
+    const pending = state.pendingAttempt;
+    if (!pending) return false;
+
+    const manaNow = Number(readStats().mana?.current ?? NaN);
+    if (Number.isFinite(manaNow) && manaNow < pending.manaBefore) {
+      state.lastRuneAt = pending.attemptedAt;
+      state.pendingAttempt = null;
+      bot.log("confirmed rune hotkey cast", {
+        slot: pending.slot,
+        manaBefore: pending.manaBefore,
+        manaAfter: manaNow,
+      });
+      return true;
+    }
+
+    if (now - pending.attemptedAt >= Math.max(200, Number(config.runeConfirmMs) || 1200)) {
+      state.pendingAttempt = null;
+      bot.log("rune hotkey did not register, will retry", {
+        slot: pending.slot,
+        mana: Number.isFinite(manaNow) ? manaNow : null,
+      });
+    }
+
+    return false;
+  }
+
   function getGateStatus(now = Date.now()) {
     const { hp, mana } = readStats();
+    const slot = normalizeHotbarSlot();
+
     if (!hp || !mana) {
       return {
         hasStats: false,
+        validHotbarSlot: !!slot,
         enoughHp: false,
         enoughMana: false,
         enoughFood: true,
         cooldownReady: false,
+        retryReady: false,
+        pending: !!state.pendingAttempt,
         cooldownRemainingMs: config.runeCooldownMs,
         canMakeRune: false,
       };
@@ -82,15 +122,20 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     const cooldownElapsedMs = now - state.lastRuneAt;
     const cooldownRemainingMs = Math.max(0, config.runeCooldownMs - cooldownElapsedMs);
     const cooldownReady = cooldownRemainingMs === 0;
+    const retryReady = now - state.lastAttemptAt >= Math.max(100, Number(config.runeRetryMs) || 500);
+    const pending = !!state.pendingAttempt;
 
     return {
       hasStats: true,
+      validHotbarSlot: !!slot,
       enoughHp,
       enoughMana,
       enoughFood,
       cooldownReady,
+      retryReady,
+      pending,
       cooldownRemainingMs,
-      canMakeRune: enoughHp && enoughMana && cooldownReady,
+      canMakeRune: !!slot && enoughHp && enoughMana && cooldownReady && retryReady && !pending,
     };
   }
 
@@ -98,82 +143,40 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     return getGateStatus(now).canMakeRune;
   }
 
-  function getSendRetryDelayMs() {
-    if (state.consecutiveSendFailures <= 2) return 250;
-    if (state.consecutiveSendFailures <= 10) return 500;
-    return 1000;
-  }
-
-  function sendRuneSpell(spellWords) {
-    const spell = String(spellWords || "").trim();
-    if (!spell) return false;
-
-    // Reacquire live game/chat objects on every attempt. The game can replace
-    // channelManager after reconnects/UI refreshes, so cached/stale references
-    // can leave Rune Maker running while every send silently fails.
-    const gameClient = window.gameClient;
-    const channelManager = gameClient?.interface?.channelManager;
-
-    const candidates = [
-      [channelManager, channelManager?.sendMessageText, "channelManager.sendMessageText"],
-      [bot, bot.sendChat, "bot.sendChat"],
-      [gameClient, gameClient?.sendChat, "gameClient.sendChat"],
-      [channelManager, channelManager?.sendMessage, "channelManager.sendMessage"],
-      [channelManager, channelManager?.say, "channelManager.say"],
-    ];
-
-    for (const [context, sender, label] of candidates) {
-      if (typeof sender !== "function") continue;
-
-      try {
-        const result = sender.call(context, spell);
-        if (result !== false) {
-          state.consecutiveSendFailures = 0;
-          state.lastSendFailureAt = 0;
-          return true;
-        }
-      } catch (error) {
-        bot.log("rune spell chat method failed", { method: label, error: String(error) });
-      }
-    }
-
-    return false;
-  }
-
   function tryMakeRune(now = Date.now()) {
+    resolvePendingAttempt(now);
+
     const gateStatus = getGateStatus(now);
     if (!gateStatus.canMakeRune) {
       return false;
     }
 
-    if (
-      state.lastSendFailureAt > 0 &&
-      now - state.lastSendFailureAt < getSendRetryDelayMs()
-    ) {
+    const slot = normalizeHotbarSlot();
+    if (!slot) return false;
+
+    const stats = readStats();
+    const manaBefore = Number(stats.mana?.current ?? 0);
+    const clicked = bot.clickHotbar?.(slot - 1);
+
+    state.lastAttemptAt = now;
+
+    if (!clicked) {
+      bot.log("rune hotkey press failed, will retry", { slot, mana: manaBefore });
       return false;
     }
 
-    const sent = sendRuneSpell(config.runeSpellWords);
-    if (sent) {
-      state.lastRuneAt = Date.now();
-      return true;
-    }
+    state.pendingAttempt = {
+      attemptedAt: now,
+      slot,
+      manaBefore,
+    };
 
-    state.consecutiveSendFailures += 1;
-    state.lastSendFailureAt = Date.now();
-
-    if (state.consecutiveSendFailures === 1 || state.consecutiveSendFailures % 10 === 0) {
-      bot.log("rune spell send failed, will retry", {
-        mana: gateStatus.hasStats ? readStats().mana?.current : null,
-        requiredMana: config.runeManaCost,
-        spell: config.runeSpellWords,
-        failures: state.consecutiveSendFailures,
-        channelManagerAvailable: !!window.gameClient?.interface?.channelManager,
-        sendMessageTextAvailable:
-          typeof window.gameClient?.interface?.channelManager?.sendMessageText === "function",
-      });
-    }
-    return false;
+    bot.log("pressed rune maker hotkey", {
+      slot,
+      mana: manaBefore,
+      requiredMana: config.runeManaCost,
+    });
+    return true;
   }
 
   function clearTickTimer() {
@@ -201,18 +204,12 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
   }
 
   function handleResume() {
-    if (document.hidden) {
-      return;
-    }
-
+    if (document.hidden) return;
     runImmediateTick();
   }
 
   function attachResumeListeners() {
-    if (resumeListenersAttached) {
-      return;
-    }
-
+    if (resumeListenersAttached) return;
     document.addEventListener("visibilitychange", handleResume);
     window.addEventListener("focus", handleResume);
     window.addEventListener("pageshow", handleResume);
@@ -220,10 +217,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
   }
 
   function detachResumeListeners() {
-    if (!resumeListenersAttached) {
-      return;
-    }
-
+    if (!resumeListenersAttached) return;
     document.removeEventListener("visibilitychange", handleResume);
     window.removeEventListener("focus", handleResume);
     window.removeEventListener("pageshow", handleResume);
@@ -231,14 +225,10 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
   }
 
   function startWatchdog() {
-    if (state.watchdogId != null) {
-      return;
-    }
+    if (state.watchdogId != null) return;
 
     state.watchdogId = window.setInterval(() => {
-      if (!state.running || state.tickInProgress) {
-        return;
-      }
+      if (!state.running || state.tickInProgress) return;
 
       const staleForMs = Date.now() - state.lastTickAt;
       if (state.lastTickAt === 0 || staleForMs >= 2000 || state.timerId == null) {
@@ -275,6 +265,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
   function start(overrides = {}) {
     Object.assign(config, overrides, { enabled: true });
     config.tickMs = 100;
+    config.runeHotbarSlot = normalizeHotbarSlot(config.runeHotbarSlot) || 1;
     persistConfig();
 
     if (state.running) {
@@ -285,8 +276,8 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
 
     state.running = true;
     state.lastTickAt = Date.now();
-    state.lastSendFailureAt = 0;
-    state.consecutiveSendFailures = 0;
+    state.lastAttemptAt = 0;
+    state.pendingAttempt = null;
     attachResumeListeners();
     startWatchdog();
     bot.log("rune maker started", { ...config });
@@ -298,6 +289,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     const shouldPersistEnabled = options.persistEnabled !== false;
     state.running = false;
     state.tickInProgress = false;
+    state.pendingAttempt = null;
 
     clearTickTimer();
     stopWatchdog();
@@ -318,24 +310,23 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
       stats: readStats(),
       gates: getGateStatus(),
       lastRuneAt: state.lastRuneAt,
+      lastAttemptAt: state.lastAttemptAt,
+      pendingAttempt: state.pendingAttempt ? { ...state.pendingAttempt } : null,
       lastTickAt: state.lastTickAt,
       watchdogRunning: state.watchdogId != null,
-      consecutiveSendFailures: state.consecutiveSendFailures,
-      lastSendFailureAt: state.lastSendFailureAt,
     };
   }
 
   function updateConfig(nextConfig = {}) {
     Object.assign(config, nextConfig);
     config.tickMs = 100;
+    config.runeHotbarSlot = normalizeHotbarSlot(config.runeHotbarSlot) || 1;
     persistConfig();
     bot.log("rune config updated", { ...config });
     return { ...config };
   }
 
-  if (config.enabled) {
-    start();
-  }
+  if (config.enabled) start();
 
   bot.rune = {
     start,
