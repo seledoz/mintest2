@@ -81,51 +81,8 @@ Use a fine-grained GitHub token with read and write access to the repository con
 })();
 ```
 
-## GitHub token identity test
-
-Run this in the browser developer console. The token is entered only into the prompt and is not saved by this code.
+## GitHub token
 
 ```js
-(async () => {
-  const token = prompt("Paste the new token")?.trim();
-  if (!token) return;
-
-  const response = await fetch("https://api.github.com/user", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
-    cache: "no-store",
-  });
-
-  console.log("Status:", response.status, response.statusText);
-  console.log(await response.text());
-})();
-```
-
-## Private repository access test
-
-Run this in the browser developer console using the same token.
-
-```js
-(async () => {
-  const token = prompt("Paste the same token")?.trim();
-  if (!token) return;
-
-  const response = await fetch(
-    "https://api.github.com/repos/seledoz/mintest2/contents/pz-bot.js?ref=main",
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: "application/vnd.github.raw+json",
-        "X-GitHub-Api-Version": "2022-11-28",
-      },
-      cache: "no-store",
-    }
-  );
-
-  console.log("Status:", response.status, response.statusText);
-  console.log(await response.text());
-})();
+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
 ```
