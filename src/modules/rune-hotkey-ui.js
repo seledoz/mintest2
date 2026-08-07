@@ -1,16 +1,54 @@
 (() => {
   const SECTION_MARKER_ID = "minibia-bot-rune-hotkey-settings";
 
+  function purgeLegacyRuneUi() {
+    const wrapper = document.getElementById(SECTION_MARKER_ID);
+
+    // Remove the legacy settings wrapper if an older Quick Controls instance recreated it.
+    document.getElementById("minibia-bot-rune-settings")?.remove();
+
+    // Remove any legacy Rune Spell row, regardless of which module injected it.
+    document.querySelectorAll("#minibia-bot-panel .mb-field").forEach((field) => {
+      if (wrapper?.contains(field)) return;
+      const caption = field.querySelector(".mb-field-label");
+      const text = String(caption?.textContent || "").trim().toLowerCase();
+      if (text === "rune spell") field.remove();
+    });
+
+    // Keep exactly one Rune Mana Cost field: the one inside the new hotkey wrapper.
+    document.querySelectorAll("#minibia-bot-panel .mb-field").forEach((field) => {
+      if (wrapper?.contains(field)) return;
+      const caption = field.querySelector(".mb-field-label");
+      const text = String(caption?.textContent || "").trim().toLowerCase();
+      if (text === "rune mana cost") field.remove();
+    });
+
+    // Also remove duplicate legacy inputs by id in case their label markup differs.
+    document.querySelectorAll("#minibia-bot-rune-spell-words").forEach((input) => {
+      if (!wrapper?.contains(input)) (input.closest("label") || input).remove();
+    });
+    document.querySelectorAll("#minibia-bot-rune-mana-cost").forEach((input) => {
+      if (!wrapper?.contains(input)) (input.closest("label") || input).remove();
+    });
+  }
+
   function install() {
     const bot = window.minibiaBot;
     if (!bot?.rune) return false;
-    if (document.getElementById(SECTION_MARKER_ID)) return true;
+
+    purgeLegacyRuneUi();
+
+    let wrapper = document.getElementById(SECTION_MARKER_ID);
+    if (wrapper) {
+      purgeLegacyRuneUi();
+      return true;
+    }
 
     const runeToggle = document.getElementById("minibia-bot-rune-enabled");
     const stack = runeToggle?.closest?.(".mb-stack");
     if (!runeToggle || !stack) return false;
 
-    const wrapper = document.createElement("div");
+    wrapper = document.createElement("div");
     wrapper.id = SECTION_MARKER_ID;
     wrapper.className = "mb-stack";
     wrapper.innerHTML = `
@@ -26,6 +64,7 @@
     `;
 
     runeToggle.closest("label")?.insertAdjacentElement("afterend", wrapper);
+    purgeLegacyRuneUi();
 
     const slotInput = wrapper.querySelector("#minibia-bot-rune-hotbar-slot");
     const manaInput = wrapper.querySelector("#minibia-bot-rune-mana-cost");
@@ -36,6 +75,8 @@
     }
 
     function refresh() {
+      purgeLegacyRuneUi();
+
       const status = bot.rune.status?.();
       const cfg = status?.config || bot.rune.config || {};
       const gates = status?.gates || {};
@@ -78,5 +119,14 @@
     attempts += 1;
     if (install() || attempts >= 80) window.clearInterval(timerId);
   }, 250);
+
+  // Keep a lightweight cleanup running briefly to catch late legacy injectors.
+  let cleanupAttempts = 0;
+  const cleanupTimer = window.setInterval(() => {
+    cleanupAttempts += 1;
+    purgeLegacyRuneUi();
+    if (cleanupAttempts >= 80) window.clearInterval(cleanupTimer);
+  }, 250);
+
   install();
 })();
