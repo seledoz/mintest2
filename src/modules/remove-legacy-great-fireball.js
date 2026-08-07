@@ -65,6 +65,9 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       const bot = window.minibiaBot;
       const installer = window.__minibiaBotBundle?.installQuickControlsSettingsModule;
       if (bot && typeof installer === "function") {
+        try { bot.quickControlsSettings?.destroy?.(); } catch (_) {}
+        if (bot.quickControlsSettings) delete bot.quickControlsSettings;
+        document.getElementById("minibia-bot-rune-settings")?.remove();
         installer(bot);
         window.clearInterval(installTimer);
       } else if (attempts >= 40) {
