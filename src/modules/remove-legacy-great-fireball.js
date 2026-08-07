@@ -152,3 +152,41 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     console.error("[minibia-bot] failed to load lure mode 2 Pause/Break integration", error);
   }
 })();
+
+(async function loadHotbarRuneMaker() {
+  try {
+    const runeUrl = "https://raw.githubusercontent.com/seledoz/mintest2/main/src/modules/rune.js?t=" + Date.now();
+    const runeResponse = await fetch(runeUrl, { cache: "no-store" });
+    if (!runeResponse.ok) throw new Error(`HTTP ${runeResponse.status}`);
+    window.eval(`\n//# sourceURL=${runeUrl}\n${await runeResponse.text()}`);
+
+    let attempts = 0;
+    const installTimer = window.setInterval(() => {
+      attempts += 1;
+      const bot = window.minibiaBot;
+      const installer = window.__minibiaBotBundle?.installRuneModule;
+      if (bot && typeof installer === "function") {
+        const wasRunning = !!bot.rune?.status?.().running;
+        try { bot.rune?.stop?.({ persistEnabled: false }); } catch (_) {}
+        installer(bot);
+        if (wasRunning && !bot.rune?.status?.().running) bot.rune?.start?.();
+        window.clearInterval(installTimer);
+      } else if (attempts >= 40) {
+        window.clearInterval(installTimer);
+      }
+    }, 250);
+  } catch (error) {
+    console.error("[minibia-bot] failed to load hotbar Rune Maker", error);
+  }
+})();
+
+(async function loadRuneHotkeyUi() {
+  try {
+    const sourceUrl = "https://raw.githubusercontent.com/seledoz/mintest2/main/src/modules/rune-hotkey-ui.js?t=" + Date.now();
+    const response = await fetch(sourceUrl, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    window.eval(`\n//# sourceURL=${sourceUrl}\n${await response.text()}`);
+  } catch (error) {
+    console.error("[minibia-bot] failed to load Rune Maker hotkey UI", error);
+  }
+})();
