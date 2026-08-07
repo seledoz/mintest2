@@ -82,8 +82,14 @@
       const gates = status?.gates || {};
       const mana = Number(status?.stats?.mana?.current ?? 0);
 
-      slotInput.value = String(normalizeSlot(cfg.runeHotbarSlot));
-      manaInput.value = String(Math.max(0, Math.trunc(Number(cfg.runeManaCost) || 0)));
+      // Do not overwrite a field while the user is typing in it. Previously the
+      // 250 ms refresh made it impossible to clear the existing value first.
+      if (document.activeElement !== slotInput) {
+        slotInput.value = String(normalizeSlot(cfg.runeHotbarSlot));
+      }
+      if (document.activeElement !== manaInput) {
+        manaInput.value = String(Math.max(0, Math.trunc(Number(cfg.runeManaCost) || 0)));
+      }
 
       if (!status?.running) statusLabel.textContent = "Rune Maker: idle";
       else if (!gates.validHotbarSlot) statusLabel.textContent = "Rune Maker: invalid hotbar slot";
