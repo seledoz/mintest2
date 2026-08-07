@@ -9,6 +9,8 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     lastTickAt: 0,
     tickInProgress: false,
     lastRuneAt: 0,
+    lastSendFailureAt: 0,
+    consecutiveSendFailures: 0,
   };
   let resumeListenersAttached = false;
 
@@ -96,25 +98,42 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
     return getGateStatus(now).canMakeRune;
   }
 
+  function getSendRetryDelayMs() {
+    if (state.consecutiveSendFailures <= 2) return 250;
+    if (state.consecutiveSendFailures <= 10) return 500;
+    return 1000;
+  }
+
   function sendRuneSpell(spellWords) {
     const spell = String(spellWords || "").trim();
     if (!spell) return false;
 
+    // Reacquire live game/chat objects on every attempt. The game can replace
+    // channelManager after reconnects/UI refreshes, so cached/stale references
+    // can leave Rune Maker running while every send silently fails.
+    const gameClient = window.gameClient;
+    const channelManager = gameClient?.interface?.channelManager;
+
     const candidates = [
-      [bot, bot.sendChat],
-      [window.gameClient, window.gameClient?.sendChat],
-      [window.gameClient?.interface?.channelManager, window.gameClient?.interface?.channelManager?.sendMessage],
-      [window.gameClient?.interface?.channelManager, window.gameClient?.interface?.channelManager?.say],
+      [channelManager, channelManager?.sendMessageText, "channelManager.sendMessageText"],
+      [bot, bot.sendChat, "bot.sendChat"],
+      [gameClient, gameClient?.sendChat, "gameClient.sendChat"],
+      [channelManager, channelManager?.sendMessage, "channelManager.sendMessage"],
+      [channelManager, channelManager?.say, "channelManager.say"],
     ];
 
-    for (const [context, sender] of candidates) {
+    for (const [context, sender, label] of candidates) {
       if (typeof sender !== "function") continue;
 
       try {
         const result = sender.call(context, spell);
-        if (result !== false) return true;
+        if (result !== false) {
+          state.consecutiveSendFailures = 0;
+          state.lastSendFailureAt = 0;
+          return true;
+        }
       } catch (error) {
-        bot.log("rune spell chat method failed", { error: String(error) });
+        bot.log("rune spell chat method failed", { method: label, error: String(error) });
       }
     }
 
@@ -127,17 +146,33 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
       return false;
     }
 
+    if (
+      state.lastSendFailureAt > 0 &&
+      now - state.lastSendFailureAt < getSendRetryDelayMs()
+    ) {
+      return false;
+    }
+
     const sent = sendRuneSpell(config.runeSpellWords);
     if (sent) {
       state.lastRuneAt = Date.now();
       return true;
     }
 
-    bot.log("rune spell send failed, will retry", {
-      mana: gateStatus.hasStats ? readStats().mana?.current : null,
-      requiredMana: config.runeManaCost,
-      spell: config.runeSpellWords,
-    });
+    state.consecutiveSendFailures += 1;
+    state.lastSendFailureAt = Date.now();
+
+    if (state.consecutiveSendFailures === 1 || state.consecutiveSendFailures % 10 === 0) {
+      bot.log("rune spell send failed, will retry", {
+        mana: gateStatus.hasStats ? readStats().mana?.current : null,
+        requiredMana: config.runeManaCost,
+        spell: config.runeSpellWords,
+        failures: state.consecutiveSendFailures,
+        channelManagerAvailable: !!window.gameClient?.interface?.channelManager,
+        sendMessageTextAvailable:
+          typeof window.gameClient?.interface?.channelManager?.sendMessageText === "function",
+      });
+    }
     return false;
   }
 
@@ -250,6 +285,8 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
 
     state.running = true;
     state.lastTickAt = Date.now();
+    state.lastSendFailureAt = 0;
+    state.consecutiveSendFailures = 0;
     attachResumeListeners();
     startWatchdog();
     bot.log("rune maker started", { ...config });
@@ -283,6 +320,8 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
       lastRuneAt: state.lastRuneAt,
       lastTickAt: state.lastTickAt,
       watchdogRunning: state.watchdogId != null,
+      consecutiveSendFailures: state.consecutiveSendFailures,
+      lastSendFailureAt: state.lastSendFailureAt,
     };
   }
 
