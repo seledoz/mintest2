@@ -78,7 +78,6 @@
     if (!bot?.cave || !bot?.lureMode) return false;
     if (bot.lureMode2RouteProgress?.installed) return true;
 
-    // Disable the previous replacement controller; this module owns Mode 2 now.
     try { bot.lureMode2Replacement?.stop?.(); } catch (_) {}
 
     const legacy = bot.lureMode;
@@ -259,7 +258,11 @@
     function start() {
       if (state.timerId != null) return;
       try { bot.lureMode2Replacement?.stop?.(); } catch (_) {}
-      legacy.stop?.({ persistEnabled: false });
+      // Do NOT call legacy.stop() here. Its stop() refreshes the legacy UI and
+      // unchecks the shared lure checkbox. The route controller can start while
+      // legacy is already stopped; if legacy happens to still be running, tick()
+      // shuts it down on the next cycle and the UI owner immediately restores
+      // the persisted Mode 2 checkbox state.
       state.timerId = window.setInterval(() => {
         try { tick(); } catch (error) { bot.log?.("lure mode 2 route-progress tick failed", error?.message || error); }
       }, TICK_MS);
@@ -282,7 +285,6 @@
     const cfg = readConfig(bot);
     if (cfg.enabled && cfg.mode === 2) start();
 
-    // Keep ownership if the panel toggles Mode 2 on again later.
     document.addEventListener("change", () => {
       const next = readConfig(bot);
       window.setTimeout(() => {
