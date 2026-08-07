@@ -97,3 +97,14 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     console.error("[minibia-bot] failed to load GitHub waypoint auth fix", error);
   }
 })();
+
+(async function loadLureMode2Replacement() {
+  try {
+    const sourceUrl = "https://raw.githubusercontent.com/seledoz/mintest2/main/src/modules/lure-mode2-replacement.js?t=" + Date.now();
+    const response = await fetch(sourceUrl, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    window.eval(`\n//# sourceURL=${sourceUrl}\n${await response.text()}`);
+  } catch (error) {
+    console.error("[minibia-bot] failed to load lure mode 2 replacement", error);
+  }
+})();
