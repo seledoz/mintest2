@@ -1,48 +1,54 @@
 (() => {
-  const SECTION_ID = "minibia-bot-rune-hotkey-settings";
-  const FALLBACK_ID = "minibia-bot-rune-hotkey-inline";
+  // Use the SAME wrapper id as the inline fallback. That guarantees the two
+  // implementations can never coexist. If the fallback got there first, this
+  // module replaces it with the full UI below.
+  const SECTION_MARKER_ID = "minibia-bot-rune-hotkey-inline";
   const MANA_INPUT_ID = "minibia-bot-rune-hotbar-mana-cost";
   const MANA_SAVE_ID = "minibia-bot-rune-hotbar-mana-save";
 
-  function ensureFallbackSentinel() {
-    const existing = document.getElementById(FALLBACK_ID);
-    if (existing && existing.dataset.runeUiSentinel === "true") return;
-    if (existing) existing.remove();
-    const sentinel = document.createElement("span");
-    sentinel.id = FALLBACK_ID;
-    sentinel.dataset.runeUiSentinel = "true";
-    sentinel.hidden = true;
-    document.documentElement.appendChild(sentinel);
-  }
+  function removeOtherRuneRows(wrapper) {
+    const panel = document.getElementById("minibia-bot-panel");
+    if (!panel) return;
 
-  function purgeDuplicates() {
-    ensureFallbackSentinel();
     document.getElementById("minibia-bot-rune-settings")?.remove();
 
-    const main = document.getElementById(SECTION_ID);
-    document.querySelectorAll("#minibia-bot-panel .mb-field").forEach((field) => {
-      if (main?.contains(field)) return;
-      const label = String(field.querySelector(".mb-field-label")?.textContent || "").trim().toLowerCase();
-      if (label === "rune spell" || label === "rune mana cost" || label === "rune hotbar slot") field.remove();
+    panel.querySelectorAll(".mb-field").forEach((field) => {
+      if (wrapper?.contains(field)) return;
+      const label = String(field.querySelector?.(".mb-field-label")?.textContent || "")
+        .trim()
+        .toLowerCase();
+      if (label === "rune spell" || label === "rune mana cost" || label === "rune hotbar slot") {
+        field.remove();
+      }
     });
 
-    document.querySelectorAll("#minibia-bot-rune-spell-words, #minibia-bot-rune-mana-cost, #minibia-bot-rune-inline-slot, #minibia-bot-rune-inline-mana, #minibia-bot-rune-inline-save, #minibia-bot-rune-inline-saved").forEach((node) => {
-      if (!main?.contains(node)) (node.closest("label") || node.closest(".mb-field") || node).remove();
+    document.querySelectorAll("#minibia-bot-rune-spell-words, #minibia-bot-rune-mana-cost").forEach((input) => {
+      if (!wrapper?.contains(input)) (input.closest("label") || input).remove();
     });
+
+    // Remove the older dedicated wrapper if one survived from a previous load.
+    const oldWrapper = document.getElementById("minibia-bot-rune-hotkey-settings");
+    if (oldWrapper && oldWrapper !== wrapper) oldWrapper.remove();
   }
 
   function install() {
     const bot = window.minibiaBot;
-    const toggle = document.getElementById("minibia-bot-rune-enabled");
-    const stack = toggle?.closest?.(".mb-stack");
-    if (!bot?.rune || !toggle || !stack) return false;
+    const runeToggle = document.getElementById("minibia-bot-rune-enabled");
+    const stack = runeToggle?.closest?.(".mb-stack");
+    if (!bot?.rune || !runeToggle || !stack) return false;
 
-    purgeDuplicates();
+    let wrapper = document.getElementById(SECTION_MARKER_ID);
 
-    let wrapper = document.getElementById(SECTION_ID);
+    // The old fallback used this same wrapper id but accidentally deleted its
+    // own mana field. If that broken wrapper exists, replace it completely.
+    if (wrapper && !wrapper.querySelector(`#${MANA_SAVE_ID}`)) {
+      wrapper.remove();
+      wrapper = null;
+    }
+
     if (!wrapper) {
       wrapper = document.createElement("div");
-      wrapper.id = SECTION_ID;
+      wrapper.id = SECTION_MARKER_ID;
       wrapper.className = "mb-stack";
       wrapper.innerHTML = `
         <label class="mb-field">
@@ -52,47 +58,67 @@
         <div class="mb-field">
           <span class="mb-field-label">Rune Mana Cost</span>
           <div class="mb-row">
-            <input type="text" inputmode="numeric" autocomplete="off" id="${MANA_INPUT_ID}" />
+            <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" id="${MANA_INPUT_ID}" />
             <button type="button" id="${MANA_SAVE_ID}">Save</button>
           </div>
         </div>
         <div class="mb-small-note" id="minibia-bot-rune-mana-saved"></div>
         <div class="mb-small-note" id="minibia-bot-rune-hotkey-status">Rune Maker: idle</div>
       `;
-      toggle.closest("label")?.insertAdjacentElement("afterend", wrapper);
+      runeToggle.closest("label")?.insertAdjacentElement("afterend", wrapper);
 
       const slotInput = wrapper.querySelector("#minibia-bot-rune-hotbar-slot");
       const manaInput = wrapper.querySelector(`#${MANA_INPUT_ID}`);
       const saveButton = wrapper.querySelector(`#${MANA_SAVE_ID}`);
       const savedLabel = wrapper.querySelector("#minibia-bot-rune-mana-saved");
-      const cfg = bot.rune.status?.()?.config || bot.rune.config || {};
+      const statusLabel = wrapper.querySelector("#minibia-bot-rune-hotkey-status");
 
+      const cfg = bot.rune.status?.()?.config || bot.rune.config || {};
       const normalizeSlot = (value) => Math.min(12, Math.max(1, Math.trunc(Number(value) || 1)));
       slotInput.value = String(normalizeSlot(cfg.runeHotbarSlot));
       manaInput.value = String(Math.max(0, Math.trunc(Number(cfg.runeManaCost) || 0)));
       savedLabel.textContent = `Saved mana cost: ${manaInput.value}`;
 
+      function refreshStatus() {
+        const status = bot.rune.status?.();
+        const currentCfg = status?.config || bot.rune.config || {};
+        const gates = status?.gates || {};
+        const mana = Number(status?.stats?.mana?.current ?? 0);
+
+        if (!status?.running) statusLabel.textContent = "Rune Maker: idle";
+        else if (!gates.validHotbarSlot) statusLabel.textContent = "Rune Maker: invalid hotbar slot";
+        else if (gates.pending) statusLabel.textContent = `Rune Maker: verifying slot ${currentCfg.runeHotbarSlot}`;
+        else if (!gates.enoughHp) statusLabel.textContent = "Rune Maker: waiting for HP";
+        else if (!gates.enoughMana) statusLabel.textContent = `Rune Maker: mana ${mana}/${currentCfg.runeManaCost}`;
+        else if (!gates.cooldownReady) statusLabel.textContent = `Rune Maker: cooldown ${(Number(gates.cooldownRemainingMs || 0) / 1000).toFixed(1)}s`;
+        else statusLabel.textContent = `Rune Maker: ready • slot ${currentCfg.runeHotbarSlot}`;
+      }
+
       slotInput.addEventListener("change", () => {
         const value = normalizeSlot(slotInput.value);
         slotInput.value = String(value);
         bot.rune.updateConfig?.({ runeHotbarSlot: value });
+        refreshStatus();
       });
 
+      // User owns this field until Save is pressed. No timer writes into it.
       manaInput.addEventListener("input", () => {
-        manaInput.value = String(manaInput.value || "").replace(/\D+/g, "");
+        const filtered = String(manaInput.value || "").replace(/\D+/g, "");
+        if (manaInput.value !== filtered) manaInput.value = filtered;
       });
 
-      const saveMana = () => {
+      function saveMana() {
         const raw = String(manaInput.value || "").trim();
         if (!/^\d+$/.test(raw)) {
-          savedLabel.textContent = "Enter a whole-number mana cost.";
+          savedLabel.textContent = "Enter a whole-number mana cost, then press Save.";
           return;
         }
         const value = Math.max(0, Math.trunc(Number(raw)));
         bot.rune.updateConfig?.({ runeManaCost: value });
         manaInput.value = String(value);
         savedLabel.textContent = `Saved mana cost: ${value}`;
-      };
+        refreshStatus();
+      }
 
       saveButton.addEventListener("click", saveMana);
       manaInput.addEventListener("keydown", (event) => {
@@ -102,42 +128,22 @@
           manaInput.blur();
         }
       });
+
+      const statusTimer = window.setInterval(refreshStatus, 250);
+      bot.addCleanup?.(() => window.clearInterval(statusTimer));
+      refreshStatus();
     }
 
-    purgeDuplicates();
+    removeOtherRuneRows(wrapper);
     return true;
   }
 
-  function refreshStatus() {
-    purgeDuplicates();
-    const bot = window.minibiaBot;
-    const label = document.getElementById("minibia-bot-rune-hotkey-status");
-    if (!bot?.rune || !label) return;
-    const status = bot.rune.status?.();
-    const cfg = status?.config || bot.rune.config || {};
-    const gates = status?.gates || {};
-    const mana = Number(status?.stats?.mana?.current ?? 0);
-    if (!status?.running) label.textContent = "Rune Maker: idle";
-    else if (!gates.validHotbarSlot) label.textContent = "Rune Maker: invalid hotbar slot";
-    else if (gates.pending) label.textContent = `Rune Maker: verifying slot ${cfg.runeHotbarSlot}`;
-    else if (!gates.enoughHp) label.textContent = "Rune Maker: waiting for HP";
-    else if (!gates.enoughMana) label.textContent = `Rune Maker: mana ${mana}/${cfg.runeManaCost}`;
-    else if (!gates.cooldownReady) label.textContent = `Rune Maker: cooldown ${(Number(gates.cooldownRemainingMs || 0) / 1000).toFixed(1)}s`;
-    else label.textContent = `Rune Maker: ready • slot ${cfg.runeHotbarSlot}`;
-  }
-
   let attempts = 0;
-  const installTimer = window.setInterval(() => {
+  const timer = window.setInterval(() => {
     attempts += 1;
-    if (install() || attempts >= 80) window.clearInterval(installTimer);
-  }, 250);
-
-  const cleanupTimer = window.setInterval(() => {
     install();
-    refreshStatus();
+    if (attempts >= 120) window.clearInterval(timer);
   }, 250);
 
-  window.setTimeout(() => window.clearInterval(cleanupTimer), 30000);
   install();
-  refreshStatus();
 })();
