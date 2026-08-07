@@ -1,6 +1,7 @@
 (() => {
   const SECTION_MARKER_ID = "minibia-bot-rune-hotkey-settings";
   const MANA_INPUT_ID = "minibia-bot-rune-hotbar-mana-cost";
+  const MANA_SAVE_ID = "minibia-bot-rune-hotbar-mana-save";
 
   function purgeLegacyRuneUi() {
     const wrapper = document.getElementById(SECTION_MARKER_ID);
@@ -18,8 +19,6 @@
       if (!wrapper?.contains(input)) (input.closest("label") || input).remove();
     });
 
-    // The old Rune Maker used this id. The hotkey Rune Maker intentionally uses
-    // a different id so no legacy refresh/listener can overwrite the editable field.
     document.querySelectorAll("#minibia-bot-rune-mana-cost").forEach((input) => {
       (input.closest("label") || input).remove();
     });
@@ -49,10 +48,14 @@
         <span class="mb-field-label">Rune Hotbar Slot</span>
         <input type="number" id="minibia-bot-rune-hotbar-slot" min="1" max="12" step="1" />
       </label>
-      <label class="mb-field">
+      <div class="mb-field">
         <span class="mb-field-label">Rune Mana Cost</span>
-        <input type="number" id="${MANA_INPUT_ID}" min="0" step="1" />
-      </label>
+        <div class="mb-row">
+          <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" id="${MANA_INPUT_ID}" />
+          <button type="button" id="${MANA_SAVE_ID}">Save</button>
+        </div>
+      </div>
+      <div class="mb-small-note" id="minibia-bot-rune-mana-saved"></div>
       <div class="mb-small-note" id="minibia-bot-rune-hotkey-status">Rune Maker: idle</div>
     `;
 
@@ -61,17 +64,22 @@
 
     const slotInput = wrapper.querySelector("#minibia-bot-rune-hotbar-slot");
     const manaInput = wrapper.querySelector(`#${MANA_INPUT_ID}`);
+    const manaSaveButton = wrapper.querySelector(`#${MANA_SAVE_ID}`);
+    const manaSavedLabel = wrapper.querySelector("#minibia-bot-rune-mana-saved");
     const statusLabel = wrapper.querySelector("#minibia-bot-rune-hotkey-status");
 
     function normalizeSlot(value) {
       return Math.min(12, Math.max(1, Math.trunc(Number(value) || 1)));
     }
 
-    // Populate editable fields once. Status refreshes must never write into them;
-    // otherwise clearing/retyping a number can be interrupted by a timer or an old UI listener.
-    const initialConfig = bot.rune.status?.()?.config || bot.rune.config || {};
+    function currentConfig() {
+      return bot.rune.status?.()?.config || bot.rune.config || {};
+    }
+
+    const initialConfig = currentConfig();
     slotInput.value = String(normalizeSlot(initialConfig.runeHotbarSlot));
     manaInput.value = String(Math.max(0, Math.trunc(Number(initialConfig.runeManaCost) || 0)));
+    manaSavedLabel.textContent = `Saved mana cost: ${Math.max(0, Math.trunc(Number(initialConfig.runeManaCost) || 0))}`;
 
     function refreshStatus() {
       purgeLegacyRuneUi();
@@ -90,6 +98,21 @@
       else statusLabel.textContent = `Rune Maker: ready • slot ${cfg.runeHotbarSlot}`;
     }
 
+    function saveManaCost() {
+      const raw = String(manaInput.value ?? "").trim();
+      if (!/^\d+$/.test(raw)) {
+        manaSavedLabel.textContent = "Enter a whole-number mana cost, then tap Save.";
+        return false;
+      }
+
+      const runeManaCost = Math.max(0, Math.trunc(Number(raw)));
+      bot.rune.updateConfig?.({ runeManaCost });
+      manaInput.value = String(runeManaCost);
+      manaSavedLabel.textContent = `Saved mana cost: ${runeManaCost}`;
+      refreshStatus();
+      return true;
+    }
+
     slotInput.addEventListener("change", () => {
       const runeHotbarSlot = normalizeSlot(slotInput.value);
       slotInput.value = String(runeHotbarSlot);
@@ -97,18 +120,18 @@
       refreshStatus();
     });
 
-    manaInput.addEventListener("change", () => {
-      const raw = String(manaInput.value || "").trim();
-      if (raw === "") return;
-      const runeManaCost = Math.max(0, Math.trunc(Number(raw) || 0));
-      manaInput.value = String(runeManaCost);
-      bot.rune.updateConfig?.({ runeManaCost });
-      refreshStatus();
+    // Never mutate manaInput from a timer/change/blur handler. The user owns its
+    // text until Save is explicitly pressed, which works reliably on mobile too.
+    manaInput.addEventListener("input", () => {
+      const filtered = String(manaInput.value || "").replace(/\D+/g, "");
+      if (manaInput.value !== filtered) manaInput.value = filtered;
     });
 
-    // Enter saves without requiring a mouse click elsewhere.
+    manaSaveButton.addEventListener("click", saveManaCost);
     manaInput.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
+        event.preventDefault();
+        saveManaCost();
         manaInput.blur();
       }
     });
