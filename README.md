@@ -80,9 +80,3 @@ Use a fine-grained GitHub token with read and write access to the repository con
   window.eval(await response.text());
 })();
 ```
-
-## GitHub token
-
-```js
-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
-```
