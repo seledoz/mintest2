@@ -202,6 +202,106 @@
     updatePanelState();
   }
 
+  function installLureCaveProgressPreserver(bot) {
+    if (!bot?.cave?.start || !bot?.cave?.stop || !bot?.cave?.status || !bot?.cave?.setCurrentIndex) return null;
+
+    const originalStart = bot.cave.start.bind(bot.cave);
+    const originalStop = bot.cave.stop.bind(bot.cave);
+    const state = { pending: null, restoreCount: 0, lastRestoreAt: 0 };
+
+    function lureOwnsCave() {
+      const lureStatus = bot.lureMode?.status?.() || null;
+      if (!lureStatus?.running) return false;
+      const mode = Number(lureStatus?.config?.mode) === 2 ? 2 : 1;
+      if (mode === 2) return !!lureStatus?.mode2?.active;
+      return !!lureStatus?.clearingPack;
+    }
+
+    function snapshotProgress() {
+      const caveStatus = bot.cave.status();
+      const routeLength = Array.isArray(caveStatus?.route) ? caveStatus.route.length : 0;
+      if (!caveStatus?.running || routeLength <= 0) return null;
+      return {
+        currentIndex: Math.max(0, Math.min(routeLength - 1, Math.trunc(Number(caveStatus.currentIndex) || 0))),
+        direction: Number(caveStatus.direction) < 0 ? -1 : 1,
+        routeLength,
+        waypoint: caveStatus.currentWaypoint ? { ...caveStatus.currentWaypoint } : null,
+        capturedAt: Date.now(),
+      };
+    }
+
+    bot.cave.stop = function lureAwareCaveStop(options = {}) {
+      if (lureOwnsCave()) {
+        const snapshot = snapshotProgress();
+        if (snapshot) {
+          state.pending = snapshot;
+          bot.log?.("lure preserved cave waypoint before takeover", {
+            index: snapshot.currentIndex + 1,
+            direction: snapshot.direction,
+            routeLength: snapshot.routeLength,
+            waypoint: snapshot.waypoint,
+          });
+        }
+      }
+      return originalStop(options);
+    };
+
+    bot.cave.start = function lureAwareCaveStart(...args) {
+      const pending = state.pending ? { ...state.pending } : null;
+      const result = originalStart(...args);
+      if (!pending || !bot.cave.status()?.running) return result;
+
+      const currentStatus = bot.cave.status();
+      const routeLength = Array.isArray(currentStatus?.route) ? currentStatus.route.length : 0;
+      if (!routeLength) {
+        state.pending = null;
+        return result;
+      }
+
+      const restoreIndex = Math.max(0, Math.min(routeLength - 1, pending.currentIndex));
+      bot.cave.setCurrentIndex(restoreIndex);
+
+      const restoredStatus = bot.cave.status();
+      const restoredWaypoint = restoredStatus?.currentWaypoint || null;
+
+      const targets = [
+        window.gameClient?.world?.pathfinder,
+        window.gameClient?.player,
+        window.gameClient?.world,
+      ].filter(Boolean);
+      ["stop", "cancel", "clear", "clearPath", "stopWalking", "cancelWalking", "stopAutoWalk", "reset"].forEach((name) => {
+        targets.forEach((target) => {
+          if (typeof target?.[name] !== "function") return;
+          try { target[name](); } catch (error) {}
+        });
+      });
+
+      if (restoredWaypoint) {
+        try { bot.cave.goToWaypoint?.(restoredWaypoint); } catch (error) {}
+      }
+
+      state.pending = null;
+      state.restoreCount += 1;
+      state.lastRestoreAt = Date.now();
+      bot.log?.("lure restored cave waypoint after takeover", {
+        index: restoreIndex + 1,
+        directionBeforeLure: pending.direction,
+        routeLength,
+        waypoint: restoredWaypoint,
+      });
+      return result;
+    };
+
+    bot.lureCaveProgressPreserver = {
+      status: () => ({
+        pending: state.pending ? { ...state.pending } : null,
+        restoreCount: state.restoreCount,
+        lastRestoreAt: state.lastRestoreAt,
+      }),
+    };
+    return bot.lureCaveProgressPreserver;
+  }
+
   function boot(currentBundle = bundle) {
     const previousEnabledSnapshot = getPersistedEnabledSnapshot(window.minibiaBot);
     if (window.minibiaBot?.destroy) window.minibiaBot.destroy();
@@ -254,6 +354,7 @@
     currentBundle.installAutoAttackPriorityModule?.(bot);
     currentBundle.installGreatFireballV2Module?.(bot);
     currentBundle.installLureModeModule?.(bot);
+    installLureCaveProgressPreserver(bot);
     currentBundle.installGithubWaypointLibraryModule?.(bot);
     installGmKillSwitchBelowGithub(bot);
     removePanelDebugSection();
@@ -297,6 +398,7 @@
       runeMakerDrop: bot.runeMakerDrop?.status?.() || null,
       maxLight: bot.maxLight?.status?.() || null,
       pauseBreak: bot.pauseBreak?.status?.() || null,
+      lureCaveProgressPreserver: bot.lureCaveProgressPreserver?.status?.() || null,
     });
 
     window.minibiaBot = bot;
