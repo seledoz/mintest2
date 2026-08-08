@@ -12,7 +12,6 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
   };
   const runeV2Config = Object.assign(
     {
-      spellName: "",
       manaCost: 600,
       hotkey: "1",
       cooldownMs: 3500,
@@ -20,6 +19,8 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
     },
     bot.storage.get(runeV2StorageKey, {})
   );
+
+  delete runeV2Config.spellName;
 
   function clampHotbarSlot(value, fallback = 10) {
     const numeric = Math.trunc(Number(value));
@@ -90,7 +91,6 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
     runeV2State.lastActivationAt = Date.now();
     bot.log("rune spell 2.0 hotkey activated", {
-      spellName: runeV2Config.spellName,
       manaCost: runeV2Config.manaCost,
       hotkey: slot,
     });
@@ -137,9 +137,7 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
   function updateRuneV2Config(nextConfig = {}) {
     const normalized = { ...nextConfig };
-    if (Object.prototype.hasOwnProperty.call(normalized, "spellName")) {
-      normalized.spellName = String(normalized.spellName || "").trim();
-    }
+    delete normalized.spellName;
     if (Object.prototype.hasOwnProperty.call(normalized, "manaCost")) {
       normalized.manaCost = clampManaCost(normalized.manaCost, runeV2Config.manaCost ?? 600);
     }
@@ -150,6 +148,7 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
       normalized.cooldownMs = Math.max(0, Math.trunc(Number(normalized.cooldownMs) || 0));
     }
     Object.assign(runeV2Config, normalized);
+    delete runeV2Config.spellName;
     persistRuneV2Config();
     return { ...runeV2Config };
   }
@@ -236,17 +235,6 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
       toggleText.textContent = "Enable Rune Spell 2.0";
       toggleLabel.append(toggleInput, toggleText);
 
-      const spellNameInput = document.createElement("input");
-      spellNameInput.type = "text";
-      spellNameInput.id = "minibia-bot-rune-v2-spell-name";
-      spellNameInput.placeholder = "Spell name";
-      spellNameInput.value = runeV2Config.spellName;
-      spellNameInput.addEventListener("change", () => {
-        const spellName = spellNameInput.value.trim();
-        spellNameInput.value = spellName;
-        updateRuneV2Config({ spellName });
-      });
-
       const manaInput = document.createElement("input");
       manaInput.type = "number";
       manaInput.id = "minibia-bot-rune-v2-mana-cost";
@@ -278,7 +266,6 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
       runeV2Settings.append(
         toggleLabel,
-        makeField("Rune 2.0 Spell Name", spellNameInput),
         makeField("Rune 2.0 Mana Cost", manaInput),
         makeField("Rune 2.0 Hotkey", hotkeyInput)
       );
