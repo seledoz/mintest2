@@ -22,19 +22,27 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
   delete runeV2Config.spellName;
 
-  function removeLegacyRuneV2SpellNameField() {
-    const legacyInput = document.getElementById("minibia-bot-rune-v2-spell-name");
-    legacyInput?.closest?.("label")?.remove();
-    legacyInput?.remove?.();
+  function removeLegacyRuneMakerUi() {
+    document.getElementById("minibia-bot-rune-settings")?.remove();
+    document.getElementById("minibia-bot-rune-enabled")?.closest?.("label")?.remove();
+    document.getElementById("minibia-bot-rune-v2-spell-name")?.closest?.("label")?.remove();
+    document.getElementById("minibia-bot-rune-v2-spell-name")?.remove?.();
 
     document.querySelectorAll("#minibia-bot-rune-v2-settings .mb-field").forEach((field) => {
       const label = String(field.querySelector?.(".mb-field-label")?.textContent || "")
         .trim()
         .toLowerCase();
-      if (label === "rune 2.0 spell name" || label === "spell name") {
-        field.remove();
-      }
+      if (label === "rune 2.0 spell name" || label === "spell name") field.remove();
     });
+  }
+
+  function disableLegacyRuneMaker() {
+    try {
+      bot.rune?.stop?.();
+      bot.rune?.updateConfig?.({ enabled: false });
+    } catch (error) {
+      bot.log?.("failed to disable legacy rune maker", error?.message || error);
+    }
   }
 
   function clampHotbarSlot(value, fallback = 10) {
@@ -96,7 +104,6 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
   function tryRuneV2(now = Date.now()) {
     if (!runeV2State.running || !runeV2Config.enabled) return false;
-
     const gate = getRuneV2GateStatus(now);
     if (!gate.canActivate) return false;
 
@@ -194,48 +201,13 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
   }
 
   function installControls() {
-    removeLegacyRuneV2SpellNameField();
+    disableLegacyRuneMaker();
+    removeLegacyRuneMakerUi();
 
-    const runeToggle = document.getElementById("minibia-bot-rune-enabled");
     const eatToggle = document.getElementById("minibia-bot-auto-eat-enabled");
-    const quickSection = runeToggle?.closest?.(".mb-section") || eatToggle?.closest?.(".mb-section");
+    const quickSection = eatToggle?.closest?.(".mb-section");
     const stack = quickSection?.querySelector?.(".mb-stack");
     if (!stack) return false;
-
-    if (!document.getElementById("minibia-bot-rune-settings")) {
-      const runeSettings = document.createElement("div");
-      runeSettings.id = "minibia-bot-rune-settings";
-      runeSettings.className = "mb-stack";
-
-      const spellInput = document.createElement("input");
-      spellInput.type = "text";
-      spellInput.id = "minibia-bot-rune-spell-words";
-      spellInput.placeholder = "adori vita vis";
-      spellInput.value = String(bot.rune?.config?.runeSpellWords || "adori vita vis");
-      spellInput.addEventListener("change", () => {
-        const runeSpellWords = spellInput.value.trim() || String(bot.rune?.config?.runeSpellWords || "adori vita vis");
-        spellInput.value = runeSpellWords;
-        bot.rune?.updateConfig?.({ runeSpellWords });
-      });
-
-      const manaInput = document.createElement("input");
-      manaInput.type = "number";
-      manaInput.id = "minibia-bot-rune-mana-cost";
-      manaInput.min = "0";
-      manaInput.step = "1";
-      manaInput.value = String(clampManaCost(bot.rune?.config?.runeManaCost, 600));
-      manaInput.addEventListener("change", () => {
-        const runeManaCost = clampManaCost(manaInput.value, bot.rune?.config?.runeManaCost ?? 600);
-        manaInput.value = String(runeManaCost);
-        bot.rune?.updateConfig?.({ runeManaCost });
-      });
-
-      runeSettings.append(
-        makeField("Rune Spell", spellInput),
-        makeField("Rune Mana Cost", manaInput)
-      );
-      runeToggle?.closest?.("label")?.after(runeSettings);
-    }
 
     if (!document.getElementById("minibia-bot-rune-v2-settings")) {
       const runeV2Settings = document.createElement("div");
@@ -286,13 +258,8 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
         makeField("Rune 2.0 Mana Cost", manaInput),
         makeField("Rune 2.0 Hotkey", hotkeyInput)
       );
-
-      const runeSettings = document.getElementById("minibia-bot-rune-settings");
-      if (runeSettings) runeSettings.after(runeV2Settings);
-      else runeToggle?.closest?.("label")?.after(runeV2Settings);
+      stack.prepend(runeV2Settings);
     }
-
-    removeLegacyRuneV2SpellNameField();
 
     if (!document.getElementById("minibia-bot-auto-eat-settings")) {
       const eatSettings = document.createElement("div");
@@ -316,6 +283,7 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
       eatToggle?.closest?.("label")?.after(eatSettings);
     }
 
+    removeLegacyRuneMakerUi();
     return true;
   }
 
@@ -330,11 +298,13 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
   bot.quickControlsSettings = { installControls, destroy };
 
-  removeLegacyRuneV2SpellNameField();
+  disableLegacyRuneMaker();
+  removeLegacyRuneMakerUi();
 
   if (!installControls()) {
     observer = new MutationObserver(() => {
-      removeLegacyRuneV2SpellNameField();
+      disableLegacyRuneMaker();
+      removeLegacyRuneMakerUi();
       if (installControls()) observer?.disconnect?.();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
