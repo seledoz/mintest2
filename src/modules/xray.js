@@ -164,6 +164,15 @@ window.__minibiaBotBundle.installXrayModule = function installXrayModule(bot) {
     return creature?.type === 0 ? "Player" : "Mob";
   }
 
+  function isSpecialMonster(creature) {
+    if (!creature || creature.type === 0) {
+      return false;
+    }
+
+    const name = normalizeName(creature.name);
+    return name.includes("alpha") || name.includes("ancient");
+  }
+
   function getOverlayCreatures() {
     const me = bot.getPlayerPosition();
     if (!me) {
@@ -237,6 +246,12 @@ window.__minibiaBotBundle.installXrayModule = function installXrayModule(bot) {
         background: rgba(92, 10, 10, 0.84);
         color: #ffd6d6;
       }
+
+      #${overlayRootId} .mb-xray-marker.mb-xray-marker-special-monster {
+        border-color: rgba(190, 112, 255, 0.95);
+        background: rgba(66, 17, 95, 0.86);
+        color: #f1dcff;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -298,6 +313,8 @@ window.__minibiaBotBundle.installXrayModule = function installXrayModule(bot) {
 
       if (creature?.type === 0) {
         marker.classList.add("mb-xray-marker-player");
+      } else if (isSpecialMonster(creature)) {
+        marker.classList.add("mb-xray-marker-special-monster");
       }
 
       if (pos.z === me.z) {
