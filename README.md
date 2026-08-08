@@ -84,5 +84,5 @@ Use a fine-grained GitHub token with read and write access to the repository con
 ## GitHub token
 
 ```js
-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
+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
 ```
