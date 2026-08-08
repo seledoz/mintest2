@@ -2,6 +2,7 @@
   const bundle = window.__minibiaBotBundle || window.__minibiaBotReloadBundle || {};
   const persistedEnabledModules = [
     ["rune", "minibiaBot.rune.config"],
+    ["runeV2", "minibiaBot.runeV2.config"],
     ["heal", "minibiaBot.heal.config"],
     ["antiParalyze", "minibiaBot.antiParalyzeV2.config"],
     ["damageTtsAlert", "minibiaBot.damageTtsAlert.config"],
@@ -150,11 +151,9 @@
         lureMode: !!bot.lureMode?.status?.().running,
       };
 
-      // Stop Lure Mode first because its cleanup may resume Cavebot.
       if (resumeSnapshot.lureMode) bot.lureMode.stop({ persistEnabled: false });
       if (resumeSnapshot.greatFireballV2) bot.greatFireballV2.stop({ persistEnabled: false });
       if (resumeSnapshot.attack) bot.attack.stop({ persistEnabled: false });
-      // Keep Cavebot last so nothing can restart it after Pause/Break.
       if (resumeSnapshot.cave || bot.cave?.status?.().running) {
         bot.cave.stop({ persistEnabled: false });
       }
@@ -245,6 +244,7 @@
     currentBundle.installCaveWaypointActionsModule?.(bot);
 
     bot.ui.inject();
+    currentBundle.installQuickControlsSettingsModule?.(bot);
     bot.gmDefaultChatKillSwitch?.injectPanelControl?.();
     bot.maxLight?.injectControls?.();
     installPauseBreakToggle(bot);
@@ -270,6 +270,7 @@
       panic: bot.panic.status(),
       gmDefaultChatKillSwitch: bot.gmDefaultChatKillSwitch?.status?.() || null,
       rune: bot.rune.status(),
+      runeV2: bot.runeV2?.status?.() || null,
       heal: bot.heal.status(),
       antiParalyze: bot.antiParalyze?.status?.() || null,
       damageTtsAlert: bot.damageTtsAlert?.status?.() || null,
@@ -302,7 +303,7 @@
       branch: bot.version.branch,
       commit: bot.version.commit,
       buildDate: bot.version.date,
-      modules: ["pz", "xray", "panic", "gmDefaultChatKillSwitch", "rune", "heal", "antiParalyze", "damageTtsAlert", "invisible", "magicShield", "attack", "attackExclude", "attackPriority", "attackAoe", "greatFireballV2", "lureMode", "redTextAlert", "cave", "caveForwardLoop", "caveArrowKeys", "caveWaypointActions", "githubWaypointLibrary", "equipRing", "mining", "eat", "talk", "runeMakerDrop", "maxLight", "pauseBreak", "ui"],
+      modules: ["pz", "xray", "panic", "gmDefaultChatKillSwitch", "rune", "runeV2", "heal", "antiParalyze", "damageTtsAlert", "invisible", "magicShield", "attack", "attackExclude", "attackPriority", "attackAoe", "greatFireballV2", "lureMode", "redTextAlert", "cave", "caveForwardLoop", "caveArrowKeys", "caveWaypointActions", "githubWaypointLibrary", "equipRing", "mining", "eat", "talk", "runeMakerDrop", "maxLight", "pauseBreak", "ui"],
     });
     console.log("minibiaBot.reload()");
     console.log("minibiaBot.attackExclude.addName(\"monster name\")");
