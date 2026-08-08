@@ -3,6 +3,7 @@
   const persistedEnabledModules = [
     ["rune", "minibiaBot.rune.config"],
     ["runeV2", "minibiaBot.runeV2.config"],
+    ["runeV3", "minibiaBot.runeV3.config"],
     ["heal", "minibiaBot.heal.config"],
     ["antiParalyze", "minibiaBot.antiParalyzeV2.config"],
     ["damageTtsAlert", "minibiaBot.damageTtsAlert.config"],
@@ -245,6 +246,7 @@
 
     bot.ui.inject();
     currentBundle.installQuickControlsSettingsModule?.(bot);
+    currentBundle.installRuneV3KeyboardModule?.(bot);
     bot.gmDefaultChatKillSwitch?.injectPanelControl?.();
     bot.maxLight?.injectControls?.();
     installPauseBreakToggle(bot);
@@ -271,6 +273,7 @@
       gmDefaultChatKillSwitch: bot.gmDefaultChatKillSwitch?.status?.() || null,
       rune: bot.rune.status(),
       runeV2: bot.runeV2?.status?.() || null,
+      runeV3: bot.runeV3?.status?.() || null,
       heal: bot.heal.status(),
       antiParalyze: bot.antiParalyze?.status?.() || null,
       damageTtsAlert: bot.damageTtsAlert?.status?.() || null,
@@ -303,7 +306,7 @@
       branch: bot.version.branch,
       commit: bot.version.commit,
       buildDate: bot.version.date,
-      modules: ["pz", "xray", "panic", "gmDefaultChatKillSwitch", "rune", "runeV2", "heal", "antiParalyze", "damageTtsAlert", "invisible", "magicShield", "attack", "attackExclude", "attackPriority", "attackAoe", "greatFireballV2", "lureMode", "redTextAlert", "cave", "caveForwardLoop", "caveArrowKeys", "caveWaypointActions", "githubWaypointLibrary", "equipRing", "mining", "eat", "talk", "runeMakerDrop", "maxLight", "pauseBreak", "ui"],
+      modules: ["pz", "xray", "panic", "gmDefaultChatKillSwitch", "rune", "runeV2", "runeV3", "heal", "antiParalyze", "damageTtsAlert", "invisible", "magicShield", "attack", "attackExclude", "attackPriority", "attackAoe", "greatFireballV2", "lureMode", "redTextAlert", "cave", "caveForwardLoop", "caveArrowKeys", "caveWaypointActions", "githubWaypointLibrary", "equipRing", "mining", "eat", "talk", "runeMakerDrop", "maxLight", "pauseBreak", "ui"],
     });
     console.log("minibiaBot.reload()");
     console.log("minibiaBot.attackExclude.addName(\"monster name\")");
@@ -322,15 +325,12 @@
     console.log("minibiaBot.cave.stop()");
     console.log("minibiaBot.damageTtsAlert.start()");
     console.log("minibiaBot.damageTtsAlert.stop()");
-    console.log("minibiaBot.mining.start({ pickHotbarSlot: 5 })");
+    console.log("minibiaBot.mining.start()");
     console.log("minibiaBot.mining.stop()");
-    console.log("minibiaBot.maxLight.toggle()");
-    console.log("minibiaBot.pauseBreak.toggle()");
-    return bot;
+    console.log("minibiaBot.runeV3.start({ hotkey: \"F1\", shift: false })");
+    console.log("minibiaBot.runeV3.stop()");
   }
 
-  window.__minibiaBotReloadBundle = bundle;
-  window.minibiaBotReload = () => boot(window.__minibiaBotReloadBundle || bundle);
-  boot(bundle);
-  delete window.__minibiaBotBundle;
+  window.__minibiaBotBoot = boot;
+  boot();
 })();
