@@ -22,6 +22,21 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
   delete runeV2Config.spellName;
 
+  function removeLegacyRuneV2SpellNameField() {
+    const legacyInput = document.getElementById("minibia-bot-rune-v2-spell-name");
+    legacyInput?.closest?.("label")?.remove();
+    legacyInput?.remove?.();
+
+    document.querySelectorAll("#minibia-bot-rune-v2-settings .mb-field").forEach((field) => {
+      const label = String(field.querySelector?.(".mb-field-label")?.textContent || "")
+        .trim()
+        .toLowerCase();
+      if (label === "rune 2.0 spell name" || label === "spell name") {
+        field.remove();
+      }
+    });
+  }
+
   function clampHotbarSlot(value, fallback = 10) {
     const numeric = Math.trunc(Number(value));
     return Number.isFinite(numeric) && numeric >= 1 && numeric <= 12 ? numeric : fallback;
@@ -179,6 +194,8 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
   }
 
   function installControls() {
+    removeLegacyRuneV2SpellNameField();
+
     const runeToggle = document.getElementById("minibia-bot-rune-enabled");
     const eatToggle = document.getElementById("minibia-bot-auto-eat-enabled");
     const quickSection = runeToggle?.closest?.(".mb-section") || eatToggle?.closest?.(".mb-section");
@@ -275,6 +292,8 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
       else runeToggle?.closest?.("label")?.after(runeV2Settings);
     }
 
+    removeLegacyRuneV2SpellNameField();
+
     if (!document.getElementById("minibia-bot-auto-eat-settings")) {
       const eatSettings = document.createElement("div");
       eatSettings.id = "minibia-bot-auto-eat-settings";
@@ -311,8 +330,11 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
   bot.quickControlsSettings = { installControls, destroy };
 
+  removeLegacyRuneV2SpellNameField();
+
   if (!installControls()) {
     observer = new MutationObserver(() => {
+      removeLegacyRuneV2SpellNameField();
       if (installControls()) observer?.disconnect?.();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
