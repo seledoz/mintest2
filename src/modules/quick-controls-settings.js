@@ -73,6 +73,8 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
     const stats = bot.rune?.readStats?.();
     const hp = stats?.hp;
     const mana = stats?.mana;
+    const nearbyMonsters = bot.hasteParalyzeMonsterRangeGuard?.getMonstersWithinRange?.(4) || [];
+    const monsterSafe = nearbyMonsters.length === 0;
     if (!hp || !mana) {
       return {
         hasStats: false,
@@ -80,6 +82,8 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
         enoughMana: false,
         cooldownReady: false,
         cooldownRemainingMs: runeV2Config.cooldownMs,
+        monsterSafe,
+        nearbyMonsterCount: nearbyMonsters.length,
         canActivate: false,
       };
     }
@@ -98,7 +102,9 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
       enoughMana,
       cooldownReady,
       cooldownRemainingMs,
-      canActivate: enoughHp && enoughMana && cooldownReady,
+      monsterSafe,
+      nearbyMonsterCount: nearbyMonsters.length,
+      canActivate: enoughHp && enoughMana && cooldownReady && monsterSafe,
     };
   }
 
