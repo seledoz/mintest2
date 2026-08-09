@@ -249,13 +249,17 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
 
 (() => {
   let attempts = 0;
+  let lastBot = null;
   const timer = window.setInterval(() => {
     attempts += 1;
     const bot = window.minibiaBot;
-    if (bot && !bot.autoTargetV2 && window.__minibiaBotBundle?.installAutoTargetV2Module) {
-      window.__minibiaBotBundle.installAutoTargetV2Module(bot);
-      window.clearInterval(timer);
-    } else if (attempts >= 120) {
+    if (bot && bot !== lastBot && window.__minibiaBotBundle?.installAutoTargetV2Module) {
+      lastBot = bot;
+      if (!bot.autoTargetV2) {
+        window.__minibiaBotBundle.installAutoTargetV2Module(bot);
+      }
+    }
+    if (attempts >= 120) {
       window.clearInterval(timer);
     }
   }, 250);
