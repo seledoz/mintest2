@@ -4,7 +4,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
    Informacoes de versao — preenchidas pelo build.sh
 
    O script de build (build.sh) substitui os placeholders
-   main, b905909 e 2026-08-09T19:28:37Z pelos valores reais
+   main, 609d9c2 e 2026-08-09T19:30:47Z pelos valores reais
    do git no momento da construcao do bundle pz-bot.js.
 
    Para desenvolvimento local sem build, os placeholders
@@ -13,8 +13,8 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 window.__minibiaBotBundle.versionInfo = {
   number: "2.0.0",
   branch: "main",
-  commit: "b905909",
-  date: "2026-08-09T19:28:37Z"
+  commit: "609d9c2",
+  date: "2026-08-09T19:30:47Z"
 };
 
 // Capture the Anti Paralyze toggle before its module-level change handler.
@@ -4264,13 +4264,17 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
 
 (() => {
   let attempts = 0;
+  let lastBot = null;
   const timer = window.setInterval(() => {
     attempts += 1;
     const bot = window.minibiaBot;
-    if (bot && !bot.autoTargetV2 && window.__minibiaBotBundle?.installAutoTargetV2Module) {
-      window.__minibiaBotBundle.installAutoTargetV2Module(bot);
-      window.clearInterval(timer);
-    } else if (attempts >= 120) {
+    if (bot && bot !== lastBot && window.__minibiaBotBundle?.installAutoTargetV2Module) {
+      lastBot = bot;
+      if (!bot.autoTargetV2) {
+        window.__minibiaBotBundle.installAutoTargetV2Module(bot);
+      }
+    }
+    if (attempts >= 120) {
       window.clearInterval(timer);
     }
   }, 250);
