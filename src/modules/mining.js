@@ -294,7 +294,10 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
         <label class="mb-field"><span class="mb-field-label">Rock name contains</span><input type="text" id="${rockNameId}" /></label>
         <div class="mb-small-note" id="${statusId}">Status: idle</div>
       </div>`;
-    firstColumn.prepend(section);
+
+    const gmSection = document.getElementById("minibia-bot-gm-kill-switch-section");
+    if (gmSection?.parentElement) gmSection.insertAdjacentElement("afterend", section);
+    else firstColumn.appendChild(section);
 
     const enabled = document.getElementById(enabledId);
     const hotkey = document.getElementById(hotkeyId);
