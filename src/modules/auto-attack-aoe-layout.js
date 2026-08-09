@@ -365,9 +365,12 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     if (label) {
       const status = getPrimaryStatus();
       const primaryConfig = status?.config || {};
+      if (!status?.running || !primaryConfig.enabled) {
+        label.textContent = "Square #2: off";
+        return;
+      }
       const count = countMonsters(positiveInt(config.squareRange, 3), primaryConfig);
-      if (!status?.running || !primaryConfig.enabled) label.textContent = "Square #2: off";
-      else if (primarySquareIsEligible(status)) label.textContent = `Square #2: waiting — #1 has priority (${count}/${config.minMonsters})`;
+      if (primarySquareIsEligible(status)) label.textContent = `Square #2: waiting — #1 has priority (${count}/${config.minMonsters})`;
       else label.textContent = `Square #2: watching (${count}/${config.minMonsters})`;
     }
   }
@@ -385,8 +388,12 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
   window.setInterval(() => {
     ensureUi();
-    try { triggerSecond(); } catch (error) {
-      window.minibiaBot?.log?.("square hotkey #2 tick failed", error?.message || error);
+    const status = getPrimaryStatus();
+    const enabled = !!status?.running && !!status?.config?.enabled;
+    if (enabled) {
+      try { triggerSecond(); } catch (error) {
+        window.minibiaBot?.log?.("square hotkey #2 tick failed", error?.message || error);
+      }
     }
     refreshUi();
   }, 250);
