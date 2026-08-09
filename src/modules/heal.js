@@ -19,7 +19,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
       healCooldownMs: 2040,
       manaCooldownMs: 1050,
       healRetryMs: 100,
-      healConfirmMs: 250,
+      healConfirmMs: 150,
       minHp: 250,
       hpHotbarSlot: 1,
       minMana: 150,
