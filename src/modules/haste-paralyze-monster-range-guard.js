@@ -66,6 +66,7 @@ window.__minibiaBotBundle.installHasteParalyzeMonsterRangeGuard = function insta
       antiParalyzeStatus?.running &&
       bot.antiParalyze?.config?.enabled
     ) {
+      if (bot.antiParalyze?.config?.ignoreMonsterGuard) return null;
       return "anti-paralyze";
     }
 
