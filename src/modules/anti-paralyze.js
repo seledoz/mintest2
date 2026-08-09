@@ -16,9 +16,11 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
   const config = Object.assign({
     enabled: false,
     spellWords: "",
+    ignoreMonsterGuard: false,
     tickMs: 50,
     recastCooldownMs: 2100,
   }, bot.storage.get(configStorageKey, {}));
+  config.ignoreMonsterGuard = !!config.ignoreMonsterGuard;
   config.tickMs = 50;
   config.recastCooldownMs = 2100;
 
@@ -89,7 +91,7 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
     const sent = bot.sendChat(spellWords);
     if (sent) {
       state.lastCastAt = now;
-      bot.log("cast anti-paralyze spell", { spellWords, cooldownMs: 2100, detectionSource: state.detectionSource });
+      bot.log("cast anti-paralyze spell", { spellWords, cooldownMs: 2100, detectionSource: state.detectionSource, ignoreMonsterGuard: !!config.ignoreMonsterGuard });
     }
     return sent;
   }
@@ -120,6 +122,7 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
   function start(overrides = {}) {
     Object.assign(config, overrides, { enabled: true, tickMs: 50, recastCooldownMs: 2100 });
     config.spellWords = String(config.spellWords || "").trim();
+    config.ignoreMonsterGuard = !!config.ignoreMonsterGuard;
     persistConfig();
     if (state.running) { syncUi(); return false; }
     state.running = true;
@@ -144,6 +147,7 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
 
   function updateConfig(nextConfig = {}) {
     if (Object.prototype.hasOwnProperty.call(nextConfig, "spellWords")) nextConfig.spellWords = String(nextConfig.spellWords || "").trim();
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "ignoreMonsterGuard")) nextConfig.ignoreMonsterGuard = !!nextConfig.ignoreMonsterGuard;
     Object.assign(config, nextConfig, { tickMs: 50, recastCooldownMs: 2100 });
     persistConfig();
     syncUi();
@@ -152,8 +156,10 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
 
   function syncUi() {
     const toggle = document.getElementById("minibia-bot-anti-paralyze-enabled");
+    const ignoreGuardToggle = document.getElementById("minibia-bot-anti-paralyze-ignore-guard");
     const spellInput = document.getElementById("minibia-bot-anti-paralyze-spell");
     if (toggle) toggle.checked = state.running;
+    if (ignoreGuardToggle) ignoreGuardToggle.checked = !!config.ignoreMonsterGuard;
     if (spellInput && document.activeElement !== spellInput) spellInput.value = config.spellWords || "";
   }
 
@@ -169,19 +175,23 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
     wrapper.innerHTML = `
       <div class="mb-row">
         <label class="mb-toggle"><input type="checkbox" id="minibia-bot-anti-paralyze-enabled" /><span>Anti Paralyze</span></label>
+        <label class="mb-toggle"><input type="checkbox" id="minibia-bot-anti-paralyze-ignore-guard" /><span>Ignore Guard</span></label>
         <input type="text" id="minibia-bot-anti-paralyze-spell" placeholder="Spell words" />
       </div>
-      <div class="mb-small-note">Detects the paralyze status icon. Auto Heal takes priority at or below Minimum HP. Cooldown: 2100 ms.</div>`;
+      <div class="mb-small-note">Detects the paralyze status icon. Ignore Guard lets Anti Paralyze cast with monsters nearby. Auto Heal still takes priority at or below Minimum HP. Cooldown: 2100 ms.</div>`;
     autoHealStack.appendChild(wrapper);
     const toggle = wrapper.querySelector("#minibia-bot-anti-paralyze-enabled");
+    const ignoreGuardToggle = wrapper.querySelector("#minibia-bot-anti-paralyze-ignore-guard");
     const spellInput = wrapper.querySelector("#minibia-bot-anti-paralyze-spell");
     spellInput.value = config.spellWords || "";
     toggle.checked = state.running;
+    ignoreGuardToggle.checked = !!config.ignoreMonsterGuard;
     spellInput.addEventListener("change", () => updateConfig({ spellWords: spellInput.value }));
+    ignoreGuardToggle.addEventListener("change", () => updateConfig({ ignoreMonsterGuard: ignoreGuardToggle.checked }));
     toggle.addEventListener("change", () => {
       const spellWords = String(spellInput.value || "").trim();
-      updateConfig({ spellWords });
-      if (toggle.checked) start({ spellWords }); else stop();
+      updateConfig({ spellWords, ignoreMonsterGuard: ignoreGuardToggle.checked });
+      if (toggle.checked) start({ spellWords, ignoreMonsterGuard: ignoreGuardToggle.checked }); else stop();
       toggle.checked = state.running;
     });
     return true;
