@@ -5,6 +5,11 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     window.clearInterval(window.__minibiaLowCapAlarmIntervalId);
     window.__minibiaLowCapAlarmIntervalId = null;
   }
+  if (window.__minibiaLowCapAlarmUiRetryIntervalId) {
+    window.clearInterval(window.__minibiaLowCapAlarmUiRetryIntervalId);
+    window.__minibiaLowCapAlarmUiRetryIntervalId = null;
+  }
+
   window.__minibiaLowCapAlarmToken = (window.__minibiaLowCapAlarmToken || 0) + 1;
   const token = window.__minibiaLowCapAlarmToken;
 
@@ -110,13 +115,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   }
 
   function tickAlarm() {
-    if (window.__minibiaLowCapAlarmToken !== token) return;
-    if (!config.enabled) {
-      alarmStartedAt = 0;
-      lastBeepAt = 0;
-      updateStatus(null);
-      return;
-    }
+    if (window.__minibiaLowCapAlarmToken !== token || !config.enabled) return;
 
     const now = Date.now();
     const cap = getCap();
@@ -140,6 +139,36 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     updateStatus(cap);
   }
 
+  function stopMonitoring() {
+    if (window.__minibiaLowCapAlarmIntervalId != null) {
+      window.clearInterval(window.__minibiaLowCapAlarmIntervalId);
+      window.__minibiaLowCapAlarmIntervalId = null;
+    }
+    alarmStartedAt = 0;
+    lastBeepAt = 0;
+    window.speechSynthesis?.cancel?.();
+    updateStatus(null);
+  }
+
+  function startMonitoring() {
+    if (!config.enabled || window.__minibiaLowCapAlarmToken !== token) {
+      stopMonitoring();
+      return;
+    }
+    if (window.__minibiaLowCapAlarmIntervalId != null) return;
+
+    tickAlarm();
+    window.__minibiaLowCapAlarmIntervalId = window.setInterval(
+      tickAlarm,
+      Math.max(250, numberValue(config.scanMs, 500))
+    );
+  }
+
+  function syncMonitoring() {
+    if (config.enabled) startMonitoring();
+    else stopMonitoring();
+  }
+
   function getRightColumn(panel) {
     return panel?.querySelector?.(".mb-side-column") ||
       panel?.querySelector?.(".mb-cave-column") ||
@@ -161,12 +190,13 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
   function ensureUi() {
     const panel = document.getElementById("minibia-bot-panel") || document.getElementById("k9x-panel");
-    if (!panel) return;
+    if (!panel) return false;
 
     const existing = document.getElementById(sectionId);
     if (existing) {
       moveUtilitySectionsToBottomRight(panel);
-      return;
+      updateStatus();
+      return true;
     }
 
     const rightColumn = getRightColumn(panel);
@@ -197,32 +227,49 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     enabled.addEventListener("change", () => {
       unlockSpeech();
       config.enabled = !!enabled.checked;
-      if (!config.enabled) {
-        alarmStartedAt = 0;
-        lastBeepAt = 0;
-        window.speechSynthesis?.cancel?.();
-      }
       saveConfig();
+      syncMonitoring();
       updateStatus();
     });
 
     threshold.addEventListener("input", () => {
       config.threshold = numberValue(threshold.value, config.threshold);
       saveConfig();
-      updateStatus();
+      if (config.enabled) tickAlarm();
+      else updateStatus();
     });
 
     moveUtilitySectionsToBottomRight(panel);
+    updateStatus();
+    return true;
   }
 
-  function tick() {
-    if (window.__minibiaLowCapAlarmToken !== token) return;
-    ensureUi();
-    const panel = document.getElementById("minibia-bot-panel") || document.getElementById("k9x-panel");
-    if (panel) moveUtilitySectionsToBottomRight(panel);
-    tickAlarm();
+  function stopUiRetry() {
+    if (window.__minibiaLowCapAlarmUiRetryIntervalId != null) {
+      window.clearInterval(window.__minibiaLowCapAlarmUiRetryIntervalId);
+      window.__minibiaLowCapAlarmUiRetryIntervalId = null;
+    }
   }
 
-  tick();
-  window.__minibiaLowCapAlarmIntervalId = window.setInterval(tick, Math.max(250, numberValue(config.scanMs, 500)));
+  function waitForUi() {
+    if (ensureUi()) {
+      stopUiRetry();
+      return;
+    }
+
+    let attempts = 0;
+    window.__minibiaLowCapAlarmUiRetryIntervalId = window.setInterval(() => {
+      if (window.__minibiaLowCapAlarmToken !== token) {
+        stopUiRetry();
+        return;
+      }
+      attempts += 1;
+      if (ensureUi() || attempts >= 40) stopUiRetry();
+    }, 250);
+  }
+
+  // The recurring capacity scan exists only while the feature is enabled.
+  // UI setup retries only during startup and stops as soon as the panel exists.
+  syncMonitoring();
+  waitForUi();
 })();
