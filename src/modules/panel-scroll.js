@@ -110,9 +110,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       if (!bot?.cave?.removeLastWaypoint) return;
 
       const removed = bot.cave.removeLastWaypoint();
-      if (removed) {
-        bot.log?.("removed last cavebot waypoint", removed);
-      }
+      if (removed) bot.log?.("removed last cavebot waypoint", removed);
       refreshCaveUi(bot);
     });
 
@@ -225,9 +223,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     window.addEventListener("resize", updateControls, { passive: true });
     window.addEventListener("scroll", updateControls, { passive: true, capture: true });
 
-    const resizeObserver = typeof ResizeObserver === "function"
-      ? new ResizeObserver(updateControls)
-      : null;
+    const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(updateControls) : null;
     resizeObserver?.observe(panel);
 
     const positionTimer = window.setInterval(() => {
@@ -238,7 +234,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
         return;
       }
       updateControls();
-    }, 250);
+    }, 500);
 
     updateControls();
     return true;
