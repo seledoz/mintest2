@@ -15,7 +15,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
 
   const config = Object.assign(
     {
-      tickMs: 50,
+      tickMs: 35,
       healCooldownMs: 2040,
       manaCooldownMs: 1050,
       healRetryMs: 100,
