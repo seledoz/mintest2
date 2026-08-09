@@ -85,6 +85,16 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     return true;
   }
 
+  function keepMiningBelowGm() {
+    const gmSection = document.getElementById("minibia-bot-gm-kill-switch-section");
+    const miningSection = document.getElementById("minibia-bot-mining-section");
+    if (!gmSection?.parentElement || !miningSection) return false;
+    if (gmSection.nextElementSibling !== miningSection) {
+      gmSection.insertAdjacentElement("afterend", miningSection);
+    }
+    return true;
+  }
+
   function refreshCaveUi(bot) {
     bot.ui?.refreshCaveStatus?.();
     bot.ui?.refreshCavePresetControls?.();
@@ -194,6 +204,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       installCaveNewButton();
       installCaveRemoveLastButton();
       retainCavePresetSelection();
+      keepMiningBelowGm();
       const rect = panel.getBoundingClientRect();
       const maxScrollLeft = Math.max(0, panel.scrollWidth - panel.clientWidth);
       const hasHorizontalOverflow = maxScrollLeft > 2;
@@ -245,6 +256,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       installCaveNewButton();
       installCaveRemoveLastButton();
       retainCavePresetSelection();
+      keepMiningBelowGm();
       if (installControls()) observer.disconnect();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
