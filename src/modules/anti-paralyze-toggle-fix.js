@@ -15,10 +15,7 @@
 
   function getThingDefinition(itemId) {
     if (!itemId) return null;
-    return window.gameClient?.itemDefinitionsByCid?.[itemId] ||
-      window.gameClient?.itemDefinitionsBySid?.[itemId] ||
-      window.gameClient?.itemDefinitions?.[itemId] ||
-      null;
+    return window.gameClient?.itemDefinitionsByCid?.[itemId] || window.gameClient?.itemDefinitionsBySid?.[itemId] || window.gameClient?.itemDefinitions?.[itemId] || null;
   }
 
   function getThingName(thing) {
@@ -39,10 +36,7 @@
     let score = Math.abs(position.x - anchor.x) + Math.abs(position.y - anchor.y);
     if (/rope spot|rope hole/.test(names)) score -= 100;
     else if (/hole/.test(names)) score -= 80;
-    const floorChange = getTileThings(tile).some((thing) => {
-      const definition = getThingDefinition(thing?.id);
-      return !!definition?.properties?.floorchange;
-    });
+    const floorChange = getTileThings(tile).some((thing) => !!getThingDefinition(thing?.id)?.properties?.floorchange);
     if (floorChange) score -= 40;
     if (tile?.isWalkable?.() === false) score -= 10;
     return score;
@@ -57,7 +51,6 @@
         if (isRope(item)) return { which: equipment, index, location: "equipment" };
       }
     }
-
     const containers = Array.from(window.gameClient?.player?.__openedContainers || []);
     for (const container of containers) {
       const slots = container?.slots || [];
@@ -73,9 +66,7 @@
     const route = bot.cave?.getRoute?.() || status?.route || [];
     const currentIndex = Math.trunc(Number(status?.currentIndex) || 0);
     const direction = Number(status?.direction) || 1;
-    const candidateIndexes = [currentIndex - direction, currentIndex - 1, currentIndex + 1];
-
-    for (const index of candidateIndexes) {
+    for (const index of [currentIndex - direction, currentIndex - 1, currentIndex + 1]) {
       const candidate = normalizePosition(route[index]);
       if (!candidate || candidate.z !== player.z) continue;
       const distance = Math.max(Math.abs(candidate.x - player.x), Math.abs(candidate.y - player.y));
@@ -108,110 +99,86 @@
   function installLearnedRopeFallback(bot) {
     if (!bot?.cave || bot.cave.__learnedRopeFallbackInstalled) return !!bot?.cave;
     bot.cave.__learnedRopeFallbackInstalled = true;
+    let timerId = null;
 
-    const timerId = window.setInterval(() => {
+    const ropeTick = () => {
       try {
         const status = bot.cave?.status?.();
+        if (!status?.running) return;
         const player = normalizePosition(bot.getPlayerPosition?.());
         const waypoint = normalizePosition(status?.currentWaypoint);
-        if (!status?.running || !player || !waypoint || waypoint.z >= player.z) return;
-
+        if (!player || !waypoint || waypoint.z >= player.z) return;
         const transitions = Array.isArray(status.transitions) ? status.transitions : [];
-        const transition = transitions
-          .filter((entry) => Number(entry?.from?.z) === player.z && Number(entry?.to?.z) === waypoint.z)
-          .sort((left, right) => {
-            const leftDistance = Math.abs(Number(left.from.x) - player.x) + Math.abs(Number(left.from.y) - player.y);
-            const rightDistance = Math.abs(Number(right.from.x) - player.x) + Math.abs(Number(right.from.y) - player.y);
-            return leftDistance - rightDistance;
-          })[0];
-
+        const transition = transitions.filter((entry) => Number(entry?.from?.z) === player.z && Number(entry?.to?.z) === waypoint.z).sort((left, right) => {
+          const leftDistance = Math.abs(Number(left.from.x) - player.x) + Math.abs(Number(left.from.y) - player.y);
+          const rightDistance = Math.abs(Number(right.from.x) - player.x) + Math.abs(Number(right.from.y) - player.y);
+          return leftDistance - rightDistance;
+        })[0];
         const anchor = normalizePosition(transition?.from) || getRouteRopeSource(bot, status, player);
         if (!anchor) return;
-
         const dx = Math.abs(anchor.x - player.x);
         const dy = Math.abs(anchor.y - player.y);
         if (dx > 1 || dy > 1) {
-          window.gameClient?.world?.pathfinder?.findPath?.(
-            new Position(player.x, player.y, player.z),
-            new Position(anchor.x, anchor.y, anchor.z)
-          );
+          window.gameClient?.world?.pathfinder?.findPath?.(new Position(player.x, player.y, player.z), new Position(anchor.x, anchor.y, anchor.z));
           return;
         }
-
         const now = Date.now();
         if (now - lastRopeFallbackAt < 900) return;
-
         const rope = findRopeSource();
         if (!rope) {
-          if (now - lastRopeFallbackAt >= 3000) {
-            bot.log?.("cave rope transition skipped: no rope found");
-            lastRopeFallbackAt = now;
-          }
+          if (now - lastRopeFallbackAt >= 3000) { bot.log?.("cave rope transition skipped: no rope found"); lastRopeFallbackAt = now; }
           return;
         }
-
         const candidates = getNearbyRopeCandidates(anchor, player);
         if (!candidates.length) return;
         const candidate = candidates[ropeCandidateIndex % candidates.length];
         ropeCandidateIndex = (ropeCandidateIndex + 1) % candidates.length;
         const sourceKey = `${candidate.position.x},${candidate.position.y},${candidate.position.z}`;
-
-        window.gameClient?.mouse?.__handleItemUseWith?.(
-          { which: rope.which, index: rope.index },
-          { which: candidate.tile, index: 0xFF }
-        );
+        window.gameClient?.mouse?.__handleItemUseWith?.({ which: rope.which, index: rope.index }, { which: candidate.tile, index: 0xFF });
         lastRopeFallbackAt = now;
         lastRopeSourceKey = sourceKey;
-        bot.log?.("cave tried rope transition tile", {
-          anchor,
-          source: candidate.position,
-          waypoint,
-          candidate: ropeCandidateIndex,
-          candidateCount: candidates.length,
-          sourceType: transition ? "learned" : "route",
-          ropeLocation: rope.location,
-          ropeSlot: rope.index,
-        });
-      } catch (error) {
-        bot.log?.("cave rope transition fallback failed", error?.message || error);
-      }
-    }, 150);
+        bot.log?.("cave tried rope transition tile", { anchor, source: candidate.position, waypoint, candidate: ropeCandidateIndex, candidateCount: candidates.length, sourceType: transition ? "learned" : "route", ropeLocation: rope.location, ropeSlot: rope.index });
+      } catch (error) { bot.log?.("cave rope transition fallback failed", error?.message || error); }
+    };
 
-    bot.addCleanup?.(() => window.clearInterval(timerId));
+    const startFallback = () => {
+      if (timerId != null) return;
+      timerId = window.setInterval(ropeTick, 500);
+    };
+    const stopFallback = () => {
+      if (timerId != null) window.clearInterval(timerId);
+      timerId = null;
+    };
+
+    const originalStart = bot.cave.start?.bind(bot.cave);
+    const originalStop = bot.cave.stop?.bind(bot.cave);
+    if (originalStart) bot.cave.start = (...args) => { const result = originalStart(...args); if (bot.cave?.status?.().running) startFallback(); return result; };
+    if (originalStop) bot.cave.stop = (...args) => { const result = originalStop(...args); stopFallback(); return result; };
+    if (bot.cave?.status?.().running) startFallback();
+
+    bot.addCleanup?.(stopFallback);
     return true;
   }
 
   function installCaveWaypointCompatibility(bot) {
     if (!bot?.cave) return false;
-    if (typeof bot.cave.addCurrentPosition !== "function" && typeof bot.cave.addWaypointCurrentSpot === "function") {
-      bot.cave.addCurrentPosition = (...args) => bot.cave.addWaypointCurrentSpot(...args);
-    }
-    if (typeof bot.cave.clearRoute !== "function" && typeof bot.cave.clearWaypoints === "function") {
-      bot.cave.clearRoute = (...args) => bot.cave.clearWaypoints(...args);
-    }
+    if (typeof bot.cave.addCurrentPosition !== "function" && typeof bot.cave.addWaypointCurrentSpot === "function") bot.cave.addCurrentPosition = (...args) => bot.cave.addWaypointCurrentSpot(...args);
+    if (typeof bot.cave.clearRoute !== "function" && typeof bot.cave.clearWaypoints === "function") bot.cave.clearRoute = (...args) => bot.cave.clearWaypoints(...args);
     installLearnedRopeFallback(bot);
     return typeof bot.cave.addCurrentPosition === "function";
   }
 
   function findRuneCooldownInput() {
     const inputs = Array.from(document.querySelectorAll("#minibia-bot-panel input"));
-    return inputs.find((input) => {
-      const label = input.closest("label");
-      return /rune\s*ms|rune\s*cooldown/i.test(String(label?.textContent || ""));
-    }) || null;
+    return inputs.find((input) => /rune\s*ms|rune\s*cooldown/i.test(String(input.closest("label")?.textContent || ""))) || null;
   }
 
   function installRuneCooldownPersistence(bot) {
     if (!bot?.attack || bot.attack.__runeCooldownPersistenceInstalled) return !!bot?.attack;
     bot.attack.__runeCooldownPersistenceInstalled = true;
-
     const input = findRuneCooldownInput();
     const saved = Number(window.localStorage.getItem(runeCooldownBackupKey));
-    if (Number.isFinite(saved) && saved >= 0) {
-      bot.attack.updateConfig?.({ runeCooldownMs: Math.trunc(saved) });
-      if (input) input.value = String(Math.trunc(saved));
-    }
-
+    if (Number.isFinite(saved) && saved >= 0) { bot.attack.updateConfig?.({ runeCooldownMs: Math.trunc(saved) }); if (input) input.value = String(Math.trunc(saved)); }
     const saveValue = () => {
       const currentInput = findRuneCooldownInput();
       const value = Number(currentInput?.value);
@@ -220,12 +187,7 @@
       window.localStorage.setItem(runeCooldownBackupKey, String(normalized));
       bot.attack.updateConfig?.({ runeCooldownMs: normalized });
     };
-
-    document.addEventListener("change", (event) => {
-      const currentInput = findRuneCooldownInput();
-      if (currentInput && event.target === currentInput) saveValue();
-    }, true);
-
+    document.addEventListener("change", (event) => { const currentInput = findRuneCooldownInput(); if (currentInput && event.target === currentInput) saveValue(); }, true);
     return true;
   }
 
@@ -234,28 +196,21 @@
     if (bot?.equipRing && !bot.ring) bot.ring = bot.equipRing;
     installCaveWaypointCompatibility(bot);
     installRuneCooldownPersistence(bot);
-
     const toggle = document.getElementById("minibia-bot-anti-paralyze-enabled");
     const spellInput = document.getElementById("minibia-bot-anti-paralyze-spell");
     if (!bot?.antiParalyze || !toggle || !spellInput) return false;
     if (toggle.dataset.antiParalyzeToggleFix === "true") return true;
-
     toggle.dataset.antiParalyzeToggleFix = "true";
     toggle.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopImmediatePropagation();
+      event.preventDefault(); event.stopImmediatePropagation();
       const shouldEnable = !bot.antiParalyze.status().running;
       const spellWords = String(spellInput.value || "").trim();
-      if (shouldEnable) bot.antiParalyze.start({ spellWords });
-      else bot.antiParalyze.stop();
+      if (shouldEnable) bot.antiParalyze.start({ spellWords }); else bot.antiParalyze.stop();
       toggle.checked = !!bot.antiParalyze.status().running;
     }, true);
     return true;
   }
 
   let attempts = 0;
-  const timerId = window.setInterval(() => {
-    attempts += 1;
-    if (install() || attempts >= 80) window.clearInterval(timerId);
-  }, 100);
+  const timerId = window.setInterval(() => { attempts += 1; if (install() || attempts >= 80) window.clearInterval(timerId); }, 100);
 })();
