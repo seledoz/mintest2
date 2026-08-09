@@ -1,0 +1,33 @@
+name: Build pz-bot bundle
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'build.sh'
+      - '.github/workflows/build-pz-bot.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build bundle
+        run: |
+          chmod +x build.sh
+          ./build.sh
+      - name: Commit rebuilt bundle
+        run: |
+          if git diff --quiet -- pz-bot.js; then
+            echo 'pz-bot.js is already up to date'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add pz-bot.js
+          git commit -m 'Rebuild pz-bot bundle'
+          git push
