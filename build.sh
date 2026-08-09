@@ -25,6 +25,7 @@ cat \
   src/modules/auto-invisible.js \
   src/modules/auto-magic-shield.js \
   src/modules/auto-attack.js \
+  src/modules/auto-target-v2.js \
   src/modules/auto-attack-exclude.js \
   src/modules/auto-attack-aoe.js \
   src/modules/auto-attack-gfb.js \
