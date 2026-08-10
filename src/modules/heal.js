@@ -81,10 +81,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
       return false;
     }
 
-    return (
-      stats.hp.current > attempt.hpBefore ||
-      (Number.isFinite(attempt.manaBefore) && Number.isFinite(stats.mana?.current) && stats.mana.current < attempt.manaBefore)
-    );
+    return stats.hp.current > attempt.hpBefore;
   }
 
   function didManaHealSucceed(stats, attempt) {
@@ -92,10 +89,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
       return false;
     }
 
-    return (
-      stats.mana.current > attempt.manaBefore ||
-      (Number.isFinite(attempt.hpBefore) && Number.isFinite(stats.hp?.current) && stats.hp.current > attempt.hpBefore)
-    );
+    return stats.mana.current > attempt.manaBefore;
   }
 
   function resolvePendingAttempts(stats, now = Date.now()) {
