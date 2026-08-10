@@ -3,6 +3,8 @@
   const TICK_MS = 120;
   const LOST_GRACE_MS = 10000;
   const MATRIX_CACHE_MS = 500;
+  const STUCK_RETRY_LIMIT = 2;
+  const BLOCKED_TILE_MS = 2500;
 
   function pos(value) {
     if (!value) return null;
@@ -15,6 +17,14 @@
   function cheb(a, b) {
     if (!a || !b || a.z !== b.z) return Infinity;
     return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
+  }
+
+  function samePos(a, b) {
+    return !!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z;
+  }
+
+  function tileKey(p) {
+    return p ? `${p.x},${p.y}` : "";
   }
 
   function readConfig(bot) {
@@ -77,14 +87,29 @@
     return matrix;
   }
 
-  function neighbors(node, matrix) {
+  function neighbors(node, matrix, temporarilyBlocked) {
     const dirs = [
       { x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 },
       { x: -1, y: -1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: 1, y: 1 },
     ];
+
     return dirs
-      .map((d) => ({ x: node.x + d.x, y: node.y + d.y, z: node.z }))
-      .filter((p) => matrix.get(`${p.x},${p.y}`) === true);
+      .map((d) => ({ x: node.x + d.x, y: node.y + d.y, z: node.z, dx: d.x, dy: d.y }))
+      .filter((p) => {
+        if (matrix.get(`${p.x},${p.y}`) !== true) return false;
+        if (temporarilyBlocked?.has(`${p.x},${p.y}`)) return false;
+
+        // Never squeeze diagonally through the corner of a wall. Both cardinal
+        // side tiles must be walkable before a diagonal step is considered safe.
+        if (p.dx !== 0 && p.dy !== 0) {
+          const sideA = `${node.x + p.dx},${node.y}`;
+          const sideB = `${node.x},${node.y + p.dy}`;
+          if (matrix.get(sideA) !== true || matrix.get(sideB) !== true) return false;
+          if (temporarilyBlocked?.has(sideA) || temporarilyBlocked?.has(sideB)) return false;
+        }
+        return true;
+      })
+      .map(({ x, y, z }) => ({ x, y, z }));
   }
 
   function reconstruct(node) {
@@ -97,13 +122,15 @@
     return path;
   }
 
-  function findPathAStar(start, goal, tolerance = 0) {
+  function findPathAStar(start, goal, tolerance = 0, options = {}) {
     const from = pos(start);
     const to = pos(goal);
     if (!from || !to || from.z !== to.z) return null;
     if (cheb(from, to) <= tolerance) return [from];
 
     const matrix = getWalkMatrix(from.z);
+    const temporarilyBlocked = options.temporarilyBlocked || null;
+    const avoidFirstStep = pos(options.avoidFirstStep);
     const open = [{ ...from, g: 0, f: cheb(from, to), parent: null }];
     const closed = new Set();
     const key = (p) => `${p.x},${p.y}`;
@@ -119,11 +146,21 @@
       if (cheb(current, to) <= tolerance) return reconstruct(current);
       closed.add(key(current));
 
-      for (const next of neighbors(current, matrix)) {
+      for (const next of neighbors(current, matrix, temporarilyBlocked)) {
         const nextKey = key(next);
         if (closed.has(nextKey)) continue;
         const diagonal = next.x !== current.x && next.y !== current.y;
-        const g = current.g + (diagonal ? 1.4 : 1);
+        let stepCost = diagonal ? 1.4 : 1;
+
+        // A fresh A* calculation happens every paced step. Penalize an immediate
+        // return to the tile we just came from so equal-cost routes do not make
+        // the character bounce back and forth. It is only a penalty, not a ban,
+        // so a dead end can still backtrack when that is the only valid route.
+        if (current.parent == null && avoidFirstStep && samePos(next, avoidFirstStep)) {
+          stepCost += 3;
+        }
+
+        const g = current.g + stepCost;
         const f = g + cheb(next, to);
         const existing = open.find((entry) => entry.x === next.x && entry.y === next.y);
         if (existing) {
@@ -162,11 +199,31 @@
       clearing: false,
       lastStep: null,
       anchorInitialized: false,
+      stuckRetries: 0,
+      blockedTiles: new Map(),
     };
 
     function setStatus(text) {
       const label = document.getElementById("minibia-bot-lure-status");
       if (label) label.textContent = text;
+    }
+
+    function pruneBlockedTiles() {
+      const now = Date.now();
+      for (const [key, until] of state.blockedTiles.entries()) {
+        if (until <= now) state.blockedTiles.delete(key);
+      }
+    }
+
+    function activeBlockedKeys() {
+      pruneBlockedTiles();
+      return new Set(state.blockedTiles.keys());
+    }
+
+    function markBlocked(p) {
+      if (!p) return;
+      state.blockedTiles.set(tileKey(p), Date.now() + BLOCKED_TILE_MS);
+      matrixCache.delete(String(p.z));
     }
 
     function advanceIndex() {
@@ -209,6 +266,8 @@
       state.caveWasRunning = !!cave?.running;
       if (!state.anchorInitialized) syncRouteOnceFromCave();
       state.active = true;
+      state.stuckRetries = 0;
+      state.blockedTiles.clear();
       stopPathOnly();
       if (cave?.running) bot.cave.stop?.({ persistEnabled: false });
     }
@@ -223,6 +282,8 @@
       state.clearing = false;
       state.lastStep = null;
       state.anchorInitialized = false;
+      state.stuckRetries = 0;
+      state.blockedTiles.clear();
       stopPathOnly();
 
       if (shouldResume) {
@@ -295,13 +356,37 @@
           return;
         }
 
+        // If the previous movement command should already have completed but the
+        // player is still on the exact same tile, count it as a failed step. On
+        // repeated failure temporarily blacklist that destination and replan.
+        if (state.lastStep) {
+          if (samePos(me, state.lastStep.from)) {
+            state.stuckRetries += 1;
+            if (state.stuckRetries >= STUCK_RETRY_LIMIT) {
+              markBlocked(state.lastStep.to);
+              bot.log?.("lure mode 2 temporarily blocked stuck tile", state.lastStep.to);
+              state.stuckRetries = 0;
+              state.lastStep = null;
+              stopPathOnly();
+            }
+          } else {
+            state.stuckRetries = 0;
+          }
+        }
+
         const waypoint = currentWaypoint(me);
         if (!waypoint) {
           setStatus("Lure 2: no route waypoint");
           return;
         }
 
-        const path = findPathAStar(me, waypoint, state.tolerance);
+        const avoidFirstStep = state.lastStep && samePos(me, state.lastStep.to)
+          ? state.lastStep.from
+          : null;
+        const path = findPathAStar(me, waypoint, state.tolerance, {
+          avoidFirstStep,
+          temporarilyBlocked: activeBlockedKeys(),
+        });
         if (!path || path.length < 2) {
           if (cheb(me, waypoint) <= state.tolerance) {
             advanceIndex();
