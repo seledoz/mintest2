@@ -20,6 +20,12 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
     bot.storage.get(runeV2StorageKey, {})
   );
 
+  // A saved profile can restore enabled=true before the Rune 2.0 checkbox is
+  // installed. Do not auto-start from persisted config alone; the checkbox
+  // change handler is the source of truth for starting/stopping the runtime.
+  const runeV2SavedEnabled = runeV2Config.enabled === true;
+  runeV2Config.enabled = false;
+
   delete runeV2Config.spellName;
 
   function removeLegacyRuneMakerUi() {
@@ -126,10 +132,11 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
   }
 
   function scheduleRuneV2Tick() {
-    if (!runeV2State.running) return;
+    if (!runeV2State.running || !runeV2Config.enabled) return;
     if (runeV2State.timerId != null) window.clearTimeout(runeV2State.timerId);
     runeV2State.timerId = window.setTimeout(() => {
       runeV2State.timerId = null;
+      if (!runeV2State.running || !runeV2Config.enabled) return;
       try {
         tryRuneV2();
       } catch (error) {
@@ -151,12 +158,12 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
   function stopRuneV2(options = {}) {
     runeV2State.running = false;
+    runeV2Config.enabled = false;
     if (runeV2State.timerId != null) {
       window.clearTimeout(runeV2State.timerId);
       runeV2State.timerId = null;
     }
     if (options.persistEnabled !== false) {
-      runeV2Config.enabled = false;
       persistRuneV2Config();
     }
     bot.log("rune spell 2.0 stopped");
@@ -265,6 +272,13 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
         makeField("Rune 2.0 Hotkey", hotkeyInput)
       );
       stack.prepend(runeV2Settings);
+
+      // Preserve compatibility for a normal reload when Rune 2.0 was actually
+      // enabled, but only after the checkbox exists so runtime and UI agree.
+      if (runeV2SavedEnabled) {
+        toggleInput.checked = true;
+        toggleInput.dispatchEvent(new Event("change", { bubbles: true }));
+      }
     }
 
     if (!document.getElementById("minibia-bot-auto-eat-settings")) {
@@ -315,8 +329,6 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });
   }
-
-  if (runeV2Config.enabled) startRuneV2();
 
   bot.addCleanup?.(destroy);
   return bot.quickControlsSettings;
