@@ -383,10 +383,38 @@
         const avoidFirstStep = state.lastStep && samePos(me, state.lastStep.to)
           ? state.lastStep.from
           : null;
-        const path = findPathAStar(me, waypoint, state.tolerance, {
+        let path = findPathAStar(me, waypoint, state.tolerance, {
           avoidFirstStep,
           temporarilyBlocked: activeBlockedKeys(),
         });
+
+        // A no-path result can be transient: the 500 ms walkability cache may be
+        // stale, or a recently failed step may have blacklisted the only valid
+        // tile for 2.5 seconds. Rebuild the matrix immediately, then retry once
+        // with normal blocked-tile avoidance and once more without temporary
+        // blacklists before declaring the waypoint unreachable.
+        if (!path || path.length < 2) {
+          matrixCache.delete(String(me.z));
+          path = findPathAStar(me, waypoint, state.tolerance, {
+            avoidFirstStep,
+            temporarilyBlocked: activeBlockedKeys(),
+          });
+        }
+        if ((!path || path.length < 2) && cheb(me, waypoint) > state.tolerance && state.blockedTiles.size) {
+          state.blockedTiles.clear();
+          matrixCache.delete(String(me.z));
+          path = findPathAStar(me, waypoint, state.tolerance, {
+            avoidFirstStep,
+            temporarilyBlocked: null,
+          });
+          if (path && path.length >= 2) {
+            bot.log?.("lure mode 2 A* recovered after clearing temporary blocked tiles", {
+              routeIndex: state.routeIndex,
+              waypoint,
+            });
+          }
+        }
+
         if (!path || path.length < 2) {
           if (cheb(me, waypoint) <= state.tolerance) {
             advanceIndex();
