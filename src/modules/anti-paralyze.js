@@ -185,6 +185,7 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
     const spellInput = wrapper.querySelector("#minibia-bot-anti-paralyze-spell");
     spellInput.value = config.spellWords || "";
     toggle.checked = state.running;
+    toggle.dataset.antiParalyzeToggleFix = "true";
     ignoreGuardToggle.checked = !!config.ignoreMonsterGuard;
     spellInput.addEventListener("change", () => updateConfig({ spellWords: spellInput.value }));
     ignoreGuardToggle.addEventListener("change", () => updateConfig({ ignoreMonsterGuard: ignoreGuardToggle.checked }));
