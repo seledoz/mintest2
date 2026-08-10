@@ -209,10 +209,15 @@
     const originalStop = bot.cave.stop.bind(bot.cave);
     const state = { pending: null, restoreCount: 0, lastRestoreAt: 0 };
 
+    function getLureMode() {
+      const lureStatus = bot.lureMode?.status?.() || null;
+      return Number(lureStatus?.config?.mode) === 2 ? 2 : 1;
+    }
+
     function lureOwnsCave() {
       const lureStatus = bot.lureMode?.status?.() || null;
       if (!lureStatus?.running) return false;
-      const mode = Number(lureStatus?.config?.mode) === 2 ? 2 : 1;
+      const mode = getLureMode();
       if (mode === 2) return !!lureStatus?.mode2?.active;
       return !!lureStatus?.clearingPack;
     }
@@ -230,6 +235,20 @@
       };
     }
 
+    function stopCurrentMovement() {
+      const targets = [
+        window.gameClient?.world?.pathfinder,
+        window.gameClient?.player,
+        window.gameClient?.world,
+      ].filter(Boolean);
+      ["stop", "cancel", "clear", "clearPath", "stopWalking", "cancelWalking", "stopAutoWalk", "reset"].forEach((name) => {
+        targets.forEach((target) => {
+          if (typeof target?.[name] !== "function") return;
+          try { target[name](); } catch (error) {}
+        });
+      });
+    }
+
     bot.cave.stop = function lureAwareCaveStop(options = {}) {
       if (lureOwnsCave()) {
         const snapshot = snapshotProgress();
@@ -242,13 +261,22 @@
             waypoint: snapshot.waypoint,
           });
         }
+
+        // Mode 1 must keep Cavebot's route state alive while the pack is being
+        // cleared. Fully stopping and starting Cavebot makes start() re-anchor
+        // to the physically closest waypoint, which can send it backward.
+        if (getLureMode() === 1 && bot.cave.status()?.running) {
+          stopCurrentMovement();
+          return true;
+        }
       }
       return originalStop(options);
     };
 
     bot.cave.start = function lureAwareCaveStart(...args) {
       const pending = state.pending ? { ...state.pending } : null;
-      const result = originalStart(...args);
+      const alreadyRunning = !!bot.cave.status()?.running;
+      const result = alreadyRunning ? true : originalStart(...args);
       if (!pending || !bot.cave.status()?.running) return result;
 
       const currentStatus = bot.cave.status();
@@ -263,18 +291,7 @@
 
       const restoredStatus = bot.cave.status();
       const restoredWaypoint = restoredStatus?.currentWaypoint || null;
-
-      const targets = [
-        window.gameClient?.world?.pathfinder,
-        window.gameClient?.player,
-        window.gameClient?.world,
-      ].filter(Boolean);
-      ["stop", "cancel", "clear", "clearPath", "stopWalking", "cancelWalking", "stopAutoWalk", "reset"].forEach((name) => {
-        targets.forEach((target) => {
-          if (typeof target?.[name] !== "function") return;
-          try { target[name](); } catch (error) {}
-        });
-      });
+      stopCurrentMovement();
 
       if (restoredWaypoint) {
         try { bot.cave.goToWaypoint?.(restoredWaypoint); } catch (error) {}
