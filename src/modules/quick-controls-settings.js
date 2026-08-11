@@ -77,14 +77,13 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
   function getRuneV2GateStatus(now = Date.now()) {
     const stats = bot.rune?.readStats?.();
-    const hp = stats?.hp;
     const mana = stats?.mana;
     const nearbyMonsters = bot.hasteParalyzeMonsterRangeGuard?.getMonstersWithinRange?.(4) || [];
     const monsterSafe = nearbyMonsters.length === 0;
-    if (!hp || !mana) {
+    if (!mana) {
       return {
         hasStats: false,
-        enoughHp: false,
+        enoughHp: true,
         enoughMana: false,
         cooldownReady: false,
         cooldownRemainingMs: runeV2Config.cooldownMs,
@@ -94,9 +93,6 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
       };
     }
 
-    const minHpPercent = Number(bot.rune?.config?.minHpPercent ?? 50);
-    const hpPercent = hp.max > 0 ? (hp.current / hp.max) * 100 : 0;
-    const enoughHp = hpPercent >= minHpPercent;
     const enoughMana = mana.current >= runeV2Config.manaCost;
     const elapsedMs = now - runeV2State.lastActivationAt;
     const cooldownRemainingMs = Math.max(0, runeV2Config.cooldownMs - elapsedMs);
@@ -104,13 +100,13 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
     return {
       hasStats: true,
-      enoughHp,
+      enoughHp: true,
       enoughMana,
       cooldownReady,
       cooldownRemainingMs,
       monsterSafe,
       nearbyMonsterCount: nearbyMonsters.length,
-      canActivate: enoughHp && enoughMana && cooldownReady && monsterSafe,
+      canActivate: enoughMana && cooldownReady && monsterSafe,
     };
   }
 
