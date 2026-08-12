@@ -8,21 +8,62 @@ window.__minibiaBotBundle.installCaveForwardLoopModule = function installCaveFor
     timerId: null,
     wrapCount: 0,
     lastWrapAt: 0,
+    originalAttackStatus: null,
+    lastCombatActiveAt: 0,
   };
 
   const config = Object.assign(
     {
       enabled: true,
       checkMs: 250,
+      combatRetargetGraceMs: 750,
     },
     bot.storage.get(configStorageKey, {}) || {}
   );
 
   config.enabled = config.enabled !== false;
   config.checkMs = Math.max(100, Math.trunc(Number(config.checkMs) || 250));
+  config.combatRetargetGraceMs = Math.max(0, Math.trunc(Number(config.combatRetargetGraceMs) || 750));
 
   function persistConfig() {
     bot.storage.set(configStorageKey, { ...config });
+  }
+
+  function installCombatRetargetGrace() {
+    if (!bot.attack?.status || state.originalAttackStatus) return false;
+
+    state.originalAttackStatus = bot.attack.status.bind(bot.attack);
+    bot.attack.status = function statusWithCombatRetargetGrace() {
+      const status = state.originalAttackStatus();
+      const now = Date.now();
+
+      if (status?.combatActive) {
+        state.lastCombatActiveAt = now;
+        return status;
+      }
+
+      const graceMs = Math.max(0, Number(config.combatRetargetGraceMs) || 0);
+      const elapsed = state.lastCombatActiveAt ? now - state.lastCombatActiveAt : Number.POSITIVE_INFINITY;
+      if (graceMs > 0 && elapsed < graceMs) {
+        return {
+          ...status,
+          combatActive: true,
+          combatRetargetGrace: true,
+          combatRetargetGraceRemainingMs: Math.max(0, graceMs - elapsed),
+        };
+      }
+
+      return status;
+    };
+
+    return true;
+  }
+
+  function removeCombatRetargetGrace() {
+    if (!state.originalAttackStatus || !bot.attack) return;
+    bot.attack.status = state.originalAttackStatus;
+    state.originalAttackStatus = null;
+    state.lastCombatActiveAt = 0;
   }
 
   function wrapIfReversing() {
@@ -48,6 +89,7 @@ window.__minibiaBotBundle.installCaveForwardLoopModule = function installCaveFor
   }
 
   function start() {
+    installCombatRetargetGrace();
     if (state.timerId != null) return false;
     state.timerId = window.setInterval(wrapIfReversing, config.checkMs);
     return true;
@@ -72,6 +114,9 @@ window.__minibiaBotBundle.installCaveForwardLoopModule = function installCaveFor
         start();
       }
     }
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "combatRetargetGraceMs")) {
+      config.combatRetargetGraceMs = Math.max(0, Math.trunc(Number(nextConfig.combatRetargetGraceMs) || 0));
+    }
     persistConfig();
     return { ...config };
   }
@@ -82,11 +127,13 @@ window.__minibiaBotBundle.installCaveForwardLoopModule = function installCaveFor
       config: { ...config },
       wrapCount: state.wrapCount,
       lastWrapAt: state.lastWrapAt,
+      lastCombatActiveAt: state.lastCombatActiveAt,
     };
   }
 
   function destroy() {
     stop();
+    removeCombatRetargetGrace();
   }
 
   bot.caveForwardLoop = {
