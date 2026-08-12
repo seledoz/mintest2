@@ -85,18 +85,18 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     const entries = getTargetEntries();
     if (!entries.length) return null;
 
-    if (config.highestHpEnabled) {
-      const priorityEntries = config.enabled && config.creatureNames.length
-        ? entries.filter((entry) => entry.priority >= 0)
-        : [];
-      const pool = priorityEntries.length ? priorityEntries : entries;
-      return pool.sort(sortHighestHp)[0]?.monster || null;
+    if (config.enabled && config.creatureNames.length) {
+      const priorityEntries = entries.filter((entry) => entry.priority >= 0);
+      if (priorityEntries.length) {
+        const bestPriority = Math.min(...priorityEntries.map((entry) => entry.priority));
+        const topPriorityEntries = priorityEntries.filter((entry) => entry.priority === bestPriority);
+        if (config.highestHpEnabled) return topPriorityEntries.sort(sortHighestHp)[0]?.monster || null;
+        return topPriorityEntries.sort((left, right) => left.distance - right.distance || Number(left.monster?.id || 0) - Number(right.monster?.id || 0))[0]?.monster || null;
+      }
     }
 
-    if (!config.enabled || !config.creatureNames.length) return null;
-    return entries
-      .filter((entry) => entry.priority >= 0)
-      .sort((left, right) => left.priority - right.priority || left.distance - right.distance || Number(left.monster?.id || 0) - Number(right.monster?.id || 0))[0]?.monster || null;
+    if (config.highestHpEnabled) return entries.sort(sortHighestHp)[0]?.monster || null;
+    return null;
   }
   function selectTarget(target, reason = "priority") {
     if (!target || !window.gameClient?.player || typeof window.gameClient.send !== "function" || typeof TargetPacket !== "function") return false;
@@ -117,11 +117,11 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     const preferredTarget = getPreferredTarget();
     if (!preferredTarget) return false;
     const currentTarget = getCurrentTarget();
-    if (!currentTarget) return selectTarget(preferredTarget, config.highestHpEnabled ? "highest hp" : "priority");
+    if (!currentTarget) return selectTarget(preferredTarget, config.highestHpEnabled ? "priority then highest hp" : "priority");
     if (Number(currentTarget.id) === Number(preferredTarget.id)) return false;
 
     if (config.highestHpEnabled) {
-      return selectTarget(preferredTarget, getPriorityIndex(preferredTarget) >= 0 ? "priority highest hp" : "highest hp");
+      return selectTarget(preferredTarget, getPriorityIndex(preferredTarget) >= 0 ? "priority then highest hp" : "highest hp");
     }
 
     const preferredPriority = getPriorityIndex(preferredTarget);
@@ -203,7 +203,7 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     const section = document.createElement("div");
     section.className = "mb-section mb-column-section";
     section.id = "minibia-bot-auto-attack-priority-section";
-    section.innerHTML = `<div class="mb-label">Creature Priority</div><div class="mb-stack"><label class="mb-toggle"><input type="checkbox" id="minibia-bot-auto-attack-priority-enabled" /><span>Use creature priority list</span></label><div class="mb-inline"><input type="text" id="minibia-bot-auto-attack-priority-input" placeholder="Creature name" /><button type="button" class="mb-small-button" id="minibia-bot-auto-attack-priority-add">Add</button></div><div class="mb-list" id="minibia-bot-auto-attack-priority-list"></div><div class="mb-small-note">Priority creatures always beat unlisted creatures. With Highest HP targeting on, the highest-HP visible priority creature is selected first.</div></div>`;
+    section.innerHTML = `<div class="mb-label">Creature Priority</div><div class="mb-stack"><label class="mb-toggle"><input type="checkbox" id="minibia-bot-auto-attack-priority-enabled" /><span>Use creature priority list</span></label><div class="mb-inline"><input type="text" id="minibia-bot-auto-attack-priority-input" placeholder="Creature name" /><button type="button" class="mb-small-button" id="minibia-bot-auto-attack-priority-add">Add</button></div><div class="mb-list" id="minibia-bot-auto-attack-priority-list"></div><div class="mb-small-note">Priority list order always wins. With Highest HP targeting on, HP only decides between multiple monsters at the same priority rank; unlisted monsters use highest HP only when no listed monster is available.</div></div>`;
     mount.appendChild(section);
     const enabledInput = section.querySelector("#minibia-bot-auto-attack-priority-enabled");
     const nameInput = section.querySelector("#minibia-bot-auto-attack-priority-input");
