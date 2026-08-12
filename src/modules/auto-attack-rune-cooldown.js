@@ -4,6 +4,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   const bundle = window.__minibiaBotBundle;
   const originalInstallAutoAttackModule = bundle.installAutoAttackModule;
   const DEFAULT_RUNE_COOLDOWN_MS = 2050;
+  const AUTO_ATTACK_TICK_MS = 250;
 
   if (typeof originalInstallAutoAttackModule !== "function") {
     return;
@@ -71,16 +72,19 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     const attack = bot?.attack;
 
     normalizeRuneCooldown(attack?.config);
+    if (attack?.config) attack.config.tickMs = AUTO_ATTACK_TICK_MS;
 
     if (attack?.start && !attack.__customRuneCooldownStartWrapped) {
       const originalStart = attack.start;
       attack.start = function startWithRuneCooldown(overrides = {}) {
+        overrides = { ...overrides, tickMs: AUTO_ATTACK_TICK_MS };
         if (Object.prototype.hasOwnProperty.call(overrides, "runeCooldownMs")) {
           overrides = { ...overrides, runeCooldownMs: normalizeCooldown(overrides.runeCooldownMs) };
         }
 
         const startResult = originalStart.call(this, overrides);
         normalizeRuneCooldown(attack.config);
+        attack.config.tickMs = AUTO_ATTACK_TICK_MS;
         return startResult;
       };
       attack.__customRuneCooldownStartWrapped = true;
@@ -89,6 +93,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     if (attack?.updateConfig && !attack.__customRuneCooldownUpdateWrapped) {
       const originalUpdateConfig = attack.updateConfig;
       attack.updateConfig = function updateConfigWithRuneCooldown(nextConfig = {}) {
+        nextConfig = { ...nextConfig, tickMs: AUTO_ATTACK_TICK_MS };
         if (Object.prototype.hasOwnProperty.call(nextConfig, "runeCooldownMs")) {
           nextConfig = {
             ...nextConfig,
@@ -98,7 +103,8 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
         const updatedConfig = originalUpdateConfig.call(this, nextConfig);
         normalizeRuneCooldown(attack.config);
-        return updatedConfig;
+        attack.config.tickMs = AUTO_ATTACK_TICK_MS;
+        return { ...updatedConfig, tickMs: AUTO_ATTACK_TICK_MS };
       };
       attack.__customRuneCooldownUpdateWrapped = true;
     }
