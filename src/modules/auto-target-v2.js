@@ -9,6 +9,9 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     timerId: null,
     skippedTargetIds: new Map(),
     lastTargetAt: 0,
+    combatStartedAt: 0,
+    originalAttackStatus: null,
+    attackStatusBridgeInstalled: false,
   };
 
   const config = Object.assign({
@@ -50,6 +53,54 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     const maxX = Math.max(1, Number(attackConfig.maxTargetDistanceX) || 7);
     const maxY = Math.max(1, Number(attackConfig.maxTargetDistanceY) || 5);
     return Math.abs(from.x - to.x) <= maxX && Math.abs(from.y - to.y) <= maxY;
+  }
+
+  function getCurrentTarget() {
+    return window.gameClient?.player?.__target || null;
+  }
+
+  function syncCombatState(now = Date.now()) {
+    if (!state.running) {
+      state.combatStartedAt = 0;
+      return false;
+    }
+    const target = getCurrentTarget();
+    if (target) {
+      if (!state.combatStartedAt) state.combatStartedAt = now;
+      return true;
+    }
+    state.combatStartedAt = 0;
+    return false;
+  }
+
+  function installAttackStatusBridge() {
+    if (state.attackStatusBridgeInstalled || typeof bot.attack?.status !== "function") return false;
+    state.originalAttackStatus = bot.attack.status.bind(bot.attack);
+    const bridgedStatus = function autoTargetV2AttackStatusBridge() {
+      const original = state.originalAttackStatus ? state.originalAttackStatus() : {};
+      if (!state.running) return original;
+      const now = Date.now();
+      const combatActive = syncCombatState(now);
+      return {
+        ...original,
+        combatActive,
+        combatDurationMs: combatActive ? Math.max(0, now - state.combatStartedAt) : 0,
+        targetCount: combatActive ? 1 : 0,
+      };
+    };
+    bridgedStatus.__autoTargetV2Bridge = true;
+    bot.attack.status = bridgedStatus;
+    state.attackStatusBridgeInstalled = true;
+    return true;
+  }
+
+  function uninstallAttackStatusBridge() {
+    if (!state.attackStatusBridgeInstalled) return;
+    if (bot.attack && bot.attack.status?.__autoTargetV2Bridge && state.originalAttackStatus) {
+      bot.attack.status = state.originalAttackStatus;
+    }
+    state.originalAttackStatus = null;
+    state.attackStatusBridgeInstalled = false;
   }
 
   function pruneSkipped(now = Date.now()) {
@@ -138,14 +189,21 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
 
   function tryTarget(now = Date.now()) {
     if (!state.running || !config.enabled) return false;
-    if (window.gameClient?.player?.__target) return false;
+    if (getCurrentTarget()) {
+      syncCombatState(now);
+      return false;
+    }
     if (now - state.lastTargetAt < Math.max(0, Number(config.targetCooldownMs) || 1200)) return false;
 
     const target = getReachableCandidates(now)[0] || null;
-    if (!target) return false;
+    if (!target) {
+      syncCombatState(now);
+      return false;
+    }
     if (!setTarget(target)) return false;
 
     state.lastTargetAt = now;
+    state.combatStartedAt = now;
     bot.log("auto target v2 selected reachable target", {
       id: target.id,
       name: target.name || "Mob",
@@ -156,7 +214,10 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
 
   function tick() {
     if (!state.running) return;
-    try { tryTarget(); }
+    try {
+      syncCombatState();
+      tryTarget();
+    }
     catch (error) { bot.log("auto target v2 tick failed", error?.message || error); }
     finally {
       if (state.running) state.timerId = window.setTimeout(tick, config.tickMs);
@@ -166,9 +227,11 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
   function start() {
     config.enabled = true;
     persistConfig();
+    installAttackStatusBridge();
     if (bot.attack?.status?.().running) bot.attack.stop();
     if (state.running) return false;
     state.running = true;
+    state.combatStartedAt = 0;
     tick();
     syncUi();
     bot.log("auto target v2 started");
@@ -177,9 +240,11 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
 
   function stop(options = {}) {
     state.running = false;
+    state.combatStartedAt = 0;
     if (state.timerId != null) window.clearTimeout(state.timerId);
     state.timerId = null;
     state.skippedTargetIds.clear();
+    uninstallAttackStatusBridge();
     if (options.persistEnabled !== false) {
       config.enabled = false;
       persistConfig();
@@ -236,10 +301,23 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
   bot.autoTargetV2 = {
     start,
     stop,
-    status: () => ({ running: state.running, config: { ...config }, skippedTargetIds: Array.from(state.skippedTargetIds.keys()) }),
+    status: () => {
+      const now = Date.now();
+      const combatActive = syncCombatState(now);
+      return {
+        running: state.running,
+        config: { ...config },
+        skippedTargetIds: Array.from(state.skippedTargetIds.keys()),
+        combatActive,
+        combatDurationMs: combatActive ? Math.max(0, now - state.combatStartedAt) : 0,
+        targetCount: combatActive ? 1 : 0,
+        currentTarget: combatActive ? getCurrentTarget() : null,
+      };
+    },
     tryTarget,
     getReachableCandidates,
     findReachableAdjacentPosition,
+    getCurrentTarget,
     config,
   };
 
