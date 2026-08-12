@@ -21,7 +21,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   const storedConfig = bot.storage.get(configStorageKey, {}) || {};
   const config = Object.assign(
     {
-      tickMs: 500,
+      tickMs: 300,
       targetHotbarSlot: 3,
       runeHotbarSlot: null,
       targetCooldownMs: 1200,
