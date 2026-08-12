@@ -167,6 +167,16 @@
         .replace("      maxTargetDistanceX: 7,", "      maxTargetDistanceX: 5,")
         .replace("    return dx <= maxTargetDistanceX && dy <= maxTargetDistanceY;", "    return dx <= Math.min(5, maxTargetDistanceX) && dy <= Math.min(5, maxTargetDistanceY) && Math.max(dx, dy) <= 5;");
     }
+    if (path === "src/modules/cave.js") {
+      code = code.replace(`        if (config.pathfinderMode === 'astar') {
+          const target = bot.attack?.getCurrentTarget?.() || null;
+          if (target) {
+            const chaseResult = chaseTarget(target);
+            bot.logDebug("cave combat chase", { chasing: chaseResult, targetId: target.id, targetName: target.name || "Mob", targetPos: normalizePosition(target.getPosition?.() || target.__position) });
+          } else bot.logDebug("cave combat no target to chase");
+        }
+`, "");
+    }
     if (path === "src/modules/lure-mode.js") {
       code = code
         .replace("    nextMode2StepAt: 0,\n", "    nextMode2StepAt: 0,\n    mode2StepStartPosition: null,\n    mode2WaitingForStep: false,\n")
