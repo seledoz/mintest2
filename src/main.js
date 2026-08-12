@@ -96,21 +96,72 @@
             <input type="checkbox" id="minibia-bot-gm-kill-switch-enabled" />
             <span>Enable GM Kill Switch</span>
           </label>
-          <div class="mb-small-note">Stops active bot features when a saved GM name speaks in Default chat.</div>
+          <label class="mb-field" id="minibia-bot-gm-exact-names-field">
+            <span class="mb-field-label">Exact GM Name(s)</span>
+            <textarea id="minibia-bot-gm-exact-names" placeholder="Enter the exact character name. One per line, or separate with commas."></textarea>
+            <span class="mb-small-note">Matching ignores capital letters but otherwise uses the full entered name.</span>
+          </label>
+          <label class="mb-toggle">
+            <input type="checkbox" id="minibia-bot-gm-responder-enabled" />
+            <span>Enable GM Responder</span>
+          </label>
+          <label class="mb-field">
+            <span class="mb-field-label">GM Auto Reply</span>
+            <textarea id="minibia-bot-gm-responder-message" placeholder="One reply after a GM speaks"></textarea>
+          </label>
+          <div class="mb-small-note">Replies once, then resets after 15 seconds. The same chat line will not trigger again.</div>
         </div>
       `;
 
       githubSection.insertAdjacentElement("afterend", section);
-      const toggle = section.querySelector("#minibia-bot-gm-kill-switch-enabled");
-      const refresh = () => {
-        if (toggle) toggle.checked = !!bot.gmDefaultChatKillSwitch?.status?.().running;
+      const killToggle = section.querySelector("#minibia-bot-gm-kill-switch-enabled");
+      const responderToggle = section.querySelector("#minibia-bot-gm-responder-enabled");
+      const responderMessage = section.querySelector("#minibia-bot-gm-responder-message");
+      const exactNamesInput = section.querySelector("#minibia-bot-gm-exact-names");
+      const exactNamesStorageKey = "minibiaBot.gmKillSwitch.exactNames";
+
+      const loadExactNames = () => {
+        try {
+          return String(window.localStorage.getItem(exactNamesStorageKey) || "");
+        } catch (_) {
+          return "";
+        }
+      };
+      const saveExactNames = () => {
+        try {
+          window.localStorage.setItem(exactNamesStorageKey, String(exactNamesInput?.value || ""));
+        } catch (_) {}
       };
 
-      toggle?.addEventListener("change", () => {
-        if (toggle.checked) bot.gmDefaultChatKillSwitch?.start?.();
+      if (exactNamesInput) exactNamesInput.value = loadExactNames();
+
+      const refresh = () => {
+        const status = bot.gmDefaultChatKillSwitch?.status?.() || {};
+        if (killToggle) killToggle.checked = !!status.running;
+        if (responderToggle) responderToggle.checked = !!status.config?.responderEnabled;
+        if (responderMessage && responderMessage !== document.activeElement) {
+          responderMessage.value = status.config?.responderMessage || "";
+        }
+      };
+
+      killToggle?.addEventListener("change", () => {
+        if (killToggle.checked) bot.gmDefaultChatKillSwitch?.start?.();
         else bot.gmDefaultChatKillSwitch?.stop?.();
         refresh();
       });
+      responderToggle?.addEventListener("change", () => {
+        bot.gmDefaultChatKillSwitch?.updateResponderConfig?.({ responderEnabled: responderToggle.checked });
+        refresh();
+      });
+      const saveResponder = () => {
+        bot.gmDefaultChatKillSwitch?.updateResponderConfig?.({ responderMessage: responderMessage?.value || "" });
+      };
+      responderMessage?.addEventListener("input", saveResponder);
+      responderMessage?.addEventListener("change", saveResponder);
+      responderMessage?.addEventListener("blur", saveResponder);
+      exactNamesInput?.addEventListener("input", saveExactNames);
+      exactNamesInput?.addEventListener("change", saveExactNames);
+      exactNamesInput?.addEventListener("blur", saveExactNames);
 
       refresh();
       return true;
@@ -262,9 +313,6 @@
           });
         }
 
-        // Mode 1 must keep Cavebot's route state alive while the pack is being
-        // cleared. Fully stopping and starting Cavebot makes start() re-anchor
-        // to the physically closest waypoint, which can send it backward.
         if (getLureMode() === 1 && bot.cave.status()?.running) {
           stopCurrentMovement();
           return true;
