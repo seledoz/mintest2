@@ -38,7 +38,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
 
   const config = Object.assign(
     {
-      tickMs: 500,
+      tickMs: 200,
       repathMs: 1500,
       waypointTolerance: 1,
       enabled: false,
@@ -47,7 +47,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     },
     bot.storage.get(configStorageKey, {})
   );
-  config.tickMs = 500;
+  config.tickMs = 200;
   config.waypointTolerance = Math.max(1, Math.trunc(Number(config.waypointTolerance) || 0));
 
   function normalizePresetName(value) {
@@ -1151,7 +1151,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
   }
   function start(overrides = {}) {
     Object.assign(config, overrides, { enabled: true });
-    config.tickMs = 500;
+    config.tickMs = 200;
     config.waypointTolerance = Math.max(1, Math.trunc(Number(config.waypointTolerance) || 0));
     persistConfig();
     if (!route.length) { bot.log("cave bot cannot start without waypoints"); return false; }
@@ -1247,7 +1247,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
   }
   function updateConfig(nextConfig = {}) {
     Object.assign(config, nextConfig);
-    config.tickMs = 500;
+    config.tickMs = 200;
     config.waypointTolerance = Math.max(1, Math.trunc(Number(config.waypointTolerance) || 0));
     persistConfig();
     bot.log("cave config updated", { ...config });
