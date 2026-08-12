@@ -50,6 +50,9 @@
     const attack = window.minibiaBot?.attack;
     if (!attack || attack.__runeRetryTimerWrapped) return !!attack;
 
+    // Keep the shared Auto Attack / Auto Target 2.0 scan loop at 200 ms.
+    attack.updateConfig?.({ tickMs: 200 });
+
     const originalStart = attack.start?.bind(attack);
     const originalStop = attack.stop?.bind(attack);
     const originalUpdateConfig = attack.updateConfig?.bind(attack);
