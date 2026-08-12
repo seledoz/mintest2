@@ -7,6 +7,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
   const state = {
     running: false,
     uiTimerId: null,
+    uiSyncTimerId: null,
     originalGetVisibleMonsters: null,
     filterInstalled: false,
     unreachableTargets: new Map(),
@@ -174,6 +175,26 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     state.reachabilityCache.clear();
   }
 
+  function syncUi() {
+    const v2Toggle = document.getElementById("minibia-bot-auto-target-v2-enabled");
+    const v1Toggle = document.getElementById("minibia-bot-auto-attack-enabled");
+    if (v2Toggle) v2Toggle.checked = state.running;
+    if (v1Toggle && state.running) v1Toggle.checked = false;
+  }
+
+  function startUiSync() {
+    if (state.uiSyncTimerId != null) return;
+    state.uiSyncTimerId = window.setInterval(() => {
+      if (!state.running) return;
+      syncUi();
+    }, 100);
+  }
+
+  function stopUiSync() {
+    if (state.uiSyncTimerId != null) window.clearInterval(state.uiSyncTimerId);
+    state.uiSyncTimerId = null;
+  }
+
   function start() {
     config.enabled = true;
     persistConfig();
@@ -189,10 +210,12 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
       bot.attack?.start?.();
     }
 
+    startUiSync();
     syncUi();
     bot.log("auto target v2 started with full original auto attack behavior", {
       reachabilityOnly: true,
-      attackRunning: !!bot.attack?.status?.().running,
+      attackEngineRunning: !!bot.attack?.status?.().running,
+      originalToggleHiddenByV2: true,
     });
     return true;
   }
@@ -200,6 +223,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
   function stop(options = {}) {
     const stopAttack = options.stopAttack !== false;
     state.running = false;
+    stopUiSync();
     uninstallReachabilityFilter();
 
     if (stopAttack && bot.attack?.status?.().running) {
@@ -233,13 +257,6 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     state.unreachableTargets.clear();
     state.reachabilityCache.clear();
     return { ...config };
-  }
-
-  function syncUi() {
-    const v2Toggle = document.getElementById("minibia-bot-auto-target-v2-enabled");
-    const v1Toggle = document.getElementById("minibia-bot-auto-attack-enabled");
-    if (v2Toggle) v2Toggle.checked = state.running;
-    if (v1Toggle && state.running) v1Toggle.checked = false;
   }
 
   function installUi() {
@@ -287,6 +304,9 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
         : [],
       unreachableTargetIds: Array.from(state.unreachableTargets.keys()),
       fullOriginalCombatEngine: true,
+      runeAndHotbarInherited: true,
+      meleeChaseInherited: true,
+      creaturePriorityInherited: true,
     };
   }
 
@@ -306,6 +326,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     stop({ persistEnabled: false, stopAttack: false });
     if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
     state.uiTimerId = null;
+    stopUiSync();
   });
 
   if (!installUi()) {
