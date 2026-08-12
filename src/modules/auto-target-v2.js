@@ -195,6 +195,22 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     state.uiSyncTimerId = null;
   }
 
+  function withOriginalToggleHidden(callback) {
+    const v1Toggle = document.getElementById("minibia-bot-auto-attack-enabled");
+    const v1Label = v1Toggle?.closest?.("label") || null;
+    const previousVisibility = v1Label?.style?.visibility || "";
+    if (v1Label) v1Label.style.visibility = "hidden";
+    try {
+      return callback();
+    } finally {
+      syncUi();
+      window.requestAnimationFrame?.(() => {
+        syncUi();
+        if (v1Label) v1Label.style.visibility = previousVisibility;
+      });
+    }
+  }
+
   function start() {
     config.enabled = true;
     persistConfig();
@@ -205,12 +221,13 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     }
 
     state.running = true;
+    startUiSync();
+    syncUi();
 
     if (!bot.attack?.status?.().running) {
-      bot.attack?.start?.();
+      withOriginalToggleHidden(() => bot.attack?.start?.());
     }
 
-    startUiSync();
     syncUi();
     bot.log("auto target v2 started with full original auto attack behavior", {
       reachabilityOnly: true,
