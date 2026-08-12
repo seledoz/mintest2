@@ -59,6 +59,17 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     return window.gameClient?.player?.__target || null;
   }
 
+  function getCreaturePriorityIndex(monster) {
+    const priorityConfig = bot.attackPriority?.config;
+    if (!priorityConfig?.enabled || !Array.isArray(priorityConfig.creatureNames) || !priorityConfig.creatureNames.length) {
+      return Number.POSITIVE_INFINITY;
+    }
+    const name = String(monster?.name || "").trim().toLowerCase();
+    if (!name) return Number.POSITIVE_INFINITY;
+    const index = priorityConfig.creatureNames.findIndex((entry) => String(entry || "").trim().toLowerCase() === name);
+    return index >= 0 ? index : Number.POSITIVE_INFINITY;
+  }
+
   function syncCombatState(now = Date.now()) {
     if (!state.running) {
       state.combatStartedAt = 0;
@@ -174,6 +185,12 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
         return true;
       })
       .sort((a, b) => {
+        const priorityDiff = getCreaturePriorityIndex(a) - getCreaturePriorityIndex(b);
+        if (Number.isFinite(priorityDiff) && priorityDiff !== 0) return priorityDiff;
+        const aPriority = getCreaturePriorityIndex(a);
+        const bPriority = getCreaturePriorityIndex(b);
+        if (Number.isFinite(aPriority) && !Number.isFinite(bPriority)) return -1;
+        if (!Number.isFinite(aPriority) && Number.isFinite(bPriority)) return 1;
         const ap = normalizePosition(a?.getPosition?.() || a?.__position);
         const bp = normalizePosition(b?.getPosition?.() || b?.__position);
         return getTileDistance(playerPosition, ap) - getTileDistance(playerPosition, bp) || Number(a?.id || 0) - Number(b?.id || 0);
@@ -207,6 +224,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     bot.log("auto target v2 selected reachable target", {
       id: target.id,
       name: target.name || "Mob",
+      priority: Number.isFinite(getCreaturePriorityIndex(target)) ? getCreaturePriorityIndex(target) + 1 : null,
       position: normalizePosition(target.getPosition?.() || target.__position),
     });
     return true;
@@ -318,6 +336,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     getReachableCandidates,
     findReachableAdjacentPosition,
     getCurrentTarget,
+    getCreaturePriorityIndex,
     config,
   };
 
