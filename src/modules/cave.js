@@ -1074,6 +1074,11 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
       const shouldPauseForCombat = !!attackStatus?.combatActive && Number(attackStatus?.combatDurationMs || 0) < 60000;
       if (shouldPauseForCombat) {
         if (!state.pausedForCombat) {
+          try {
+            window.gameClient?.world?.pathfinder?.setPathfindCache?.(null);
+          } catch (error) {
+            bot.logDebug("cave failed to stop waypoint movement for combat", { error: error?.message || error });
+          }
           state.pausedForCombat = true;
           resetStuckCounts();
           bot.log("cave paused for auto attack", { combatDurationMs: Number(attackStatus?.combatDurationMs || 0), targetCount: Number(attackStatus?.targetCount || 0) });
