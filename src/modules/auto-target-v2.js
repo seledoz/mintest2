@@ -6,21 +6,18 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
   const configStorageKey = "minibiaBot.autoTargetV2.config";
   const state = {
     running: false,
-    timerId: null,
-    skippedTargetIds: new Map(),
-    lastTargetAt: 0,
-    combatStartedAt: 0,
-    originalAttackStatus: null,
-    attackStatusBridgeInstalled: false,
+    uiTimerId: null,
+    originalGetVisibleMonsters: null,
+    filterInstalled: false,
+    unreachableTargets: new Map(),
+    reachabilityCache: new Map(),
   };
 
   const config = Object.assign({
     enabled: false,
-    tickMs: 500,
-    targetCooldownMs: 1200,
     unreachableSkipMs: 4000,
+    reachabilityCacheMs: 350,
   }, bot.storage.get(configStorageKey, {}));
-  config.tickMs = 500;
 
   function persistConfig() {
     bot.storage.set(configStorageKey, { ...config });
@@ -33,108 +30,25 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     return { x: Math.trunc(x), y: Math.trunc(y), z: Math.trunc(z) };
   }
 
+  function getPositionKey(position) {
+    const value = normalizePosition(position);
+    return value ? `${value.x},${value.y},${value.z}` : null;
+  }
+
   function getTile(position) {
     if (!position || typeof Position !== "function") return null;
-    return window.gameClient?.world?.getTileFromWorldPosition?.(new Position(position.x, position.y, position.z)) || null;
-  }
-
-  function getNearbyMonsters() {
-    return bot.xray?.getVisibleMonsters?.({ sameFloorOnly: true }) || [];
-  }
-
-  function getTileDistance(from, to) {
-    if (!from || !to || from.z !== to.z) return Number.POSITIVE_INFINITY;
-    return Math.max(Math.abs(from.x - to.x), Math.abs(from.y - to.y));
-  }
-
-  function isInTargetRange(from, to) {
-    if (!from || !to || from.z !== to.z) return false;
-    const attackConfig = bot.attack?.config || {};
-    const maxX = Math.max(1, Number(attackConfig.maxTargetDistanceX) || 7);
-    const maxY = Math.max(1, Number(attackConfig.maxTargetDistanceY) || 5);
-    return Math.abs(from.x - to.x) <= maxX && Math.abs(from.y - to.y) <= maxY;
-  }
-
-  function getCurrentTarget() {
-    return window.gameClient?.player?.__target || null;
-  }
-
-  function getCreaturePriorityIndex(monster) {
-    const priorityConfig = bot.attackPriority?.config;
-    if (!priorityConfig?.enabled || !Array.isArray(priorityConfig.creatureNames) || !priorityConfig.creatureNames.length) {
-      return Number.POSITIVE_INFINITY;
-    }
-    const name = String(monster?.name || "").trim().toLowerCase();
-    if (!name) return Number.POSITIVE_INFINITY;
-    const index = priorityConfig.creatureNames.findIndex((entry) => String(entry || "").trim().toLowerCase() === name);
-    return index >= 0 ? index : Number.POSITIVE_INFINITY;
-  }
-
-  function syncCombatState(now = Date.now()) {
-    if (!state.running) {
-      state.combatStartedAt = 0;
-      return false;
-    }
-    const target = getCurrentTarget();
-    if (target) {
-      if (!state.combatStartedAt) state.combatStartedAt = now;
-      return true;
-    }
-    state.combatStartedAt = 0;
-    return false;
-  }
-
-  function installAttackStatusBridge() {
-    if (state.attackStatusBridgeInstalled || typeof bot.attack?.status !== "function") return false;
-    state.originalAttackStatus = bot.attack.status.bind(bot.attack);
-    const bridgedStatus = function autoTargetV2AttackStatusBridge() {
-      const original = state.originalAttackStatus ? state.originalAttackStatus() : {};
-      if (!state.running) return original;
-      const now = Date.now();
-      const combatActive = syncCombatState(now);
-      return {
-        ...original,
-        combatActive,
-        combatDurationMs: combatActive ? Math.max(0, now - state.combatStartedAt) : 0,
-        targetCount: combatActive ? 1 : 0,
-      };
-    };
-    bridgedStatus.__autoTargetV2Bridge = true;
-    bot.attack.status = bridgedStatus;
-    state.attackStatusBridgeInstalled = true;
-    return true;
-  }
-
-  function uninstallAttackStatusBridge() {
-    if (!state.attackStatusBridgeInstalled) return;
-    if (bot.attack && bot.attack.status?.__autoTargetV2Bridge && state.originalAttackStatus) {
-      bot.attack.status = state.originalAttackStatus;
-    }
-    state.originalAttackStatus = null;
-    state.attackStatusBridgeInstalled = false;
-  }
-
-  function pruneSkipped(now = Date.now()) {
-    for (const [id, until] of state.skippedTargetIds.entries()) {
-      if (until <= now) state.skippedTargetIds.delete(id);
-    }
-  }
-
-  function isSkipped(monster, now = Date.now()) {
-    pruneSkipped(now);
-    return !!monster?.id && (state.skippedTargetIds.get(monster.id) || 0) > now;
-  }
-
-  function skipMonster(monster, now = Date.now()) {
-    if (!monster?.id) return;
-    state.skippedTargetIds.set(monster.id, now + Math.max(500, Number(config.unreachableSkipMs) || 4000));
+    return window.gameClient?.world?.getTileFromWorldPosition?.(
+      new Position(position.x, position.y, position.z)
+    ) || null;
   }
 
   function findReachableAdjacentPosition(targetPosition, playerPosition) {
-    if (!targetPosition || !playerPosition || targetPosition.z !== playerPosition.z) return null;
+    const target = normalizePosition(targetPosition);
+    const player = normalizePosition(playerPosition);
+    if (!target || !player || target.z !== player.z) return null;
 
     const pathfinder = window.gameClient?.world?.pathfinder;
-    const startTile = getTile(playerPosition);
+    const startTile = getTile(player);
     if (!pathfinder || !startTile || typeof pathfinder.search !== "function") return null;
 
     const offsets = [
@@ -143,138 +57,189 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     ];
 
     offsets.sort((a, b) => {
-      const da = Math.abs(targetPosition.x + a.x - playerPosition.x) + Math.abs(targetPosition.y + a.y - playerPosition.y);
-      const db = Math.abs(targetPosition.x + b.x - playerPosition.x) + Math.abs(targetPosition.y + b.y - playerPosition.y);
+      const da = Math.abs(target.x + a.x - player.x) + Math.abs(target.y + a.y - player.y);
+      const db = Math.abs(target.x + b.x - player.x) + Math.abs(target.y + b.y - player.y);
       return da - db;
     });
 
     for (const offset of offsets) {
-      const candidate = { x: targetPosition.x + offset.x, y: targetPosition.y + offset.y, z: targetPosition.z };
+      const candidate = {
+        x: target.x + offset.x,
+        y: target.y + offset.y,
+        z: target.z,
+      };
       const tile = getTile(candidate);
       if (!tile?.isWalkable?.()) continue;
-      if (candidate.x === playerPosition.x && candidate.y === playerPosition.y) return candidate;
+      if (candidate.x === player.x && candidate.y === player.y) return candidate;
+
       try {
         const path = pathfinder.search(startTile, tile);
         if (Array.isArray(path) && path.length > 0) return candidate;
       } catch (error) {
-        bot.logDebug?.("auto target v2 reachability check failed", { targetPosition, candidate, error: error?.message || error });
+        bot.logDebug?.("auto target v2 reachability check failed", {
+          targetPosition: target,
+          candidate,
+          error: error?.message || error,
+        });
       }
     }
+
     return null;
   }
 
-  function getReachableCandidates(now = Date.now()) {
+  function pruneCaches(now = Date.now()) {
+    for (const [id, entry] of state.unreachableTargets.entries()) {
+      if (!entry || entry.until <= now) state.unreachableTargets.delete(id);
+    }
+    for (const [key, entry] of state.reachabilityCache.entries()) {
+      if (!entry || now - entry.at > Math.max(100, Number(config.reachabilityCacheMs) || 350)) {
+        state.reachabilityCache.delete(key);
+      }
+    }
+  }
+
+  function isMonsterReachable(monster, now = Date.now()) {
+    if (!monster) return false;
     const playerPosition = normalizePosition(bot.getPlayerPosition?.());
-    if (!playerPosition) return [];
+    const targetPosition = normalizePosition(monster?.getPosition?.() || monster?.__position);
+    if (!playerPosition || !targetPosition || playerPosition.z !== targetPosition.z) return false;
 
-    return getNearbyMonsters()
-      .filter((monster) => {
-        if (isSkipped(monster, now)) return false;
-        const targetPosition = normalizePosition(monster?.getPosition?.() || monster?.__position);
-        if (!isInTargetRange(playerPosition, targetPosition)) return false;
-        const reachable = findReachableAdjacentPosition(targetPosition, playerPosition);
-        if (!reachable) {
-          skipMonster(monster, now);
-          bot.logDebug?.("auto target v2 skipped unreachable monster", {
-            id: monster?.id,
-            name: monster?.name || "Mob",
-            position: targetPosition,
-          });
-          return false;
-        }
-        return true;
-      })
-      .sort((a, b) => {
-        const priorityDiff = getCreaturePriorityIndex(a) - getCreaturePriorityIndex(b);
-        if (Number.isFinite(priorityDiff) && priorityDiff !== 0) return priorityDiff;
-        const aPriority = getCreaturePriorityIndex(a);
-        const bPriority = getCreaturePriorityIndex(b);
-        if (Number.isFinite(aPriority) && !Number.isFinite(bPriority)) return -1;
-        if (!Number.isFinite(aPriority) && Number.isFinite(bPriority)) return 1;
-        const ap = normalizePosition(a?.getPosition?.() || a?.__position);
-        const bp = normalizePosition(b?.getPosition?.() || b?.__position);
-        return getTileDistance(playerPosition, ap) - getTileDistance(playerPosition, bp) || Number(a?.id || 0) - Number(b?.id || 0);
+    pruneCaches(now);
+
+    const targetKey = getPositionKey(targetPosition);
+    const playerKey = getPositionKey(playerPosition);
+    const id = monster?.id;
+    const skipped = id != null ? state.unreachableTargets.get(id) : null;
+    if (skipped && skipped.positionKey === targetKey && skipped.until > now) return false;
+    if (skipped && skipped.positionKey !== targetKey) state.unreachableTargets.delete(id);
+
+    const cacheKey = `${playerKey}|${id ?? "no-id"}|${targetKey}`;
+    const cached = state.reachabilityCache.get(cacheKey);
+    if (cached && now - cached.at <= Math.max(100, Number(config.reachabilityCacheMs) || 350)) {
+      return cached.reachable;
+    }
+
+    const reachable = !!findReachableAdjacentPosition(targetPosition, playerPosition);
+    state.reachabilityCache.set(cacheKey, { reachable, at: now });
+
+    if (!reachable && id != null) {
+      state.unreachableTargets.set(id, {
+        until: now + Math.max(500, Number(config.unreachableSkipMs) || 4000),
+        positionKey: targetKey,
       });
+      bot.logDebug?.("auto target v2 filtered unreachable monster", {
+        id,
+        name: monster?.name || "Mob",
+        position: targetPosition,
+      });
+    }
+
+    return reachable;
   }
 
-  function setTarget(target) {
-    if (!target || !window.gameClient?.player || typeof window.gameClient.send !== "function" || typeof TargetPacket !== "function") return false;
-    window.gameClient.player.setTarget(target);
-    window.gameClient.send(new TargetPacket(target.id));
+  function getRawVisibleMonsters(options = { sameFloorOnly: true }) {
+    const getter = state.originalGetVisibleMonsters || bot.xray?.getVisibleMonsters?.bind(bot.xray);
+    if (typeof getter !== "function") return [];
+    return getter(options) || [];
+  }
+
+  function getReachableCandidates(now = Date.now()) {
+    return getRawVisibleMonsters({ sameFloorOnly: true }).filter((monster) => isMonsterReachable(monster, now));
+  }
+
+  function installReachabilityFilter() {
+    if (state.filterInstalled) return true;
+    if (!bot.xray || typeof bot.xray.getVisibleMonsters !== "function") return false;
+
+    state.originalGetVisibleMonsters = bot.xray.getVisibleMonsters.bind(bot.xray);
+    bot.xray.getVisibleMonsters = function getVisibleMonstersWithAutoTargetV2Reachability(options = {}) {
+      const monsters = state.originalGetVisibleMonsters(options) || [];
+      if (!state.running) return monsters;
+      const now = Date.now();
+      return monsters.filter((monster) => isMonsterReachable(monster, now));
+    };
+    bot.xray.getVisibleMonsters.__autoTargetV2ReachabilityFilter = true;
+    state.filterInstalled = true;
     return true;
   }
 
-  function tryTarget(now = Date.now()) {
-    if (!state.running || !config.enabled) return false;
-    if (getCurrentTarget()) {
-      syncCombatState(now);
-      return false;
+  function uninstallReachabilityFilter() {
+    if (!state.filterInstalled) return;
+    if (bot.xray && bot.xray.getVisibleMonsters?.__autoTargetV2ReachabilityFilter && state.originalGetVisibleMonsters) {
+      bot.xray.getVisibleMonsters = state.originalGetVisibleMonsters;
     }
-    if (now - state.lastTargetAt < Math.max(0, Number(config.targetCooldownMs) || 1200)) return false;
-
-    const target = getReachableCandidates(now)[0] || null;
-    if (!target) {
-      syncCombatState(now);
-      return false;
-    }
-    if (!setTarget(target)) return false;
-
-    state.lastTargetAt = now;
-    state.combatStartedAt = now;
-    bot.log("auto target v2 selected reachable target", {
-      id: target.id,
-      name: target.name || "Mob",
-      priority: Number.isFinite(getCreaturePriorityIndex(target)) ? getCreaturePriorityIndex(target) + 1 : null,
-      position: normalizePosition(target.getPosition?.() || target.__position),
-    });
-    return true;
-  }
-
-  function tick() {
-    if (!state.running) return;
-    try {
-      syncCombatState();
-      tryTarget();
-    }
-    catch (error) { bot.log("auto target v2 tick failed", error?.message || error); }
-    finally {
-      if (state.running) state.timerId = window.setTimeout(tick, config.tickMs);
-    }
+    state.originalGetVisibleMonsters = null;
+    state.filterInstalled = false;
+    state.unreachableTargets.clear();
+    state.reachabilityCache.clear();
   }
 
   function start() {
     config.enabled = true;
     persistConfig();
-    installAttackStatusBridge();
-    if (bot.attack?.status?.().running) bot.attack.stop();
     if (state.running) return false;
+    if (!installReachabilityFilter()) {
+      bot.log("auto target v2 could not install reachability filter");
+      return false;
+    }
+
     state.running = true;
-    state.combatStartedAt = 0;
-    tick();
+
+    if (!bot.attack?.status?.().running) {
+      bot.attack?.start?.();
+    }
+
     syncUi();
-    bot.log("auto target v2 started");
+    bot.log("auto target v2 started with full original auto attack behavior", {
+      reachabilityOnly: true,
+      attackRunning: !!bot.attack?.status?.().running,
+    });
     return true;
   }
 
   function stop(options = {}) {
+    const stopAttack = options.stopAttack !== false;
     state.running = false;
-    state.combatStartedAt = 0;
-    if (state.timerId != null) window.clearTimeout(state.timerId);
-    state.timerId = null;
-    state.skippedTargetIds.clear();
-    uninstallAttackStatusBridge();
+    uninstallReachabilityFilter();
+
+    if (stopAttack && bot.attack?.status?.().running) {
+      bot.attack.stop();
+    }
+
     if (options.persistEnabled !== false) {
       config.enabled = false;
       persistConfig();
     }
+
     syncUi();
-    bot.log("auto target v2 stopped");
+    bot.log("auto target v2 stopped", { stoppedAttack: stopAttack });
     return true;
   }
 
+  function tryTarget() {
+    if (!state.running) return false;
+    return !!bot.attack?.tryAttack?.();
+  }
+
+  function updateConfig(nextConfig = {}) {
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "unreachableSkipMs")) {
+      nextConfig.unreachableSkipMs = Math.max(500, Math.trunc(Number(nextConfig.unreachableSkipMs) || config.unreachableSkipMs || 4000));
+    }
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "reachabilityCacheMs")) {
+      nextConfig.reachabilityCacheMs = Math.max(100, Math.trunc(Number(nextConfig.reachabilityCacheMs) || config.reachabilityCacheMs || 350));
+    }
+    Object.assign(config, nextConfig);
+    persistConfig();
+    state.unreachableTargets.clear();
+    state.reachabilityCache.clear();
+    return { ...config };
+  }
+
   function syncUi() {
-    const toggle = document.getElementById("minibia-bot-auto-target-v2-enabled");
-    if (toggle) toggle.checked = state.running;
+    const v2Toggle = document.getElementById("minibia-bot-auto-target-v2-enabled");
+    const v1Toggle = document.getElementById("minibia-bot-auto-attack-enabled");
+    if (v2Toggle) v2Toggle.checked = state.running;
+    if (v1Toggle && state.running) v1Toggle.checked = false;
   }
 
   function installUi() {
@@ -282,6 +247,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
       syncUi();
       return true;
     }
+
     const v1Toggle = document.getElementById("minibia-bot-auto-attack-enabled");
     const v1Label = v1Toggle?.closest?.("label");
     if (!v1Label) return false;
@@ -291,54 +257,67 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     label.innerHTML = '<input type="checkbox" id="minibia-bot-auto-target-v2-enabled" /><span>Auto Target 2.0</span>';
     v1Label.insertAdjacentElement("afterend", label);
 
-    const toggle = label.querySelector("#minibia-bot-auto-target-v2-enabled");
-    toggle.checked = state.running;
-    toggle.addEventListener("change", () => {
-      if (toggle.checked) start(); else stop();
+    const v2Toggle = label.querySelector("#minibia-bot-auto-target-v2-enabled");
+    v2Toggle.checked = state.running;
+    v2Toggle.addEventListener("change", () => {
+      if (v2Toggle.checked) start();
+      else stop();
       syncUi();
-      if (v1Toggle) v1Toggle.checked = !!bot.attack?.status?.().running;
     });
 
     v1Toggle.addEventListener("change", () => {
-      if (v1Toggle.checked && state.running) stop();
+      if (v1Toggle.checked && state.running) {
+        stop({ stopAttack: false });
+        v1Toggle.checked = !!bot.attack?.status?.().running;
+      }
     });
+
     return true;
   }
 
-  let uiAttempts = 0;
-  const uiTimer = window.setInterval(() => {
-    uiAttempts += 1;
-    if (installUi() || uiAttempts >= 80) window.clearInterval(uiTimer);
-  }, 250);
-
-  bot.addCleanup?.(() => {
-    stop({ persistEnabled: false });
-    window.clearInterval(uiTimer);
-  });
+  function status() {
+    const attackStatus = bot.attack?.status?.() || {};
+    return {
+      ...attackStatus,
+      running: state.running,
+      config: { ...config },
+      attackConfig: attackStatus.config ? { ...attackStatus.config } : null,
+      reachableCandidates: state.running
+        ? getReachableCandidates().map((monster) => ({ id: monster?.id, name: monster?.name || "Mob" }))
+        : [],
+      unreachableTargetIds: Array.from(state.unreachableTargets.keys()),
+      fullOriginalCombatEngine: true,
+    };
+  }
 
   bot.autoTargetV2 = {
     start,
     stop,
-    status: () => {
-      const now = Date.now();
-      const combatActive = syncCombatState(now);
-      return {
-        running: state.running,
-        config: { ...config },
-        skippedTargetIds: Array.from(state.skippedTargetIds.keys()),
-        combatActive,
-        combatDurationMs: combatActive ? Math.max(0, now - state.combatStartedAt) : 0,
-        targetCount: combatActive ? 1 : 0,
-        currentTarget: combatActive ? getCurrentTarget() : null,
-      };
-    },
+    status,
+    updateConfig,
     tryTarget,
     getReachableCandidates,
     findReachableAdjacentPosition,
-    getCurrentTarget,
-    getCreaturePriorityIndex,
+    isMonsterReachable,
     config,
   };
+
+  bot.addCleanup?.(() => {
+    stop({ persistEnabled: false, stopAttack: false });
+    if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
+    state.uiTimerId = null;
+  });
+
+  if (!installUi()) {
+    let attempts = 0;
+    state.uiTimerId = window.setInterval(() => {
+      attempts += 1;
+      if (installUi() || attempts >= 80) {
+        window.clearInterval(state.uiTimerId);
+        state.uiTimerId = null;
+      }
+    }, 250);
+  }
 
   if (config.enabled) start();
   return bot.autoTargetV2;
@@ -356,8 +335,6 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
         window.__minibiaBotBundle.installAutoTargetV2Module(bot);
       }
     }
-    if (attempts >= 120) {
-      window.clearInterval(timer);
-    }
+    if (attempts >= 120) window.clearInterval(timer);
   }, 250);
 })();
