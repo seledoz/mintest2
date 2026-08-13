@@ -281,6 +281,17 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
     state.scanTimerId = null;
   }
 
+  function startUiTimer() {
+    if (state.uiTimerId != null) return;
+    state.uiTimerId = window.setInterval(() => { ensureUi(); refreshUiValues(); }, 1000);
+  }
+
+  function stopUiTimer() {
+    if (state.uiTimerId == null) return;
+    window.clearInterval(state.uiTimerId);
+    state.uiTimerId = null;
+  }
+
   function inspectAddedNode(node) {
     if (!config.enabled || !state.running || state.mode !== "watching") return false;
     const element = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
@@ -327,6 +338,7 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
     state.baselineCaptchaKeys = new Set(getCaptchaCandidates().map((candidate) => candidate.key).filter(Boolean));
     startObserver();
     startScanTimer();
+    startUiTimer();
     bot.log("captcha alarm started", { ...config, mode: state.mode, baselineCaptchaCount: state.baselineCaptchaKeys.size });
     refreshUiValues();
     return true;
@@ -342,6 +354,7 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
     stopObserver();
     stopAlertTimer();
     stopScanTimer();
+    stopUiTimer();
     if (options.persistEnabled !== false) {
       config.enabled = false;
       persistConfig();
@@ -447,13 +460,10 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
 
   function destroy() {
     stop({ persistEnabled: false });
-    if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
-    state.uiTimerId = null;
     document.getElementById("k9x-red-text-alert-section")?.remove();
   }
 
   bot.redTextAlert = { start, stop, status, updateConfig, beep, resetSeenMessages, destroy, config };
-  state.uiTimerId = window.setInterval(() => { ensureUi(); refreshUiValues(); }, 1000);
   bot.addCleanup(destroy);
   if (config.enabled) start(); else ensureUi();
   return bot.redTextAlert;
