@@ -15,7 +15,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
 
   const config = Object.assign(
     {
-      tickMs: 35,
+      tickMs: 50,
       healCooldownMs: 2040,
       manaCooldownMs: 1050,
       healRetryMs: 100,
@@ -28,6 +28,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
     },
     bot.storage.get(configStorageKey, {})
   );
+  config.tickMs = 50;
 
   if (!Number.isFinite(Number(config.healCooldownMs)) || Number(config.healCooldownMs) < 2040) {
     config.healCooldownMs = 2040;
@@ -227,7 +228,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
   }
 
   function start(overrides = {}) {
-    Object.assign(config, overrides, { enabled: true });
+    Object.assign(config, overrides, { enabled: true, tickMs: 50 });
     if (!Number.isFinite(Number(config.healCooldownMs)) || Number(config.healCooldownMs) < 2040) {
       config.healCooldownMs = 2040;
     }
@@ -284,7 +285,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
     }
 
     if (Object.prototype.hasOwnProperty.call(nextConfig, "manaHotbarSlot")) {
-      nextConfig.manaHotbarSlot = normalizeHotbarSlot(nextConfig.manaHotbarSlot) ?? config.manaHotbarSlot;
+      nextConfig.manaHotbarSlot = normalizeHotbarSlot(nextConfig.manaHotbarSlot);
     }
 
     if (Object.prototype.hasOwnProperty.call(nextConfig, "minHp")) {
@@ -311,7 +312,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
       nextConfig.healConfirmMs = Math.max(50, Number(nextConfig.healConfirmMs) || 50);
     }
 
-    Object.assign(config, nextConfig);
+    Object.assign(config, nextConfig, { tickMs: 50 });
     if (!Number.isFinite(Number(config.healCooldownMs)) || Number(config.healCooldownMs) < 2040) {
       config.healCooldownMs = 2040;
     }
