@@ -17,11 +17,11 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
     enabled: false,
     spellWords: "",
     ignoreMonsterGuard: false,
-    tickMs: 50,
+    tickMs: 250,
     recastCooldownMs: 2100,
   }, bot.storage.get(configStorageKey, {}));
   config.ignoreMonsterGuard = !!config.ignoreMonsterGuard;
-  config.tickMs = 50;
+  config.tickMs = 250;
   config.recastCooldownMs = 2100;
 
   function persistConfig() { bot.storage.set(configStorageKey, { ...config }); }
@@ -98,7 +98,7 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
 
   function scheduleNextTick() {
     if (!state.running || !config.enabled) return;
-    state.timerId = window.setTimeout(tick, 50);
+    state.timerId = window.setTimeout(tick, 250);
   }
 
   function tick() {
@@ -120,7 +120,7 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
   }
 
   function start(overrides = {}) {
-    Object.assign(config, overrides, { enabled: true, tickMs: 50, recastCooldownMs: 2100 });
+    Object.assign(config, overrides, { enabled: true, tickMs: 250, recastCooldownMs: 2100 });
     config.spellWords = String(config.spellWords || "").trim();
     config.ignoreMonsterGuard = !!config.ignoreMonsterGuard;
     persistConfig();
@@ -148,7 +148,7 @@ window.__minibiaBotBundle.installAntiParalyzeModule = function installAntiParaly
   function updateConfig(nextConfig = {}) {
     if (Object.prototype.hasOwnProperty.call(nextConfig, "spellWords")) nextConfig.spellWords = String(nextConfig.spellWords || "").trim();
     if (Object.prototype.hasOwnProperty.call(nextConfig, "ignoreMonsterGuard")) nextConfig.ignoreMonsterGuard = !!nextConfig.ignoreMonsterGuard;
-    Object.assign(config, nextConfig, { tickMs: 50, recastCooldownMs: 2100 });
+    Object.assign(config, nextConfig, { tickMs: 250, recastCooldownMs: 2100 });
     persistConfig();
     syncUi();
     return { ...config };
