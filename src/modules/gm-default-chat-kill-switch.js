@@ -7,7 +7,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
 
   const config = Object.assign(
     {
-      killSwitchEnabled: true,
+      killSwitchEnabled: false,
       responderEnabled: false,
       responderMessage: "",
       responderDelayMs: RESPONDER_DELAY_MS,
@@ -214,7 +214,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   }
 
   function startWatcher() {
-    if (state.watcherRunning) return false;
+    if (!shouldWatch() || state.watcherRunning) return false;
     state.watcherRunning = true;
     rememberExistingEntries();
     tick();
