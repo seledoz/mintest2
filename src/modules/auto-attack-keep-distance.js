@@ -126,9 +126,6 @@ window.__minibiaBotBundle.installAutoAttackKeepDistanceModule = function install
     );
     if (directRetreat) return directRetreat;
 
-    // A wall may block every tile that immediately increases range. In that case,
-    // slide sideways along the wall without getting any closer, preferring a tile
-    // that opens an escape route on the following step.
     const lateralCandidates = candidates.filter(
       (candidate) => getTileDistance(candidate, targetPosition) === currentDistance
     );
@@ -223,9 +220,24 @@ window.__minibiaBotBundle.installAutoAttackKeepDistanceModule = function install
     }
   }
 
-  function schedule() {
-    window.clearInterval(state.timerId);
-    state.timerId = window.setInterval(tick, Math.max(100, Number(config.tickMs) || 200));
+  function shouldRunTimer() {
+    return !!config.enabled && !!bot.attack?.status?.().running;
+  }
+
+  function stopTimer() {
+    if (state.timerId != null) window.clearInterval(state.timerId);
+    state.timerId = null;
+  }
+
+  function syncTimer() {
+    if (!shouldRunTimer()) {
+      stopTimer();
+      return false;
+    }
+    if (state.timerId == null) {
+      state.timerId = window.setInterval(tick, Math.max(100, Number(config.tickMs) || 200));
+    }
+    return true;
   }
 
   function updateConfig(nextConfig = {}) {
@@ -238,6 +250,7 @@ window.__minibiaBotBundle.installAutoAttackKeepDistanceModule = function install
     Object.assign(config, nextConfig);
     persistConfig();
     syncAttackMode();
+    syncTimer();
     refreshUi();
     return { ...config };
   }
@@ -245,6 +258,7 @@ window.__minibiaBotBundle.installAutoAttackKeepDistanceModule = function install
   function status() {
     return {
       config: { ...config },
+      timerRunning: state.timerId != null,
       lastMoveAt: state.lastMoveAt,
       lastDestinationKey: state.lastDestinationKey,
       lastTargetId: state.lastTargetId,
@@ -290,14 +304,33 @@ window.__minibiaBotBundle.installAutoAttackKeepDistanceModule = function install
     return true;
   }
 
-  bot.attackKeepDistance = { updateConfig, status, injectUi, tick };
+  if (bot.attack && !bot.attack.__keepDistanceTimerSyncWrapped) {
+    const originalStart = bot.attack.start?.bind(bot.attack);
+    const originalStop = bot.attack.stop?.bind(bot.attack);
+    if (originalStart) {
+      bot.attack.start = (...args) => {
+        const result = originalStart(...args);
+        syncTimer();
+        return result;
+      };
+    }
+    if (originalStop) {
+      bot.attack.stop = (...args) => {
+        const result = originalStop(...args);
+        stopTimer();
+        return result;
+      };
+    }
+    bot.attack.__keepDistanceTimerSyncWrapped = true;
+  }
+
+  bot.attackKeepDistance = { updateConfig, status, injectUi, tick, syncTimer };
   injectUi();
-  schedule();
   syncAttackMode();
+  syncTimer();
 
   bot.addCleanup(() => {
-    window.clearInterval(state.timerId);
-    state.timerId = null;
+    stopTimer();
     if (state.previousMeleeMode != null) {
       bot.attack?.updateConfig?.({ meleeMode: state.previousMeleeMode });
       state.previousMeleeMode = null;
