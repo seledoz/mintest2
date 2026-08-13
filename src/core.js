@@ -267,7 +267,7 @@ window.__minibiaBotBundle.createBot = function createBot() {
     }
   }
 
-  startReconnectWatcher();
+  // Reconnect watcher intentionally disabled to avoid background DOM scanning.
 
   const raw = window.__minibiaBotBundle.versionInfo || {};
   const version = Object.freeze({
