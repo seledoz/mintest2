@@ -56,6 +56,46 @@
     return controls;
   }
 
+  function captureModuleLists() {
+    const bot = window.minibiaBot;
+    return {
+      attackPriorityCreatureNames: Array.isArray(bot?.attackPriority?.config?.creatureNames)
+        ? [...bot.attackPriority.config.creatureNames]
+        : [],
+      attackExcludeCreatureNames: Array.isArray(bot?.attackExclude?.config?.excludedCreatureNames)
+        ? [...bot.attackExclude.config.excludedCreatureNames]
+        : [],
+    };
+  }
+
+  function restoreModuleLists(lists) {
+    if (!lists || typeof lists !== "object") return { restored: 0, missing: 0 };
+
+    const bot = window.minibiaBot;
+    let restored = 0;
+    let missing = 0;
+
+    if (Array.isArray(lists.attackPriorityCreatureNames)) {
+      if (typeof bot?.attackPriority?.setNames === "function") {
+        bot.attackPriority.setNames(lists.attackPriorityCreatureNames);
+        restored += 1;
+      } else {
+        missing += 1;
+      }
+    }
+
+    if (Array.isArray(lists.attackExcludeCreatureNames)) {
+      if (typeof bot?.attackExclude?.setNames === "function") {
+        bot.attackExclude.setNames(lists.attackExcludeCreatureNames);
+        restored += 1;
+      } else {
+        missing += 1;
+      }
+    }
+
+    return { restored, missing };
+  }
+
   function dispatchControlEvents(element) {
     element.dispatchEvent(new Event("input", { bubbles: true }));
     element.dispatchEvent(new Event("change", { bubbles: true }));
@@ -155,15 +195,17 @@
     if (mustBeNew && profiles[normalized]) throw new Error(`Profile “${normalized}” already exists`);
 
     const controls = capturePanelControls();
+    const lists = captureModuleLists();
     profiles[normalized] = {
       name: normalized,
       savedAt: new Date().toISOString(),
       controls,
+      lists,
     };
     writeProfiles(profiles);
     window.localStorage.setItem(ACTIVE_KEY, normalized);
     refreshPanel(normalized);
-    updateStatus(`Saved profile: ${normalized} (${Object.keys(controls).length} controls)`);
+    updateStatus(`Saved profile: ${normalized} (${Object.keys(controls).length} controls + priority/exclude lists)`);
     return profiles[normalized];
   }
 
@@ -175,10 +217,17 @@
       throw new Error("This profile uses the old format. Configure the bot and press Save on this profile once.");
     }
 
-    const result = applyPanelControls(profile.controls);
+    const controlResult = applyPanelControls(profile.controls);
+    const listResult = restoreModuleLists(profile.lists);
+    const result = {
+      restored: controlResult.restored,
+      missing: controlResult.missing,
+      listsRestored: listResult.restored,
+      listsMissing: listResult.missing,
+    };
     window.localStorage.setItem(ACTIVE_KEY, normalized);
     refreshPanel(normalized);
-    updateStatus(`Loaded profile: ${normalized} (${result.restored} controls restored)`);
+    updateStatus(`Loaded profile: ${normalized} (${result.restored} controls, ${result.listsRestored} lists restored)`);
     return result;
   }
 
