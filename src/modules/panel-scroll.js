@@ -105,11 +105,9 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
   function installCaveRemoveLastButton() {
     if (document.getElementById(caveRemoveLastButtonId)) return true;
-
     const addButton = document.getElementById("minibia-bot-cave-add");
     const row = addButton?.parentElement;
     if (!addButton || !row) return false;
-
     const removeButton = document.createElement("button");
     removeButton.type = "button";
     removeButton.id = caveRemoveLastButtonId;
@@ -118,23 +116,19 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     removeButton.addEventListener("click", () => {
       const bot = window.minibiaBot;
       if (!bot?.cave?.removeLastWaypoint) return;
-
       const removed = bot.cave.removeLastWaypoint();
       if (removed) bot.log?.("removed last cavebot waypoint", removed);
       refreshCaveUi(bot);
     });
-
     addButton.insertAdjacentElement("afterend", removeButton);
     return true;
   }
 
   function installCaveNewButton() {
     if (document.getElementById(caveNewButtonId)) return true;
-
     const saveButton = document.getElementById("minibia-bot-cave-preset-save");
     const row = saveButton?.parentElement;
     if (!saveButton || !row) return false;
-
     const newButton = document.createElement("button");
     newButton.type = "button";
     newButton.id = caveNewButtonId;
@@ -143,20 +137,16 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     newButton.addEventListener("click", () => {
       const bot = window.minibiaBot;
       if (!bot?.cave) return;
-
       const name = window.prompt("New preset name", "New Route")?.trim();
       if (!name) return;
-
       const existing = bot.cave.getPresetNames?.() || [];
       if (existing.some((entry) => String(entry).toLowerCase() === name.toLowerCase())) {
         window.alert(`A preset named "${name}" already exists.`);
         return;
       }
-
       bot.cave.stop?.();
-      if (bot.cave.createPreset) {
-        bot.cave.createPreset(name);
-      } else {
+      if (bot.cave.createPreset) bot.cave.createPreset(name);
+      else {
         bot.cave.clearWaypoints?.();
         bot.cave.clearTransitions?.();
         bot.cave.savePreset?.(name);
@@ -166,7 +156,6 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       refreshCaveUi(bot);
       bot.log?.("created new cavebot preset", { name });
     });
-
     row.insertBefore(newButton, saveButton);
     return true;
   }
@@ -174,33 +163,25 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   function installControls() {
     const panel = document.getElementById("minibia-bot-panel");
     if (!panel || document.getElementById(controlsId)) return false;
-
     const controls = document.createElement("div");
     controls.id = controlsId;
-
     const leftButton = document.createElement("button");
     leftButton.id = "minibia-bot-panel-scroll-left";
     leftButton.type = "button";
     leftButton.textContent = "◀";
     leftButton.title = "Scroll panel left";
     leftButton.setAttribute("aria-label", "Scroll panel left");
-
     const rightButton = document.createElement("button");
     rightButton.id = "minibia-bot-panel-scroll-right";
     rightButton.type = "button";
     rightButton.textContent = "▶";
     rightButton.title = "Scroll panel right";
     rightButton.setAttribute("aria-label", "Scroll panel right");
-
     controls.append(leftButton, rightButton);
     document.body.appendChild(controls);
 
     const updateControls = () => {
-      if (!document.body.contains(panel)) {
-        controls.remove();
-        return;
-      }
-
+      if (!document.body.contains(panel)) { controls.remove(); return; }
       installCaveNewButton();
       installCaveRemoveLastButton();
       retainCavePresetSelection();
@@ -209,15 +190,12 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       const maxScrollLeft = Math.max(0, panel.scrollWidth - panel.clientWidth);
       const hasHorizontalOverflow = maxScrollLeft > 2;
       const visible = rect.width > 0 && rect.height > 0 && hasHorizontalOverflow;
-
       controls.style.display = visible ? "block" : "none";
       if (!visible) return;
-
       controls.style.left = `${Math.max(0, rect.left)}px`;
       controls.style.top = `${Math.max(0, rect.top)}px`;
       controls.style.width = `${Math.max(0, Math.min(rect.width, window.innerWidth - Math.max(0, rect.left)))}px`;
       controls.style.height = `${Math.max(0, Math.min(rect.height, window.innerHeight - Math.max(0, rect.top)))}px`;
-
       leftButton.disabled = panel.scrollLeft <= 1;
       rightButton.disabled = panel.scrollLeft >= maxScrollLeft - 1;
     };
@@ -227,16 +205,13 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       panel.scrollBy({ left: direction * amount, behavior: "smooth" });
       window.setTimeout(updateControls, 350);
     };
-
     leftButton.addEventListener("click", () => scrollPanel(-1));
     rightButton.addEventListener("click", () => scrollPanel(1));
     panel.addEventListener("scroll", updateControls, { passive: true });
     window.addEventListener("resize", updateControls, { passive: true });
     window.addEventListener("scroll", updateControls, { passive: true, capture: true });
-
     const resizeObserver = typeof ResizeObserver === "function" ? new ResizeObserver(updateControls) : null;
     resizeObserver?.observe(panel);
-
     const positionTimer = window.setInterval(() => {
       if (!document.body.contains(panel)) {
         window.clearInterval(positionTimer);
@@ -245,8 +220,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
         return;
       }
       updateControls();
-    }, 500);
-
+    }, 1000);
     updateControls();
     return true;
   }
