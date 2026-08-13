@@ -36,6 +36,7 @@ cat \
   src/modules/cave-forward-loop.js \
   src/modules/cave-arrow-keys.js \
   src/modules/cave-waypoint-actions.js \
+  src/modules/cave-active-timers.js \
   src/modules/waypoint-profiles.js \
   src/modules/equip-ring.js \
   src/modules/auto-eat.js \
