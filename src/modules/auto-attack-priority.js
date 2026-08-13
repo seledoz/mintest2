@@ -5,11 +5,11 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
 
   const configStorageKey = "minibiaBot.attackPriority.config";
   const state = { timerId: null, uiTimerId: null, lastSelectedTargetId: null };
-  const config = Object.assign({ enabled: true, highestHpEnabled: false, creatureNames: [], tickMs: 100 }, bot.storage.get(configStorageKey, {}) || {});
+  const config = Object.assign({ enabled: true, highestHpEnabled: false, creatureNames: [], tickMs: 250 }, bot.storage.get(configStorageKey, {}) || {});
   config.enabled = config.enabled !== false;
   config.highestHpEnabled = config.highestHpEnabled === true;
   config.creatureNames = normalizeNameList(config.creatureNames);
-  config.tickMs = Math.max(50, Math.trunc(Number(config.tickMs) || 100));
+  config.tickMs = 250;
 
   function normalizeName(name) { return String(name || "").trim().toLowerCase(); }
   function normalizeDisplayName(name) { return String(name || "").trim(); }
@@ -46,16 +46,7 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
   }
   function getCurrentHealth(monster) {
     if (!monster) return Number.NEGATIVE_INFINITY;
-    const value = [
-      monster.health,
-      monster.hp,
-      monster.currentHealth,
-      monster.state?.health,
-      monster.healthPercent,
-      monster.hpPercent,
-      monster.healthpercentage,
-      monster.state?.healthPercent,
-    ].find((entry) => Number.isFinite(Number(entry)));
+    const value = [monster.health, monster.hp, monster.currentHealth, monster.state?.health, monster.healthPercent, monster.hpPercent, monster.healthpercentage, monster.state?.healthPercent].find((entry) => Number.isFinite(Number(entry)));
     return value == null ? Number.NEGATIVE_INFINITY : Number(value);
   }
   function getPriorityIndex(creatureOrName) {
@@ -68,48 +59,30 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     const monsters = bot.xray?.getVisibleMonsters?.({ sameFloorOnly: true }) || [];
     return monsters.map((monster) => {
       const monsterPosition = normalizePosition(monster?.getPosition?.() || monster?.__position);
-      return {
-        monster,
-        priority: getPriorityIndex(monster),
-        health: getCurrentHealth(monster),
-        distance: getTileDistance(playerPosition, monsterPosition),
-        inRange: isInAttackRange(playerPosition, monsterPosition),
-      };
+      return { monster, priority: getPriorityIndex(monster), health: getCurrentHealth(monster), distance: getTileDistance(playerPosition, monsterPosition), inRange: isInAttackRange(playerPosition, monsterPosition) };
     }).filter((entry) => entry.inRange);
   }
-  function sortHighestHp(left, right) {
-    return right.health - left.health || left.distance - right.distance || Number(left.monster?.id || 0) - Number(right.monster?.id || 0);
-  }
+  function sortHighestHp(left, right) { return right.health - left.health || left.distance - right.distance || Number(left.monster?.id || 0) - Number(right.monster?.id || 0); }
   function getPreferredTarget() {
-    if (!bot.attack?.status?.().running || !bot.attack?.config?.enabled) return null;
+    if (!bot.attack?.status?.().running || !bot.attack?.config?.enabled || !config.highestHpEnabled) return null;
     const entries = getTargetEntries();
     if (!entries.length) return null;
-
     if (config.enabled && config.creatureNames.length) {
       const priorityEntries = entries.filter((entry) => entry.priority >= 0);
       if (priorityEntries.length) {
         const bestPriority = Math.min(...priorityEntries.map((entry) => entry.priority));
         const topPriorityEntries = priorityEntries.filter((entry) => entry.priority === bestPriority);
-        if (config.highestHpEnabled) return topPriorityEntries.sort(sortHighestHp)[0]?.monster || null;
-        return topPriorityEntries.sort((left, right) => left.distance - right.distance || Number(left.monster?.id || 0) - Number(right.monster?.id || 0))[0]?.monster || null;
+        return topPriorityEntries.sort(sortHighestHp)[0]?.monster || null;
       }
     }
-
-    if (config.highestHpEnabled) return entries.sort(sortHighestHp)[0]?.monster || null;
-    return null;
+    return entries.sort(sortHighestHp)[0]?.monster || null;
   }
-  function selectTarget(target, reason = "priority") {
+  function selectTarget(target, reason = "priority then highest hp") {
     if (!target || !window.gameClient?.player || typeof window.gameClient.send !== "function" || typeof TargetPacket !== "function") return false;
     window.gameClient.player.setTarget(target);
     window.gameClient.send(new TargetPacket(target.id));
     state.lastSelectedTargetId = target.id;
-    bot.log("selected auto attack target", {
-      id: target.id,
-      name: target.name || "Mob",
-      priority: getPriorityIndex(target) >= 0 ? getPriorityIndex(target) + 1 : null,
-      health: Number.isFinite(getCurrentHealth(target)) ? getCurrentHealth(target) : null,
-      reason,
-    });
+    bot.log("selected auto attack target", { id: target.id, name: target.name || "Mob", priority: getPriorityIndex(target) >= 0 ? getPriorityIndex(target) + 1 : null, health: Number.isFinite(getCurrentHealth(target)) ? getCurrentHealth(target) : null, reason });
     return true;
   }
   function trySelectPriorityTarget() {
@@ -117,67 +90,29 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     const preferredTarget = getPreferredTarget();
     if (!preferredTarget) return false;
     const currentTarget = getCurrentTarget();
-    if (!currentTarget) return selectTarget(preferredTarget, config.highestHpEnabled ? "priority then highest hp" : "priority");
+    if (!currentTarget) return selectTarget(preferredTarget, getPriorityIndex(preferredTarget) >= 0 ? "priority then highest hp" : "highest hp");
     if (Number(currentTarget.id) === Number(preferredTarget.id)) return false;
+    return selectTarget(preferredTarget, getPriorityIndex(preferredTarget) >= 0 ? "priority then highest hp" : "highest hp");
+  }
+  function stopTimer() { if (state.timerId != null) window.clearInterval(state.timerId); state.timerId = null; }
+  function shouldRun() { return !!config.highestHpEnabled && !!bot.attack?.config?.enabled && !!bot.attack?.status?.().running; }
+  function syncTimer() { if (!shouldRun()) { stopTimer(); return; } if (state.timerId == null) state.timerId = window.setInterval(trySelectPriorityTarget, 250); }
 
-    if (config.highestHpEnabled) {
-      return selectTarget(preferredTarget, getPriorityIndex(preferredTarget) >= 0 ? "priority then highest hp" : "highest hp");
-    }
-
-    const preferredPriority = getPriorityIndex(preferredTarget);
-    const currentPriority = getPriorityIndex(currentTarget);
-    if (preferredPriority < 0) return false;
-    if (currentPriority >= 0 && preferredPriority >= currentPriority) return false;
-    return selectTarget(preferredTarget, "priority");
-  }
-
-  function stopTimer() {
-    if (state.timerId != null) window.clearInterval(state.timerId);
-    state.timerId = null;
-  }
-  function shouldRun() {
-    return (!!config.enabled || !!config.highestHpEnabled) && !!bot.attack?.config?.enabled && !!bot.attack?.status?.().running;
-  }
-  function syncTimer() {
-    if (!shouldRun()) { stopTimer(); return; }
-    if (state.timerId == null) state.timerId = window.setInterval(trySelectPriorityTarget, config.tickMs);
-  }
-
-  function addName(name) {
-    const displayName = normalizeDisplayName(name), normalized = normalizeName(displayName);
-    if (!normalized || config.creatureNames.some((item) => normalizeName(item) === normalized)) return false;
-    config.creatureNames.push(displayName); persistConfig(); refreshUiValues(); syncTimer(); return true;
-  }
-  function removeName(name) {
-    const normalized = normalizeName(name), before = config.creatureNames.length;
-    config.creatureNames = config.creatureNames.filter((item) => normalizeName(item) !== normalized);
-    const removed = config.creatureNames.length !== before;
-    if (removed) persistConfig(); refreshUiValues(); syncTimer(); return removed;
-  }
-  function moveName(name, direction) {
-    const normalized = normalizeName(name);
-    const index = config.creatureNames.findIndex((item) => normalizeName(item) === normalized);
-    if (index < 0) return false;
-    const nextIndex = direction === "up" ? index - 1 : index + 1;
-    if (nextIndex < 0 || nextIndex >= config.creatureNames.length) return false;
-    const nextList = [...config.creatureNames];
-    [nextList[index], nextList[nextIndex]] = [nextList[nextIndex], nextList[index]];
-    config.creatureNames = nextList; persistConfig(); refreshUiValues(); return true;
-  }
+  function addName(name) { const displayName = normalizeDisplayName(name), normalized = normalizeName(displayName); if (!normalized || config.creatureNames.some((item) => normalizeName(item) === normalized)) return false; config.creatureNames.push(displayName); persistConfig(); refreshUiValues(); syncTimer(); return true; }
+  function removeName(name) { const normalized = normalizeName(name), before = config.creatureNames.length; config.creatureNames = config.creatureNames.filter((item) => normalizeName(item) !== normalized); const removed = config.creatureNames.length !== before; if (removed) persistConfig(); refreshUiValues(); syncTimer(); return removed; }
+  function moveName(name, direction) { const normalized = normalizeName(name); const index = config.creatureNames.findIndex((item) => normalizeName(item) === normalized); if (index < 0) return false; const nextIndex = direction === "up" ? index - 1 : index + 1; if (nextIndex < 0 || nextIndex >= config.creatureNames.length) return false; const nextList = [...config.creatureNames]; [nextList[index], nextList[nextIndex]] = [nextList[nextIndex], nextList[index]]; config.creatureNames = nextList; persistConfig(); refreshUiValues(); return true; }
   function setNames(names) { config.creatureNames = normalizeNameList(names); persistConfig(); refreshUiValues(); syncTimer(); return [...config.creatureNames]; }
   function updateConfig(nextConfig = {}) {
     if (Object.prototype.hasOwnProperty.call(nextConfig, "enabled")) config.enabled = nextConfig.enabled !== false;
     if (Object.prototype.hasOwnProperty.call(nextConfig, "highestHpEnabled")) config.highestHpEnabled = nextConfig.highestHpEnabled === true;
     if (Object.prototype.hasOwnProperty.call(nextConfig, "creatureNames")) config.creatureNames = normalizeNameList(nextConfig.creatureNames);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "tickMs")) config.tickMs = Math.max(50, Math.trunc(Number(nextConfig.tickMs) || config.tickMs || 100));
+    config.tickMs = 250;
     persistConfig(); refreshUiValues(); syncTimer();
     return { ...config, creatureNames: [...config.creatureNames] };
   }
 
   function findSideColumnMount(panel) { return panel.querySelector(".mb-side-column") || panel.querySelector(".mb-main-column") || panel.querySelector(".mb-body") || panel; }
-  function makeButton(text, title, disabled, handler) {
-    const button = document.createElement("button"); button.type = "button"; button.className = "mb-small-button"; button.textContent = text; button.title = title; button.disabled = disabled; button.addEventListener("click", handler); return button;
-  }
+  function makeButton(text, title, disabled, handler) { const button = document.createElement("button"); button.type = "button"; button.className = "mb-small-button"; button.textContent = text; button.title = title; button.disabled = disabled; button.addEventListener("click", handler); return button; }
   function ensureHighestHpToggle(panel) {
     let input = document.getElementById("minibia-bot-auto-attack-highest-hp");
     if (input) return input;
@@ -200,18 +135,14 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     const existing = document.getElementById("minibia-bot-auto-attack-priority-section");
     const mount = findSideColumnMount(panel);
     if (existing) { if (existing.parentElement !== mount) mount.appendChild(existing); refreshUiValues(); return true; }
-    const section = document.createElement("div");
-    section.className = "mb-section mb-column-section";
-    section.id = "minibia-bot-auto-attack-priority-section";
-    section.innerHTML = `<div class="mb-label">Creature Priority</div><div class="mb-stack"><label class="mb-toggle"><input type="checkbox" id="minibia-bot-auto-attack-priority-enabled" /><span>Use creature priority list</span></label><div class="mb-inline"><input type="text" id="minibia-bot-auto-attack-priority-input" placeholder="Creature name" /><button type="button" class="mb-small-button" id="minibia-bot-auto-attack-priority-add">Add</button></div><div class="mb-list" id="minibia-bot-auto-attack-priority-list"></div><div class="mb-small-note">Priority list order always wins. With Highest HP targeting on, HP only decides between multiple monsters at the same priority rank; unlisted monsters use highest HP only when no listed monster is available.</div></div>`;
+    const section = document.createElement("div"); section.className = "mb-section mb-column-section"; section.id = "minibia-bot-auto-attack-priority-section";
+    section.innerHTML = `<div class="mb-label">Creature Priority</div><div class="mb-stack"><label class="mb-toggle"><input type="checkbox" id="minibia-bot-auto-attack-priority-enabled" /><span>Use creature priority list</span></label><div class="mb-inline"><input type="text" id="minibia-bot-auto-attack-priority-input" placeholder="Creature name" /><button type="button" class="mb-small-button" id="minibia-bot-auto-attack-priority-add">Add</button></div><div class="mb-list" id="minibia-bot-auto-attack-priority-list"></div><div class="mb-small-note">Priority list is applied only while Highest HP targeting is enabled. HP decides between monsters at the same priority rank; unlisted monsters use highest HP when no listed monster is available.</div></div>`;
     mount.appendChild(section);
-    const enabledInput = section.querySelector("#minibia-bot-auto-attack-priority-enabled");
-    const nameInput = section.querySelector("#minibia-bot-auto-attack-priority-input");
+    const enabledInput = section.querySelector("#minibia-bot-auto-attack-priority-enabled"), nameInput = section.querySelector("#minibia-bot-auto-attack-priority-input");
     section.querySelector("#minibia-bot-auto-attack-priority-add")?.addEventListener("click", () => { if (addName(nameInput?.value)) nameInput.value = ""; });
     nameInput?.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); if (addName(nameInput.value)) nameInput.value = ""; } });
     enabledInput?.addEventListener("change", () => updateConfig({ enabled: enabledInput.checked }));
-    refreshUiValues();
-    return true;
+    refreshUiValues(); return true;
   }
   function refreshUiValues() {
     const enabledInput = document.getElementById("minibia-bot-auto-attack-priority-enabled");
@@ -222,32 +153,13 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     if (!list) return;
     list.innerHTML = "";
     if (!config.creatureNames.length) { const empty = document.createElement("div"); empty.className = "mb-small-note"; empty.textContent = "No priority creatures."; list.appendChild(empty); return; }
-    config.creatureNames.forEach((name, index) => {
-      const row = document.createElement("div"); row.className = "mb-list-row";
-      const label = document.createElement("span"); label.textContent = `${index + 1}. ${name}`;
-      const controls = document.createElement("div"); controls.className = "mb-inline";
-      controls.appendChild(makeButton("↑", `Move ${name} up`, index === 0, () => moveName(name, "up")));
-      controls.appendChild(makeButton("↓", `Move ${name} down`, index === config.creatureNames.length - 1, () => moveName(name, "down")));
-      controls.appendChild(makeButton("Delete", `Delete ${name}`, false, () => removeName(name)));
-      row.appendChild(label); row.appendChild(controls); list.appendChild(row);
-    });
+    config.creatureNames.forEach((name, index) => { const row = document.createElement("div"); row.className = "mb-list-row"; const label = document.createElement("span"); label.textContent = `${index + 1}. ${name}`; const controls = document.createElement("div"); controls.className = "mb-inline"; controls.appendChild(makeButton("↑", `Move ${name} up`, index === 0, () => moveName(name, "up"))); controls.appendChild(makeButton("↓", `Move ${name} down`, index === config.creatureNames.length - 1, () => moveName(name, "down"))); controls.appendChild(makeButton("Delete", `Delete ${name}`, false, () => removeName(name))); row.appendChild(label); row.appendChild(controls); list.appendChild(row); });
   }
-
-  function status() {
-    const preferred = shouldRun() ? getPreferredTarget() : null;
-    return { config: { ...config, creatureNames: [...config.creatureNames] }, preferredTarget: preferred ? { id: preferred.id, name: preferred.name, health: Number.isFinite(getCurrentHealth(preferred)) ? getCurrentHealth(preferred) : null } : null, lastSelectedTargetId: state.lastSelectedTargetId };
-  }
-  function destroy() {
-    stopTimer();
-    if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
-    state.uiTimerId = null;
-    document.getElementById("minibia-bot-auto-attack-priority-section")?.remove();
-    document.getElementById("minibia-bot-auto-attack-highest-hp-row")?.remove();
-  }
+  function status() { const preferred = shouldRun() ? getPreferredTarget() : null; return { config: { ...config, creatureNames: [...config.creatureNames] }, preferredTarget: preferred ? { id: preferred.id, name: preferred.name, health: Number.isFinite(getCurrentHealth(preferred)) ? getCurrentHealth(preferred) : null } : null, lastSelectedTargetId: state.lastSelectedTargetId }; }
+  function destroy() { stopTimer(); if (state.uiTimerId != null) window.clearInterval(state.uiTimerId); state.uiTimerId = null; document.getElementById("minibia-bot-auto-attack-priority-section")?.remove(); document.getElementById("minibia-bot-auto-attack-highest-hp-row")?.remove(); }
 
   if (bot.attack && !bot.attack.__priorityTimerSyncWrapped) {
-    const originalStart = bot.attack.start?.bind(bot.attack);
-    const originalStop = bot.attack.stop?.bind(bot.attack);
+    const originalStart = bot.attack.start?.bind(bot.attack); const originalStop = bot.attack.stop?.bind(bot.attack);
     if (originalStart) bot.attack.start = (...args) => { const result = originalStart(...args); syncTimer(); return result; };
     if (originalStop) bot.attack.stop = (...args) => { const result = originalStop(...args); stopTimer(); return result; };
     bot.attack.__priorityTimerSyncWrapped = true;
@@ -257,10 +169,7 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
   bot.addCleanup(destroy);
   if (!ensureUi()) {
     let attempts = 0;
-    state.uiTimerId = window.setInterval(() => {
-      attempts += 1;
-      if (ensureUi() || attempts >= 40) { window.clearInterval(state.uiTimerId); state.uiTimerId = null; }
-    }, 250);
+    state.uiTimerId = window.setInterval(() => { attempts += 1; if (ensureUi() || attempts >= 40) { window.clearInterval(state.uiTimerId); state.uiTimerId = null; } }, 250);
   }
   syncTimer();
   return bot.attackPriority;
