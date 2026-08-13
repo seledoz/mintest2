@@ -179,6 +179,9 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   const state = {
     lastHotkeyAt: 0,
     lastMonsterCount: 0,
+    timerId: null,
+    uiRetryTimerId: null,
+    syncTimerId: null,
   };
 
   function normalizeSlot(value) {
@@ -283,10 +286,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     const primaryConfig = status?.config || {};
     if (!bot || !status?.running || !primaryConfig.enabled || !normalizeSlot(config.hotbarSlot)) return false;
     if (primaryConfig.requireAutoAttackRunning !== false && !bot.attack?.status?.().running) return false;
-
-    // Strict priority: #2 never fires while #1's monster condition is satisfied.
     if (primarySquareIsEligible(status)) return false;
-
     if (now - state.lastHotkeyAt < nonNegativeInt(config.cooldownMs, 2000)) return false;
     return countMonsters(positiveInt(config.squareRange, 3), primaryConfig) >= positiveInt(config.minMonsters, 2);
   }
@@ -375,26 +375,66 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     }
   }
 
+  function primaryAoeEnabled() {
+    const status = getPrimaryStatus();
+    return !!status?.running && !!status?.config?.enabled;
+  }
+
+  function stopTimer() {
+    if (state.timerId != null) window.clearInterval(state.timerId);
+    state.timerId = null;
+  }
+
+  function tickSecondSquare() {
+    if (!primaryAoeEnabled()) {
+      stopTimer();
+      refreshUi();
+      return;
+    }
+    try { triggerSecond(); }
+    catch (error) { window.minibiaBot?.log?.("square hotkey #2 tick failed", error?.message || error); }
+    refreshUi();
+  }
+
+  function syncTimer() {
+    if (!primaryAoeEnabled()) {
+      stopTimer();
+      refreshUi();
+      return;
+    }
+    if (state.timerId == null) state.timerId = window.setInterval(tickSecondSquare, 250);
+  }
+
+  function installUiOnce() {
+    if (ensureUi()) return;
+    let attempts = 0;
+    state.uiRetryTimerId = window.setInterval(() => {
+      attempts += 1;
+      if (ensureUi() || attempts >= 40) {
+        window.clearInterval(state.uiRetryTimerId);
+        state.uiRetryTimerId = null;
+      }
+    }, 250);
+  }
+
   window.minibiaSquareHotkey2 = {
     config,
     updateConfig,
     trigger: triggerSecond,
+    syncTimer,
     status: () => ({
       config: { ...config },
       lastMonsterCount: state.lastMonsterCount,
       ready: canCastSecond(Date.now()),
+      timerRunning: state.timerId != null,
     }),
   };
 
-  window.setInterval(() => {
-    ensureUi();
-    const status = getPrimaryStatus();
-    const enabled = !!status?.running && !!status?.config?.enabled;
-    if (enabled) {
-      try { triggerSecond(); } catch (error) {
-        window.minibiaBot?.log?.("square hotkey #2 tick failed", error?.message || error);
-      }
-    }
-    refreshUi();
-  }, 250);
+  installUiOnce();
+  syncTimer();
+
+  // Lightweight state synchronization only; no creature/world scan occurs here.
+  // This allows Square #2 to start/stop with the primary AoE toggle without leaving
+  // its 250 ms combat scanner alive while AoE is disabled.
+  state.syncTimerId = window.setInterval(syncTimer, 1000);
 })();
