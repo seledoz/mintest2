@@ -68,9 +68,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     return Math.max(Math.abs(Number(a.x) - Number(b.x)), Math.abs(Number(a.y) - Number(b.y)));
   }
 
-  function positionKey(position) {
-    return position ? `${position.x},${position.y},${position.z}` : "";
-  }
+  function positionKey(position) { return position ? `${position.x},${position.y},${position.z}` : ""; }
 
   function passesTargetFilters(monster) {
     if (!config.respectTargetFilters) return true;
@@ -152,18 +150,15 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
       return position && position.z === playerPosition.z && tileDistance(playerPosition, position) <= 7;
     });
     if (!monsters.length) return null;
-
     const candidatesByKey = new Map();
     monsters.forEach((monster) => {
       const position = getPosition(monster);
       if (position) candidatesByKey.set(positionKey(position), { position, target: monster });
     });
-
     const evaluations = Array.from(candidatesByKey.values()).map((candidate) => ({
       ...evaluateGfbAtPosition(candidate.position, monsters),
       target: candidate.target,
     }));
-
     evaluations.sort((left, right) => {
       const countDiff = right.count - left.count;
       if (countDiff) return countDiff;
@@ -174,9 +169,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
 
   function getTileFromPosition(position) {
     if (!position) return null;
-    if (typeof Position === "function") {
-      return window.gameClient?.world?.getTileFromWorldPosition?.(new Position(position.x, position.y, position.z)) || null;
-    }
+    if (typeof Position === "function") return window.gameClient?.world?.getTileFromWorldPosition?.(new Position(position.x, position.y, position.z)) || null;
     return window.gameClient?.world?.getTileFromWorldPosition?.(position) || null;
   }
 
@@ -184,41 +177,31 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     const slot = normalizeHotbarSlot(config.gfbHotbarSlot);
     if (!slot || !best?.position) return false;
     if (!bot.clickHotbar(slot - 1)) return false;
-
     const tile = getTileFromPosition(best.position);
     const target = best.target || best.monsters?.[0] || tile;
     const mouse = window.gameClient?.mouse;
     const targetRef = tile ? { which: tile, index: 0xFF } : target ? { which: target, index: 0xFF } : null;
-
-    if (targetRef && typeof mouse?.__handleItemUseWith === "function") {
-      try { mouse.__handleItemUseWith(null, targetRef); return true; } catch (error) {}
-    }
-    if (targetRef && typeof mouse?.__handleThingUse === "function") {
-      try { mouse.__handleThingUse(targetRef); return true; } catch (error) {}
-    }
-    if (tile && typeof mouse?.__handleTileClick === "function") {
-      try { mouse.__handleTileClick(tile); return true; } catch (error) {}
-    }
-    if (target && typeof mouse?.__handleCreatureClick === "function") {
-      try { mouse.__handleCreatureClick(target); return true; } catch (error) {}
-    }
-
+    if (targetRef && typeof mouse?.__handleItemUseWith === "function") { try { mouse.__handleItemUseWith(null, targetRef); return true; } catch (_error) {} }
+    if (targetRef && typeof mouse?.__handleThingUse === "function") { try { mouse.__handleThingUse(targetRef); return true; } catch (_error) {} }
+    if (tile && typeof mouse?.__handleTileClick === "function") { try { mouse.__handleTileClick(tile); return true; } catch (_error) {} }
+    if (target && typeof mouse?.__handleCreatureClick === "function") { try { mouse.__handleCreatureClick(target); return true; } catch (_error) {} }
     bot.log("GFB crosshair target could not be clicked by known mouse handlers", { position: best.position, target: best.target?.name || "Mob" });
     return false;
   }
 
-  function canCastGfb(now = Date.now()) {
+  function getReadyGfbCandidate(now = Date.now()) {
     const slot = normalizeHotbarSlot(config.gfbHotbarSlot);
-    if (!config.enabled || !state.running || !config.gfbEnabled || !slot) return false;
-    if (now - state.lastGfbHotkeyAt < nonNegativeInt(config.gfbCooldownMs, 2000)) return false;
+    if (!config.enabled || !state.running || !config.gfbEnabled || !slot) return null;
+    if (now - state.lastGfbHotkeyAt < nonNegativeInt(config.gfbCooldownMs, 2000)) return null;
     const best = getBestGfbCandidate();
-    return !!best && best.count >= positiveInt(config.gfbMinMonsters, 4);
+    return best && best.count >= positiveInt(config.gfbMinMonsters, 4) ? best : null;
   }
 
-  function triggerGfb(now = Date.now()) {
-    if (!canCastGfb(now)) return false;
-    const best = getBestGfbCandidate();
-    if (!best || best.count < positiveInt(config.gfbMinMonsters, 4)) return false;
+  function canCastGfb(now = Date.now()) { return !!getReadyGfbCandidate(now); }
+
+  function triggerGfb(now = Date.now(), bestCandidate = null) {
+    const best = bestCandidate || getReadyGfbCandidate(now);
+    if (!best) return false;
     const clicked = clickCrosshairTarget(best);
     if (clicked) {
       state.lastGfbHotkeyAt = now;
@@ -231,7 +214,9 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
   }
 
   function triggerSpell(now = Date.now()) {
-    return triggerGfb(now) || triggerSquareSpell(now);
+    const bestGfb = getReadyGfbCandidate(now);
+    if (bestGfb && triggerGfb(now, bestGfb)) return true;
+    return triggerSquareSpell(now);
   }
 
   function tick() {
@@ -240,10 +225,22 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     state.timerId = window.setTimeout(tick, positiveInt(config.tickMs, 250));
   }
 
+  function startUiTimer() {
+    if (state.uiTimerId != null || !state.running || !config.enabled) return;
+    state.uiTimerId = window.setInterval(() => { ensureUi(); refreshUiValues(); }, 1000);
+  }
+
+  function stopUiTimer() {
+    if (state.uiTimerId == null) return;
+    window.clearInterval(state.uiTimerId);
+    state.uiTimerId = null;
+  }
+
   function start(overrides = {}) {
     updateConfig(Object.assign({}, overrides, { enabled: true }), { silent: true });
     if (state.running) return false;
     state.running = true;
+    startUiTimer();
     bot.log("auto attack AoE started", { ...config });
     tick();
     refreshUiValues();
@@ -254,6 +251,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     state.running = false;
     if (state.timerId != null) window.clearTimeout(state.timerId);
     state.timerId = null;
+    stopUiTimer();
     if (options.persistEnabled !== false) { config.enabled = false; persistConfig(); }
     bot.log("auto attack AoE stopped");
     refreshUiValues();
@@ -401,7 +399,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
 
   function destroy() {
     stop({ persistEnabled: false });
-    if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
     document.getElementById("minibia-bot-auto-attack-aoe-section")?.remove();
   }
 
@@ -419,7 +416,6 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     destroy,
     config,
   };
-  state.uiTimerId = window.setInterval(() => { ensureUi(); refreshUiValues(); }, 1000);
   bot.addCleanup(destroy);
   if (config.enabled) start(); else ensureUi();
   return bot.attackAoe;
