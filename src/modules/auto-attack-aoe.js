@@ -8,6 +8,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     running: false,
     timerId: null,
     uiTimerId: null,
+    uiStartupTimerId: null,
     lastSpellHotkeyAt: 0,
     lastCastMonsterCount: 0,
     lastGfbHotkeyAt: 0,
@@ -236,10 +237,34 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     state.uiTimerId = null;
   }
 
+  function stopUiStartupTimer() {
+    if (state.uiStartupTimerId == null) return;
+    window.clearInterval(state.uiStartupTimerId);
+    state.uiStartupTimerId = null;
+  }
+
+  function ensureUiAtStartup() {
+    if (document.getElementById("minibia-bot-auto-attack-aoe-section")) return true;
+    ensureUi();
+    if (document.getElementById("minibia-bot-auto-attack-aoe-section")) return true;
+    if (state.uiStartupTimerId != null) return false;
+
+    let attempts = 0;
+    state.uiStartupTimerId = window.setInterval(() => {
+      attempts += 1;
+      ensureUi();
+      if (document.getElementById("minibia-bot-auto-attack-aoe-section") || attempts >= 40) {
+        stopUiStartupTimer();
+      }
+    }, 250);
+    return false;
+  }
+
   function start(overrides = {}) {
     updateConfig(Object.assign({}, overrides, { enabled: true }), { silent: true });
     if (state.running) return false;
     state.running = true;
+    ensureUiAtStartup();
     startUiTimer();
     bot.log("auto attack AoE started", { ...config });
     tick();
@@ -399,6 +424,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
 
   function destroy() {
     stop({ persistEnabled: false });
+    stopUiStartupTimer();
     document.getElementById("minibia-bot-auto-attack-aoe-section")?.remove();
   }
 
@@ -417,6 +443,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     config,
   };
   bot.addCleanup(destroy);
-  if (config.enabled) start(); else ensureUi();
+  ensureUiAtStartup();
+  if (config.enabled) start();
   return bot.attackAoe;
 };
