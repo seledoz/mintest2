@@ -63,8 +63,9 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     }).filter((entry) => entry.inRange);
   }
   function sortHighestHp(left, right) { return right.health - left.health || left.distance - right.distance || Number(left.monster?.id || 0) - Number(right.monster?.id || 0); }
+  function sortNearest(left, right) { return left.distance - right.distance || Number(left.monster?.id || 0) - Number(right.monster?.id || 0); }
   function getPreferredTarget() {
-    if (!bot.attack?.status?.().running || !bot.attack?.config?.enabled || !config.highestHpEnabled) return null;
+    if (!bot.attack?.status?.().running || !bot.attack?.config?.enabled) return null;
     const entries = getTargetEntries();
     if (!entries.length) return null;
     if (config.enabled && config.creatureNames.length) {
@@ -72,12 +73,13 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
       if (priorityEntries.length) {
         const bestPriority = Math.min(...priorityEntries.map((entry) => entry.priority));
         const topPriorityEntries = priorityEntries.filter((entry) => entry.priority === bestPriority);
-        return topPriorityEntries.sort(sortHighestHp)[0]?.monster || null;
+        return topPriorityEntries.sort(config.highestHpEnabled ? sortHighestHp : sortNearest)[0]?.monster || null;
       }
     }
+    if (!config.highestHpEnabled) return null;
     return entries.sort(sortHighestHp)[0]?.monster || null;
   }
-  function selectTarget(target, reason = "priority then highest hp") {
+  function selectTarget(target, reason = "creature priority") {
     if (!target || !window.gameClient?.player || typeof window.gameClient.send !== "function" || typeof TargetPacket !== "function") return false;
     window.gameClient.player.setTarget(target);
     window.gameClient.send(new TargetPacket(target.id));
@@ -90,12 +92,19 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     const preferredTarget = getPreferredTarget();
     if (!preferredTarget) return false;
     const currentTarget = getCurrentTarget();
-    if (!currentTarget) return selectTarget(preferredTarget, getPriorityIndex(preferredTarget) >= 0 ? "priority then highest hp" : "highest hp");
+    const isPriorityTarget = getPriorityIndex(preferredTarget) >= 0;
+    const reason = isPriorityTarget
+      ? (config.highestHpEnabled ? "priority then highest hp" : "creature priority")
+      : "highest hp";
+    if (!currentTarget) return selectTarget(preferredTarget, reason);
     if (Number(currentTarget.id) === Number(preferredTarget.id)) return false;
-    return selectTarget(preferredTarget, getPriorityIndex(preferredTarget) >= 0 ? "priority then highest hp" : "highest hp");
+    return selectTarget(preferredTarget, reason);
   }
   function stopTimer() { if (state.timerId != null) window.clearInterval(state.timerId); state.timerId = null; }
-  function shouldRun() { return !!config.highestHpEnabled && !!bot.attack?.config?.enabled && !!bot.attack?.status?.().running; }
+  function shouldRun() {
+    const priorityActive = !!config.enabled && config.creatureNames.length > 0;
+    return (priorityActive || !!config.highestHpEnabled) && !!bot.attack?.config?.enabled && !!bot.attack?.status?.().running;
+  }
   function syncTimer() { if (!shouldRun()) { stopTimer(); return; } if (state.timerId == null) state.timerId = window.setInterval(trySelectPriorityTarget, 250); }
 
   function addName(name) { const displayName = normalizeDisplayName(name), normalized = normalizeName(displayName); if (!normalized || config.creatureNames.some((item) => normalizeName(item) === normalized)) return false; config.creatureNames.push(displayName); persistConfig(); refreshUiValues(); syncTimer(); return true; }
@@ -136,7 +145,7 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     const mount = findSideColumnMount(panel);
     if (existing) { if (existing.parentElement !== mount) mount.appendChild(existing); refreshUiValues(); return true; }
     const section = document.createElement("div"); section.className = "mb-section mb-column-section"; section.id = "minibia-bot-auto-attack-priority-section";
-    section.innerHTML = `<div class="mb-label">Creature Priority</div><div class="mb-stack"><label class="mb-toggle"><input type="checkbox" id="minibia-bot-auto-attack-priority-enabled" /><span>Use creature priority list</span></label><div class="mb-inline"><input type="text" id="minibia-bot-auto-attack-priority-input" placeholder="Creature name" /><button type="button" class="mb-small-button" id="minibia-bot-auto-attack-priority-add">Add</button></div><div class="mb-list" id="minibia-bot-auto-attack-priority-list"></div><div class="mb-small-note">Priority list is applied only while Highest HP targeting is enabled. HP decides between monsters at the same priority rank; unlisted monsters use highest HP when no listed monster is available.</div></div>`;
+    section.innerHTML = `<div class="mb-label">Creature Priority</div><div class="mb-stack"><label class="mb-toggle"><input type="checkbox" id="minibia-bot-auto-attack-priority-enabled" /><span>Use creature priority list</span></label><div class="mb-inline"><input type="text" id="minibia-bot-auto-attack-priority-input" placeholder="Creature name" /><button type="button" class="mb-small-button" id="minibia-bot-auto-attack-priority-add">Add</button></div><div class="mb-list" id="minibia-bot-auto-attack-priority-list"></div><div class="mb-small-note">Creature Priority works independently of Highest HP targeting. Listed creatures are selected by priority rank; Highest HP only breaks ties within the same rank and chooses the highest-HP unlisted monster when no listed creature is available.</div></div>`;
     mount.appendChild(section);
     const enabledInput = section.querySelector("#minibia-bot-auto-attack-priority-enabled"), nameInput = section.querySelector("#minibia-bot-auto-attack-priority-input");
     section.querySelector("#minibia-bot-auto-attack-priority-add")?.addEventListener("click", () => { if (addName(nameInput?.value)) nameInput.value = ""; });
