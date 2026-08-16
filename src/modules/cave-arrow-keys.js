@@ -46,8 +46,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   }
 
   function getMatrix(z) {
-    const key = String(z);
-    const cached = matrixCache.get(key);
+    const cacheKey = String(z);
+    const cached = matrixCache.get(cacheKey);
     if (cached && Date.now() - cached.at <= config.matrixCacheMs) return cached.matrix;
 
     const matrix = new Map();
@@ -61,13 +61,11 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       }
     }
 
-    matrixCache.set(key, { matrix, at: Date.now() });
+    matrixCache.set(cacheKey, { matrix, at: Date.now() });
     return matrix;
   }
 
   function getNeighbors(node, matrix) {
-    // Arrow keys only move one cardinal tile at a time. Do not let A* select
-    // diagonal steps that a single physical arrow-key walk cannot reproduce.
     const directions = [
       { x: 0, y: -1 },
       { x: 1, y: 0 },
@@ -126,7 +124,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
         const g = current.g + 1;
         const f = g + heuristic(neighbor, to);
         const existing = open.find((entry) => entry.x === neighbor.x && entry.y === neighbor.y);
-
         if (existing) {
           if (g < existing.g) {
             existing.g = g;
@@ -145,7 +142,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   function pickArrowKey(from, to) {
     const dx = Number(to.x) - Number(from.x);
     const dy = Number(to.y) - Number(from.y);
-
     if (dx === 1 && dy === 0) return "ArrowRight";
     if (dx === -1 && dy === 0) return "ArrowLeft";
     if (dx === 0 && dy === 1) return "ArrowDown";
@@ -160,95 +156,76 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       state.lastNextTile = { ...path[1] };
       return path[1];
     }
-
     state.lastPathLength = path ? path.length : 0;
     state.lastNextTile = null;
     return null;
   }
 
-  function directionInfoForKey(key) {
-    if (key === "ArrowUp") return { name: "North", lower: "north", numeric: 0 };
-    if (key === "ArrowRight") return { name: "East", lower: "east", numeric: 1 };
-    if (key === "ArrowDown") return { name: "South", lower: "south", numeric: 2 };
-    if (key === "ArrowLeft") return { name: "West", lower: "west", numeric: 3 };
-    return null;
+  function normalizeButtonText(value) {
+    return String(value || "")
+      .replace(/\uFE0E|\uFE0F/g, "")
+      .replace(/\s+/g, "")
+      .trim();
   }
 
-  function tryNamedWalkMethod(owner, ownerName, methodName) {
-    const method = owner?.[methodName];
-    if (typeof method !== "function") return false;
-    method.call(owner);
-    state.lastWalkMethod = `${ownerName}.${methodName}()`;
-    return true;
+  const dpadTextByKey = {
+    ArrowUp: "▲",
+    ArrowRight: "▶",
+    ArrowDown: "▼",
+    ArrowLeft: "◀",
+  };
+
+  function getExactDirectionButtons(symbol) {
+    return Array.from(document.querySelectorAll("button"))
+      .filter((button) => normalizeButtonText(button.textContent) === symbol);
   }
 
-  function tryGenericWalkMethod(owner, ownerName, methodName, direction) {
-    const method = owner?.[methodName];
-    if (typeof method !== "function") return false;
+  function containerHasDpad(container) {
+    if (!container?.querySelectorAll) return false;
+    const symbols = new Set(
+      Array.from(container.querySelectorAll("button"))
+        .map((button) => normalizeButtonText(button.textContent))
+    );
+    return ["▲", "▶", "▼", "◀"].every((symbol) => symbols.has(symbol));
+  }
 
-    // Minibia client builds have exposed movement helpers with both textual
-    // direction names and Tibia's standard 0=N,1=E,2=S,3=W direction values.
-    // Prefer the readable direction first and only use the numeric form when
-    // the textual call explicitly returns false.
-    const result = method.call(owner, direction.lower);
-    if (result === false) {
-      const numericResult = method.call(owner, direction.numeric);
-      if (numericResult === false) return false;
-      state.lastWalkMethod = `${ownerName}.${methodName}(${direction.numeric})`;
-      return true;
+  function findDpadButton(key) {
+    const symbol = dpadTextByKey[key];
+    if (!symbol) return null;
+    const candidates = getExactDirectionButtons(symbol);
+    if (!candidates.length) return null;
+
+    for (const candidate of candidates) {
+      let ancestor = candidate.parentElement;
+      for (let depth = 0; ancestor && depth < 6; depth += 1, ancestor = ancestor.parentElement) {
+        if (containerHasDpad(ancestor)) return candidate;
+      }
     }
 
-    state.lastWalkMethod = `${ownerName}.${methodName}("${direction.lower}")`;
-    return true;
+    return candidates[0];
+  }
+
+  function clickDpadButton(key) {
+    const button = findDpadButton(key);
+    if (!button) return false;
+
+    try {
+      button.click();
+      state.lastWalkMethod = `Minibia D-pad ${dpadTextByKey[key]}`;
+      state.lastError = null;
+      return true;
+    } catch (error) {
+      state.lastError = `D-pad click failed: ${error?.message || error}`;
+      return false;
+    }
   }
 
   function walkWithArrowKey(key) {
-    const direction = directionInfoForKey(key);
-    if (!direction) return false;
-
-    const client = window.gameClient;
-    const owners = [
-      [client?.player, "gameClient.player"],
-      [client?.world, "gameClient.world"],
-      [client, "gameClient"],
-      [client?.protocol, "gameClient.protocol"],
-      [client?.network, "gameClient.network"],
-    ];
-
-    const namedMethods = [
-      `walk${direction.name}`,
-      `move${direction.name}`,
-      `sendWalk${direction.name}`,
-      `step${direction.name}`,
-    ];
-
-    for (const [owner, ownerName] of owners) {
-      for (const methodName of namedMethods) {
-        try {
-          if (tryNamedWalkMethod(owner, ownerName, methodName)) return true;
-        } catch (error) {
-          state.lastError = `${ownerName}.${methodName}: ${error?.message || error}`;
-        }
-      }
-    }
-
-    const genericMethods = ["walk", "move", "sendWalk", "step"];
-    for (const [owner, ownerName] of owners) {
-      for (const methodName of genericMethods) {
-        try {
-          if (tryGenericWalkMethod(owner, ownerName, methodName, direction)) return true;
-        } catch (error) {
-          state.lastError = `${ownerName}.${methodName}: ${error?.message || error}`;
-        }
-      }
-    }
+    if (clickDpadButton(key)) return true;
 
     state.lastWalkMethod = null;
-    state.lastError = `No native game walk method found for ${key}`;
-    bot.log("cave Smart A* arrow walk unavailable", {
-      key,
-      error: state.lastError,
-    });
+    state.lastError = `Could not find Minibia D-pad control for ${key}`;
+    bot.log("cave Smart A* arrow walk unavailable", { key, error: state.lastError });
     return false;
   }
 
@@ -303,7 +280,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
         stepToward(from, to);
         return null;
       }
-
       return state.originalFindPath(from, to, ...args);
     };
 
