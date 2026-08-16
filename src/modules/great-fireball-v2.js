@@ -6,7 +6,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
   const configStorageKey = "minibiaBot.greatFireballV2.config";
   const sectionId = "minibia-bot-gfb-v2-section";
   const state = { running: false, timerId: null, uiTimerId: null, lastCastAt: 0, lastMonsterCount: 0, lastTargetName: "", lastTargetPosition: null, currentBest: null };
-  const config = Object.assign({ enabled: false, hotbarSlot: null, minMonsters: 4, cooldownMs: 2000, scanMs: 250, maxRange: 7, respectTargetFilters: true }, bot.storage.get(configStorageKey, {}) || {});
+  const config = Object.assign({ enabled: false, highestPriority: false, hotbarSlot: null, minMonsters: 4, cooldownMs: 2000, scanMs: 250, maxRange: 7, respectTargetFilters: true }, bot.storage.get(configStorageKey, {}) || {});
 
   function normalizeHotbarSlot(value) { const slot = Math.trunc(Number(value)); return Number.isFinite(slot) && slot >= 1 && slot <= 12 ? slot : null; }
   function positiveInt(value, fallback) { const number = Math.trunc(Number(value)); return Number.isFinite(number) && number > 0 ? number : fallback; }
@@ -26,6 +26,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
   function persistConfig() { bot.storage.set(configStorageKey, { ...config }); }
 
   config.enabled = !!config.enabled;
+  config.highestPriority = !!config.highestPriority;
   config.hotbarSlot = normalizeHotbarSlot(config.hotbarSlot);
   config.minMonsters = positiveInt(config.minMonsters, 4);
   config.cooldownMs = nonNegativeInt(config.cooldownMs, 2000);
@@ -77,6 +78,41 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     return evaluations[0] || null;
   }
   function getBestCandidate() { return state.running && config.enabled ? (state.currentBest || calculateBestCandidate()) : null; }
+  function shouldReservePriority() {
+    if (!state.running || !config.enabled || !config.highestPriority || !normalizeHotbarSlot(config.hotbarSlot)) return false;
+    const best = state.currentBest || calculateBestCandidate();
+    return !!best && best.count >= config.minMonsters;
+  }
+
+  function getSquare2Slot() {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem("minibiaBot.attackAoe.square2.config") || "{}");
+      return normalizeHotbarSlot(saved.hotbarSlot);
+    } catch (_) { return null; }
+  }
+  function getBlockedSlots() {
+    const slots = new Set();
+    [bot.attack?.config?.runeHotbarSlot, bot.attackAoe?.config?.spellHotbarSlot, getSquare2Slot()].forEach((slot) => {
+      const normalized = normalizeHotbarSlot(slot);
+      if (normalized) slots.add(normalized);
+    });
+    return slots;
+  }
+  function patchClickHotbar() {
+    if (!bot.clickHotbar || bot.__gfbV2PriorityPatched) return;
+    const originalClickHotbar = bot.clickHotbar.bind(bot);
+    bot.clickHotbar = function clickHotbarWithGfbPriority(index, ...args) {
+      const attemptedSlot = Math.trunc(Number(index)) + 1;
+      const gfbSlot = normalizeHotbarSlot(config.hotbarSlot);
+      if (shouldReservePriority() && attemptedSlot !== gfbSlot && getBlockedSlots().has(attemptedSlot)) {
+        bot.logDebug?.("blocked lower-priority cast for GFB 2.0", { slot: attemptedSlot, gfbSlot });
+        return false;
+      }
+      return originalClickHotbar(index, ...args);
+    };
+    bot.__gfbV2PriorityPatched = true;
+  }
+
   function getTile(position) {
     if (!position) return null;
     try {
@@ -141,6 +177,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
   }
   function updateConfig(nextConfig = {}, options = {}) {
     if (Object.prototype.hasOwnProperty.call(nextConfig, "enabled")) nextConfig.enabled = !!nextConfig.enabled;
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "highestPriority")) nextConfig.highestPriority = !!nextConfig.highestPriority;
     if (Object.prototype.hasOwnProperty.call(nextConfig, "hotbarSlot")) nextConfig.hotbarSlot = normalizeHotbarSlot(nextConfig.hotbarSlot);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "minMonsters")) nextConfig.minMonsters = positiveInt(nextConfig.minMonsters, config.minMonsters || 4);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "cooldownMs")) nextConfig.cooldownMs = nonNegativeInt(nextConfig.cooldownMs, config.cooldownMs || 2000);
@@ -154,8 +191,8 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     return { ...config };
   }
   function status() {
-    const best = state.running && config.enabled ? state.currentBest : null;
-    return { running: state.running, config: { ...config }, bestMonsterCount: best?.count || 0, bestTargetName: best?.target?.name || "", bestTargetPosition: best?.position || null, lastMonsterCount: state.lastMonsterCount, lastTargetName: state.lastTargetName, lastTargetPosition: state.lastTargetPosition, ready: canCast(Date.now(), best) };
+    const best = state.running && config.enabled ? (state.currentBest || calculateBestCandidate()) : null;
+    return { running: state.running, config: { ...config }, bestMonsterCount: best?.count || 0, bestTargetName: best?.target?.name || "", bestTargetPosition: best?.position || null, lastMonsterCount: state.lastMonsterCount, lastTargetName: state.lastTargetName, lastTargetPosition: state.lastTargetPosition, priorityReserved: shouldReservePriority(), ready: canCast(Date.now(), best) };
   }
   function ensureUi() {
     const aoeSection = document.getElementById("minibia-bot-auto-attack-aoe-section");
@@ -163,23 +200,25 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     if (document.getElementById(sectionId)) return true;
     const section = document.createElement("div");
     section.id = sectionId; section.className = "mb-section";
-    section.innerHTML = `<div class="mb-label">Great Fireball 2.0 — Crosshairs</div><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gfb-v2-enabled" /><span>Enable Great Fireball 2.0</span></label><div class="mb-field-grid"><label class="mb-field"><span class="mb-field-label">GFB 2.0 Hotkey</span><input type="number" id="minibia-bot-gfb-v2-hotkey" min="1" max="12" placeholder="8" /></label><label class="mb-field"><span class="mb-field-label">Minimum Creatures</span><input type="number" id="minibia-bot-gfb-v2-monsters" min="1" placeholder="4" /></label><label class="mb-field"><span class="mb-field-label">Cooldown MS</span><input type="number" id="minibia-bot-gfb-v2-cooldown" min="0" placeholder="2000" /></label></div><div class="mb-small-note">Set the Great Fireball hotkey to Use with Crosshairs. The bot shoots the tile that hits the biggest group and waits until the minimum is met.</div><div class="mb-small-note" id="minibia-bot-gfb-v2-status">GFB 2.0: off</div>`;
+    section.innerHTML = `<div class="mb-label">Great Fireball 2.0 — Crosshairs</div><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gfb-v2-enabled" /><span>Enable Great Fireball 2.0</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gfb-v2-highest-priority" /><span>GFB Highest Priority</span></label><div class="mb-field-grid"><label class="mb-field"><span class="mb-field-label">GFB 2.0 Hotkey</span><input type="number" id="minibia-bot-gfb-v2-hotkey" min="1" max="12" placeholder="8" /></label><label class="mb-field"><span class="mb-field-label">Minimum Creatures</span><input type="number" id="minibia-bot-gfb-v2-monsters" min="1" placeholder="4" /></label><label class="mb-field"><span class="mb-field-label">Cooldown MS</span><input type="number" id="minibia-bot-gfb-v2-cooldown" min="0" placeholder="2000" /></label></div><div class="mb-small-note">Highest Priority blocks both square AoE hotkeys and the auto-attack rune while GFB 2.0 has enough creatures, including while GFB is cooling down.</div><div class="mb-small-note">Set the Great Fireball hotkey to Use with Crosshairs. The bot shoots the tile that hits the biggest group and waits until the minimum is met.</div><div class="mb-small-note" id="minibia-bot-gfb-v2-status">GFB 2.0: off</div>`;
     const originalGfb = document.getElementById("minibia-bot-gfb-section") || document.getElementById("minibia-bot-gfb-enabled")?.closest?.(".mb-section");
     if (originalGfb?.parentElement) originalGfb.insertAdjacentElement("afterend", section); else aoeSection.querySelector(".mb-stack")?.appendChild(section);
-    const enabled = section.querySelector("#minibia-bot-gfb-v2-enabled"), hotkey = section.querySelector("#minibia-bot-gfb-v2-hotkey"), monsters = section.querySelector("#minibia-bot-gfb-v2-monsters"), cooldown = section.querySelector("#minibia-bot-gfb-v2-cooldown");
+    const enabled = section.querySelector("#minibia-bot-gfb-v2-enabled"), priority = section.querySelector("#minibia-bot-gfb-v2-highest-priority"), hotkey = section.querySelector("#minibia-bot-gfb-v2-hotkey"), monsters = section.querySelector("#minibia-bot-gfb-v2-monsters"), cooldown = section.querySelector("#minibia-bot-gfb-v2-cooldown");
     enabled?.addEventListener("change", () => enabled.checked ? start() : stop());
+    priority?.addEventListener("change", () => updateConfig({ highestPriority: priority.checked }));
     hotkey?.addEventListener("change", () => updateConfig({ hotbarSlot: hotkey.value }));
     monsters?.addEventListener("change", () => updateConfig({ minMonsters: monsters.value }));
     cooldown?.addEventListener("change", () => updateConfig({ cooldownMs: cooldown.value }));
     refreshUi(); return true;
   }
   function refreshUi() {
-    const enabled = document.getElementById("minibia-bot-gfb-v2-enabled"), hotkey = document.getElementById("minibia-bot-gfb-v2-hotkey"), monsters = document.getElementById("minibia-bot-gfb-v2-monsters"), cooldown = document.getElementById("minibia-bot-gfb-v2-cooldown"), statusLabel = document.getElementById("minibia-bot-gfb-v2-status"), best = state.running && config.enabled ? state.currentBest : null;
+    const enabled = document.getElementById("minibia-bot-gfb-v2-enabled"), priority = document.getElementById("minibia-bot-gfb-v2-highest-priority"), hotkey = document.getElementById("minibia-bot-gfb-v2-hotkey"), monsters = document.getElementById("minibia-bot-gfb-v2-monsters"), cooldown = document.getElementById("minibia-bot-gfb-v2-cooldown"), statusLabel = document.getElementById("minibia-bot-gfb-v2-status"), best = state.running && config.enabled ? (state.currentBest || calculateBestCandidate()) : null;
     if (enabled) enabled.checked = !!state.running;
+    if (priority) priority.checked = !!config.highestPriority;
     if (hotkey && document.activeElement !== hotkey) hotkey.value = config.hotbarSlot || "";
     if (monsters && document.activeElement !== monsters) monsters.value = config.minMonsters;
     if (cooldown && document.activeElement !== cooldown) cooldown.value = config.cooldownMs;
-    if (statusLabel) statusLabel.textContent = state.running ? `GFB 2.0: biggest group ${best?.count || 0}/${config.minMonsters}` : "GFB 2.0: off";
+    if (statusLabel) statusLabel.textContent = state.running ? `GFB 2.0: biggest group ${best?.count || 0}/${config.minMonsters}${shouldReservePriority() ? " PRIORITY" : ""}` : "GFB 2.0: off";
   }
   function destroy() {
     stop({ persistEnabled: false });
@@ -187,7 +226,8 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     document.getElementById(sectionId)?.remove();
   }
 
-  bot.greatFireballV2 = { start, stop, trigger, status, updateConfig, getBestCandidate, evaluateAtPosition, getGfbTiles, destroy, config };
+  patchClickHotbar();
+  bot.greatFireballV2 = { start, stop, trigger, status, updateConfig, shouldReservePriority, getBestCandidate, evaluateAtPosition, getGfbTiles, destroy, config };
   bot.addCleanup(destroy);
   if (!ensureUi()) {
     let attempts = 0;
