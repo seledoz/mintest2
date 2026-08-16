@@ -16,6 +16,7 @@ window.__minibiaBotBundle.installAutoAttackGfbModule = function installAutoAttac
 
   const config = Object.assign({
     enabled: false,
+    highestPriority: false,
     hotbarSlot: null,
     minMonsters: 4,
     cooldownMs: 2000,
@@ -24,6 +25,7 @@ window.__minibiaBotBundle.installAutoAttackGfbModule = function installAutoAttac
   }, bot.storage.get(configStorageKey, {}) || {});
 
   config.enabled = !!config.enabled;
+  config.highestPriority = !!config.highestPriority;
   config.hotbarSlot = normalizeHotbarSlot(config.hotbarSlot);
   config.minMonsters = positiveInt(config.minMonsters, 4);
   config.cooldownMs = nonNegativeInt(config.cooldownMs, 2000);
@@ -124,6 +126,13 @@ window.__minibiaBotBundle.installAutoAttackGfbModule = function installAutoAttac
     return evaluations[0] || null;
   }
 
+  function shouldReservePriority() {
+    const slot = normalizeHotbarSlot(config.hotbarSlot);
+    if (!state.running || !config.enabled || !config.highestPriority || !slot) return false;
+    const best = getBestGfbCandidate();
+    return !!best && best.count >= positiveInt(config.minMonsters, 4);
+  }
+
   function getTileFromPosition(position) {
     if (!position) return null;
     if (typeof Position === "function") {
@@ -221,6 +230,7 @@ window.__minibiaBotBundle.installAutoAttackGfbModule = function installAutoAttac
 
   function updateConfig(nextConfig = {}, options = {}) {
     if (Object.prototype.hasOwnProperty.call(nextConfig, "enabled")) nextConfig.enabled = !!nextConfig.enabled;
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "highestPriority")) nextConfig.highestPriority = !!nextConfig.highestPriority;
     if (Object.prototype.hasOwnProperty.call(nextConfig, "hotbarSlot")) nextConfig.hotbarSlot = normalizeHotbarSlot(nextConfig.hotbarSlot);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "minMonsters")) nextConfig.minMonsters = positiveInt(nextConfig.minMonsters, config.minMonsters || 4);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "cooldownMs")) nextConfig.cooldownMs = nonNegativeInt(nextConfig.cooldownMs, config.cooldownMs || 2000);
@@ -243,6 +253,7 @@ window.__minibiaBotBundle.installAutoAttackGfbModule = function installAutoAttac
       bestMonsterCount: best?.count || 0,
       bestTargetName: best?.target?.name || "",
       bestTargetPosition: best?.position || null,
+      priorityReserved: shouldReservePriority(),
       ready: canCast(Date.now()),
     };
   }
@@ -257,11 +268,13 @@ window.__minibiaBotBundle.installAutoAttackGfbModule = function installAutoAttac
     section.innerHTML = `
       <div class="mb-label">Great Fireball 1-5-5-7-5-5-1</div>
       <label class="mb-toggle"><input type="checkbox" id="minibia-bot-gfb-enabled" /><span>Enable Great Fireball</span></label>
+      <label class="mb-toggle"><input type="checkbox" id="minibia-bot-gfb-highest-priority" /><span>GFB Highest Priority</span></label>
       <div class="mb-field-grid">
         <label class="mb-field"><span class="mb-field-label">GFB Hotkey</span><input type="number" id="minibia-bot-gfb-hotkey" min="1" max="12" placeholder="8" /></label>
         <label class="mb-field"><span class="mb-field-label">GFB Min Creatures</span><input type="number" id="minibia-bot-gfb-monsters" min="1" placeholder="4" /></label>
         <label class="mb-field"><span class="mb-field-label">GFB Cooldown MS</span><input type="number" id="minibia-bot-gfb-cooldown" min="0" placeholder="2000" /></label>
       </div>
+      <div class="mb-small-note">Highest Priority blocks other rune/AoE casts while GFB still has enough creatures to attempt a shot, including while GFB is cooling down.</div>
       <div class="mb-small-note">Hotkey should have Great Fireball selected on crosshairs. Picks the best 1-5-5-7-5-5-1 shot and casts only if it hits the minimum.</div>
       <div class="mb-small-note" id="minibia-bot-gfb-status">GFB: idle</div>`;
 
@@ -273,10 +286,12 @@ window.__minibiaBotBundle.installAutoAttackGfbModule = function installAutoAttac
     }
 
     const enabled = section.querySelector("#minibia-bot-gfb-enabled");
+    const highestPriority = section.querySelector("#minibia-bot-gfb-highest-priority");
     const hotkey = section.querySelector("#minibia-bot-gfb-hotkey");
     const monsters = section.querySelector("#minibia-bot-gfb-monsters");
     const cooldown = section.querySelector("#minibia-bot-gfb-cooldown");
     enabled?.addEventListener("change", () => enabled.checked ? start() : stop());
+    highestPriority?.addEventListener("change", () => updateConfig({ highestPriority: highestPriority.checked }));
     hotkey?.addEventListener("change", () => updateConfig({ hotbarSlot: hotkey.value }));
     monsters?.addEventListener("change", () => updateConfig({ minMonsters: monsters.value }));
     cooldown?.addEventListener("change", () => updateConfig({ cooldownMs: cooldown.value }));
@@ -285,17 +300,19 @@ window.__minibiaBotBundle.installAutoAttackGfbModule = function installAutoAttac
 
   function refreshUiValues() {
     const enabled = document.getElementById("minibia-bot-gfb-enabled");
+    const highestPriority = document.getElementById("minibia-bot-gfb-highest-priority");
     const hotkey = document.getElementById("minibia-bot-gfb-hotkey");
     const monsters = document.getElementById("minibia-bot-gfb-monsters");
     const cooldown = document.getElementById("minibia-bot-gfb-cooldown");
     const statusLabel = document.getElementById("minibia-bot-gfb-status");
     const best = getBestGfbCandidate();
     if (enabled) enabled.checked = !!state.running;
+    if (highestPriority) highestPriority.checked = !!config.highestPriority;
     if (hotkey) hotkey.value = config.hotbarSlot || "";
     if (monsters) monsters.value = config.minMonsters;
     if (cooldown) cooldown.value = config.cooldownMs;
     if (statusLabel) statusLabel.textContent = state.running
-      ? `GFB: best ${best?.count || 0}/${config.minMonsters}${best?.target ? ` via ${best.target.name || "Mob"}` : ""}`
+      ? `GFB: best ${best?.count || 0}/${config.minMonsters}${shouldReservePriority() ? "; priority reserved" : ""}${best?.target ? ` via ${best.target.name || "Mob"}` : ""}`
       : "GFB: off";
   }
 
@@ -305,7 +322,7 @@ window.__minibiaBotBundle.installAutoAttackGfbModule = function installAutoAttac
     document.getElementById("minibia-bot-gfb-section")?.remove();
   }
 
-  bot.attackGfb = { start, stop, status, updateConfig, triggerGreatFireball, getBestGfbCandidate, evaluateGfbAtPosition, getGfbTiles, destroy, config };
+  bot.attackGfb = { start, stop, status, updateConfig, triggerGreatFireball, shouldReservePriority, getBestGfbCandidate, evaluateGfbAtPosition, getGfbTiles, destroy, config };
   state.uiTimerId = window.setInterval(() => { ensureUi(); refreshUiValues(); }, 1000);
   bot.addCleanup(destroy);
   if (config.enabled) start(); else ensureUi();
