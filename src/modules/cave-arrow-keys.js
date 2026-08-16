@@ -9,19 +9,23 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     lastStepAt: 0,
     lastKey: null,
     stepCount: 0,
+    fieldStepCount: 0,
     uiTimerId: null,
     lastPathLength: 0,
     lastNextTile: null,
     lastError: null,
     lastWalkMethod: null,
+    lastFieldName: null,
   };
 
   const config = {
     stepCooldownMs: 180,
     matrixCacheMs: 750,
+    allowDamagingFields: true,
   };
 
   const matrixCache = new Map();
+  const damagingFieldPattern = /\b(?:fire|poison|energy)\s+field\b/i;
 
   function normalizePosition(value) {
     if (!value) return null;
@@ -45,6 +49,64 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     return sameTile(to, caveStatus.currentWaypoint);
   }
 
+  function getThingDefinition(itemId) {
+    if (!itemId) return null;
+    const client = window.gameClient;
+    return client?.itemDefinitionsByCid?.[itemId]
+      || client?.itemDefinitionsBySid?.[itemId]
+      || client?.itemDefinitions?.[itemId]
+      || null;
+  }
+
+  function getThingName(thing) {
+    if (!thing) return "";
+    const definition = getThingDefinition(thing.id);
+    return String(definition?.properties?.name || thing?.name || "").trim().toLowerCase();
+  }
+
+  function getTileThings(tile) {
+    if (!tile) return [];
+    const things = [];
+    if (tile.id) things.push(tile);
+    if (Array.isArray(tile.items)) {
+      for (const item of tile.items) if (item) things.push(item);
+    }
+    return things;
+  }
+
+  function getDamagingFieldName(tile) {
+    if (!config.allowDamagingFields || !tile) return null;
+    for (const thing of getTileThings(tile)) {
+      const name = getThingName(thing);
+      if (damagingFieldPattern.test(name)) return name;
+    }
+    return null;
+  }
+
+  function isDamagingFieldTile(tile) {
+    return !!getDamagingFieldName(tile);
+  }
+
+  function getTileAt(position) {
+    const pos = normalizePosition(position);
+    if (!pos) return null;
+    try {
+      return window.gameClient?.world?.getTileFromWorldPosition?.(
+        new Position(pos.x, pos.y, pos.z)
+      ) || null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function isSmartArrowPassable(tile) {
+    if (!tile) return false;
+    try {
+      if (typeof tile.isWalkable === "function" && tile.isWalkable()) return true;
+    } catch (_) {}
+    return isDamagingFieldTile(tile);
+  }
+
   function getMatrix(z) {
     const cacheKey = String(z);
     const cached = matrixCache.get(cacheKey);
@@ -57,7 +119,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       for (const tile of chunk.tiles) {
         const pos = normalizePosition(tile?.__position);
         if (!pos || pos.z !== z) continue;
-        matrix.set(`${pos.x},${pos.y}`, tile.isWalkable ? tile.isWalkable() : false);
+        matrix.set(`${pos.x},${pos.y}`, isSmartArrowPassable(tile));
       }
     }
 
@@ -161,17 +223,61 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     return null;
   }
 
+  function temporarilyForceFieldTileWalkable(tile, callback) {
+    const fieldName = getDamagingFieldName(tile);
+    if (!fieldName) return callback(false, null);
+
+    const restores = [];
+    const patchMethod = (owner, methodName) => {
+      if (!owner || typeof owner[methodName] !== "function") return;
+      const original = owner[methodName];
+      try {
+        owner[methodName] = () => true;
+        restores.push(() => { owner[methodName] = original; });
+      } catch (_) {}
+    };
+
+    patchMethod(tile, "isWalkable");
+    patchMethod(tile, "isPathable");
+    patchMethod(tile, "isPathfindable");
+
+    try {
+      return callback(true, fieldName);
+    } finally {
+      for (let index = restores.length - 1; index >= 0; index -= 1) {
+        try { restores[index](); } catch (_) {}
+      }
+    }
+  }
+
   function walkOneCardinalTile(originalFrom, fromPosition, nextTile, key) {
     if (typeof state.originalFindPath !== "function") {
       state.lastError = "Original Minibia pathfinder is unavailable";
       return false;
     }
 
+    const targetTile = getTileAt(nextTile);
+
     try {
       const nextPosition = new Position(nextTile.x, nextTile.y, nextTile.z);
-      state.originalFindPath(originalFrom, nextPosition);
-      state.lastWalkMethod = `Minibia one-tile path (${key})`;
+      const result = temporarilyForceFieldTileWalkable(targetTile, (forcedField, fieldName) => {
+        const pathResult = state.originalFindPath(originalFrom, nextPosition);
+        state.lastFieldName = forcedField ? fieldName : null;
+        if (forcedField) state.fieldStepCount += 1;
+        return pathResult;
+      });
+
+      state.lastWalkMethod = state.lastFieldName
+        ? `Minibia forced one-tile field step (${key})`
+        : `Minibia one-tile path (${key})`;
       state.lastError = null;
+      bot.log("cave Smart A* one-tile walk step requested", {
+        key,
+        from: fromPosition,
+        nextTile,
+        field: state.lastFieldName,
+        pathResult: result == null ? null : typeof result,
+      });
       return true;
     } catch (error) {
       state.lastWalkMethod = null;
@@ -180,6 +286,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
         key,
         from: fromPosition,
         nextTile,
+        field: getDamagingFieldName(targetTile),
         error: state.lastError,
       });
       return false;
@@ -221,8 +328,10 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       from: fromPosition,
       nextTile,
       waypoint: toPosition,
+      field: state.lastFieldName,
       pathLength: state.lastPathLength,
       stepCount: state.stepCount,
+      fieldStepCount: state.fieldStepCount,
     });
     return true;
   }
@@ -271,7 +380,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       arrowOption.value = "arrow";
       select.appendChild(arrowOption);
     }
-    arrowOption.textContent = "Smart A* + 1-Tile Steps";
+    arrowOption.textContent = "Smart A* + Field Crossing";
 
     const mode = bot.cave?.status?.().config?.pathfinderMode;
     if (mode === "astar" || mode === "arrow") select.value = mode;
@@ -284,10 +393,12 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       lastStepAt: state.lastStepAt,
       lastKey: state.lastKey,
       stepCount: state.stepCount,
+      fieldStepCount: state.fieldStepCount,
       lastPathLength: state.lastPathLength,
       lastNextTile: state.lastNextTile,
       lastError: state.lastError,
       lastWalkMethod: state.lastWalkMethod,
+      lastFieldName: state.lastFieldName,
     };
   }
 
@@ -295,6 +406,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     uninstallPathInterceptor();
     if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
     state.uiTimerId = null;
+    matrixCache.clear();
   }
 
   bot.caveArrowKeys = {
@@ -304,6 +416,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     status,
     destroy,
     config,
+    isDamagingFieldTile,
+    getDamagingFieldName,
   };
 
   installPathInterceptor();
