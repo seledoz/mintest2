@@ -161,72 +161,29 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     return null;
   }
 
-  function normalizeButtonText(value) {
-    return String(value || "")
-      .replace(/\uFE0E|\uFE0F/g, "")
-      .replace(/\s+/g, "")
-      .trim();
-  }
-
-  const dpadTextByKey = {
-    ArrowUp: "▲",
-    ArrowRight: "▶",
-    ArrowDown: "▼",
-    ArrowLeft: "◀",
-  };
-
-  function getExactDirectionButtons(symbol) {
-    return Array.from(document.querySelectorAll("button"))
-      .filter((button) => normalizeButtonText(button.textContent) === symbol);
-  }
-
-  function containerHasDpad(container) {
-    if (!container?.querySelectorAll) return false;
-    const symbols = new Set(
-      Array.from(container.querySelectorAll("button"))
-        .map((button) => normalizeButtonText(button.textContent))
-    );
-    return ["▲", "▶", "▼", "◀"].every((symbol) => symbols.has(symbol));
-  }
-
-  function findDpadButton(key) {
-    const symbol = dpadTextByKey[key];
-    if (!symbol) return null;
-    const candidates = getExactDirectionButtons(symbol);
-    if (!candidates.length) return null;
-
-    for (const candidate of candidates) {
-      let ancestor = candidate.parentElement;
-      for (let depth = 0; ancestor && depth < 6; depth += 1, ancestor = ancestor.parentElement) {
-        if (containerHasDpad(ancestor)) return candidate;
-      }
+  function walkOneCardinalTile(originalFrom, fromPosition, nextTile, key) {
+    if (typeof state.originalFindPath !== "function") {
+      state.lastError = "Original Minibia pathfinder is unavailable";
+      return false;
     }
 
-    return candidates[0];
-  }
-
-  function clickDpadButton(key) {
-    const button = findDpadButton(key);
-    if (!button) return false;
-
     try {
-      button.click();
-      state.lastWalkMethod = `Minibia D-pad ${dpadTextByKey[key]}`;
+      const nextPosition = new Position(nextTile.x, nextTile.y, nextTile.z);
+      state.originalFindPath(originalFrom, nextPosition);
+      state.lastWalkMethod = `Minibia one-tile path (${key})`;
       state.lastError = null;
       return true;
     } catch (error) {
-      state.lastError = `D-pad click failed: ${error?.message || error}`;
+      state.lastWalkMethod = null;
+      state.lastError = `One-tile movement failed: ${error?.message || error}`;
+      bot.log("cave Smart A* one-tile walk failed", {
+        key,
+        from: fromPosition,
+        nextTile,
+        error: state.lastError,
+      });
       return false;
     }
-  }
-
-  function walkWithArrowKey(key) {
-    if (clickDpadButton(key)) return true;
-
-    state.lastWalkMethod = null;
-    state.lastError = `Could not find Minibia D-pad control for ${key}`;
-    bot.log("cave Smart A* arrow walk unavailable", { key, error: state.lastError });
-    return false;
   }
 
   function stepToward(from, to) {
@@ -249,16 +206,16 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
 
     const key = pickArrowKey(fromPosition, nextTile);
     if (!key) {
-      state.lastError = "Smart A* produced a non-cardinal arrow step";
+      state.lastError = "Smart A* produced a non-cardinal step";
       return false;
     }
 
-    if (!walkWithArrowKey(key)) return false;
+    if (!walkOneCardinalTile(from, fromPosition, nextTile, key)) return false;
 
     state.lastStepAt = now;
     state.lastKey = key;
     state.stepCount += 1;
-    bot.log("cave Smart A* arrow-key walk step", {
+    bot.log("cave Smart A* one-tile walk step", {
       key,
       walkMethod: state.lastWalkMethod,
       from: fromPosition,
@@ -314,7 +271,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       arrowOption.value = "arrow";
       select.appendChild(arrowOption);
     }
-    arrowOption.textContent = "Smart A* + Arrow Keys";
+    arrowOption.textContent = "Smart A* + 1-Tile Steps";
 
     const mode = bot.cave?.status?.().config?.pathfinderMode;
     if (mode === "astar" || mode === "arrow") select.value = mode;
