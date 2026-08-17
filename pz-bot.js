@@ -25,6 +25,7 @@
     "src/modules/auto-attack-block-follow-while-targeted.js",
     "src/modules/auto-attack-aoe.js",
     "src/modules/great-fireball-v2.js",
+    "src/modules/fireball.js",
     "src/modules/auto-attack-aoe-layout.js",
     "src/modules/lure-mode.js",
     "src/modules/aoe-cooldown-input-fix.js",
