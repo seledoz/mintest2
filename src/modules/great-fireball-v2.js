@@ -71,10 +71,38 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
       return position && position.z === playerPosition.z && tileDistance(playerPosition, position) <= config.maxRange;
     });
     if (!monsters.length) return null;
+
+    const monsterPositions = new Map();
+    monsters.forEach((monster) => {
+      const position = getPosition(monster);
+      if (position) monsterPositions.set(positionKey(position), position);
+    });
+
+    // Evaluate every center that can place at least one visible monster inside
+    // the GFB footprint. This includes empty ground tiles between monsters.
     const candidates = new Map();
-    monsters.forEach((monster) => { const position = getPosition(monster); if (position) candidates.set(positionKey(position), position); });
-    const evaluations = Array.from(candidates.values()).map((position) => evaluateAtPosition(position, monsters));
-    evaluations.sort((left, right) => right.count - left.count || tileDistance(playerPosition, left.position) - tileDistance(playerPosition, right.position));
+    monsterPositions.forEach((monsterPosition) => {
+      getGfbTiles({ x: 0, y: 0, z: monsterPosition.z }).forEach((offsetTile) => {
+        const center = {
+          x: monsterPosition.x - offsetTile.x,
+          y: monsterPosition.y - offsetTile.y,
+          z: monsterPosition.z,
+        };
+        if (tileDistance(playerPosition, center) > config.maxRange) return;
+        if (!getTile(center)) return;
+        candidates.set(positionKey(center), center);
+      });
+    });
+
+    const evaluations = Array.from(candidates.values()).map((position) => ({
+      ...evaluateAtPosition(position, monsters),
+      occupiedByMonster: monsterPositions.has(positionKey(position)),
+    }));
+    evaluations.sort((left, right) =>
+      right.count - left.count ||
+      Number(right.occupiedByMonster) - Number(left.occupiedByMonster) ||
+      tileDistance(playerPosition, left.position) - tileDistance(playerPosition, right.position)
+    );
     return evaluations[0] || null;
   }
   function getBestCandidate() { return state.running && config.enabled ? (state.currentBest || calculateBestCandidate()) : null; }
