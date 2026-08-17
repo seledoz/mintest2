@@ -63,6 +63,13 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     });
     return { position: centerPosition, count: hitMonsters.length, monsters: hitMonsters, target: hitMonsters[0] || null };
   }
+  function getTile(position) {
+    if (!position) return null;
+    try {
+      const worldPosition = typeof Position === "function" ? new Position(position.x, position.y, position.z) : position;
+      return window.gameClient?.world?.getTileFromWorldPosition?.(worldPosition) || null;
+    } catch (_) { return null; }
+  }
   function calculateBestCandidate() {
     const playerPosition = getPosition(bot.getPlayerPosition?.());
     if (!playerPosition) return null;
@@ -71,38 +78,19 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
       return position && position.z === playerPosition.z && tileDistance(playerPosition, position) <= config.maxRange;
     });
     if (!monsters.length) return null;
-
     const monsterPositions = new Map();
-    monsters.forEach((monster) => {
-      const position = getPosition(monster);
-      if (position) monsterPositions.set(positionKey(position), position);
-    });
-
-    // Evaluate every center that can place at least one visible monster inside
-    // the GFB footprint. This includes empty ground tiles between monsters.
+    monsters.forEach((monster) => { const position = getPosition(monster); if (position) monsterPositions.set(positionKey(position), position); });
     const candidates = new Map();
     monsterPositions.forEach((monsterPosition) => {
       getGfbTiles({ x: 0, y: 0, z: monsterPosition.z }).forEach((offsetTile) => {
-        const center = {
-          x: monsterPosition.x - offsetTile.x,
-          y: monsterPosition.y - offsetTile.y,
-          z: monsterPosition.z,
-        };
+        const center = { x: monsterPosition.x - offsetTile.x, y: monsterPosition.y - offsetTile.y, z: monsterPosition.z };
         if (tileDistance(playerPosition, center) > config.maxRange) return;
         if (!getTile(center)) return;
         candidates.set(positionKey(center), center);
       });
     });
-
-    const evaluations = Array.from(candidates.values()).map((position) => ({
-      ...evaluateAtPosition(position, monsters),
-      occupiedByMonster: monsterPositions.has(positionKey(position)),
-    }));
-    evaluations.sort((left, right) =>
-      right.count - left.count ||
-      Number(right.occupiedByMonster) - Number(left.occupiedByMonster) ||
-      tileDistance(playerPosition, left.position) - tileDistance(playerPosition, right.position)
-    );
+    const evaluations = Array.from(candidates.values()).map((position) => ({ ...evaluateAtPosition(position, monsters), occupiedByMonster: monsterPositions.has(positionKey(position)) }));
+    evaluations.sort((left, right) => right.count - left.count || Number(right.occupiedByMonster) - Number(left.occupiedByMonster) || tileDistance(playerPosition, left.position) - tileDistance(playerPosition, right.position));
     return evaluations[0] || null;
   }
   function getBestCandidate() { return state.running && config.enabled ? (state.currentBest || calculateBestCandidate()) : null; }
@@ -113,17 +101,12 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
   }
 
   function getSquare2Slot() {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem("minibiaBot.attackAoe.square2.config") || "{}");
-      return normalizeHotbarSlot(saved.hotbarSlot);
-    } catch (_) { return null; }
+    try { const saved = JSON.parse(window.localStorage.getItem("minibiaBot.attackAoe.square2.config") || "{}"); return normalizeHotbarSlot(saved.hotbarSlot); }
+    catch (_) { return null; }
   }
   function getBlockedSlots() {
     const slots = new Set();
-    [bot.attack?.config?.runeHotbarSlot, bot.attackAoe?.config?.spellHotbarSlot, getSquare2Slot()].forEach((slot) => {
-      const normalized = normalizeHotbarSlot(slot);
-      if (normalized) slots.add(normalized);
-    });
+    [bot.attack?.config?.runeHotbarSlot, bot.attackAoe?.config?.spellHotbarSlot, getSquare2Slot()].forEach((slot) => { const normalized = normalizeHotbarSlot(slot); if (normalized) slots.add(normalized); });
     return slots;
   }
   function patchClickHotbar() {
@@ -132,6 +115,10 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     bot.clickHotbar = function clickHotbarWithGfbPriority(index, ...args) {
       const attemptedSlot = Math.trunc(Number(index)) + 1;
       const gfbSlot = normalizeHotbarSlot(config.hotbarSlot);
+      if (state.running && config.enabled && attemptedSlot === gfbSlot && state.lastCastAt && Date.now() - state.lastCastAt < config.cooldownMs) {
+        bot.logDebug?.("blocked GFB 2.0 cast during cooldown", { slot: attemptedSlot, remainingMs: Math.max(0, config.cooldownMs - (Date.now() - state.lastCastAt)) });
+        return false;
+      }
       if (shouldReservePriority() && attemptedSlot !== gfbSlot && getBlockedSlots().has(attemptedSlot)) {
         bot.logDebug?.("blocked lower-priority cast for GFB 2.0", { slot: attemptedSlot, gfbSlot });
         return false;
@@ -141,13 +128,6 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     bot.__gfbV2PriorityPatched = true;
   }
 
-  function getTile(position) {
-    if (!position) return null;
-    try {
-      const worldPosition = typeof Position === "function" ? new Position(position.x, position.y, position.z) : position;
-      return window.gameClient?.world?.getTileFromWorldPosition?.(worldPosition) || null;
-    } catch (_) { return null; }
-  }
   function fireCrosshairAt(best) {
     const slot = normalizeHotbarSlot(config.hotbarSlot);
     if (!slot || !best?.position || !bot.clickHotbar?.(slot - 1)) return false;
@@ -187,10 +167,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     if (state.running && config.enabled) state.timerId = window.setTimeout(tick, config.scanMs);
   }
   function stopUiTimer() { if (state.uiTimerId != null) window.clearInterval(state.uiTimerId); state.uiTimerId = null; }
-  function startUiTimer() {
-    if (!state.running || !config.enabled || state.uiTimerId != null) return;
-    state.uiTimerId = window.setInterval(refreshUi, 1000);
-  }
+  function startUiTimer() { if (!state.running || !config.enabled || state.uiTimerId != null) return; state.uiTimerId = window.setInterval(refreshUi, 1000); }
   function start(overrides = {}) {
     updateConfig({ ...overrides, enabled: true }, { silent: true });
     if (state.running) { startUiTimer(); return false; }
