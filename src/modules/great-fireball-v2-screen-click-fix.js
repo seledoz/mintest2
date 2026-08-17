@@ -47,13 +47,13 @@
       canvas.dispatchEvent(new MouseEvent("mouseup", { ...common, buttons: 0 }));
       canvas.dispatchEvent(new MouseEvent("click", { ...common, buttons: 0 }));
       return true;
-    } catch (error) {
+    } catch (_) {
       return false;
     }
   }
 
-  function clickBestGfbTile(bot) {
-    const module = bot?.greatFireballV2;
+  function clickBestTile(bot, moduleName, logName) {
+    const module = bot?.[moduleName];
     const best = module?.getBestCandidate?.();
     const player = getPosition(bot?.getPlayerPosition?.());
     const target = getPosition(best?.position);
@@ -69,12 +69,12 @@
 
     const inside = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
     if (!inside) {
-      bot.log?.("great fireball 2.0 target tile is outside game screen", { player, target, clientX, clientY });
+      bot.log?.(`${logName} target tile is outside game screen`, { player, target, clientX, clientY });
       return false;
     }
 
     const clicked = dispatchScreenClick(canvas, clientX, clientY);
-    bot.log?.(clicked ? "great fireball 2.0 clicked target tile on screen" : "great fireball 2.0 screen click failed", {
+    bot.log?.(clicked ? `${logName} clicked target tile on screen` : `${logName} screen click failed`, {
       monsterCount: best.count,
       target,
       clientX: Math.round(clientX),
@@ -86,7 +86,7 @@
 
   function install() {
     const bot = window.minibiaBot;
-    if (!bot?.clickHotbar || !bot?.greatFireballV2 || bot === installedBot) return false;
+    if (!bot?.clickHotbar || !bot?.greatFireballV2 || !bot?.fireball || bot === installedBot) return false;
 
     if (installedBot && originalClickHotbar && installedBot.clickHotbar !== originalClickHotbar) {
       installedBot.clickHotbar = originalClickHotbar;
@@ -97,14 +97,28 @@
     bot.clickHotbar = (...args) => {
       const result = originalClickHotbar(...args);
       const slotIndex = Number(args[0]);
-      const gfbSlotIndex = Number(bot.greatFireballV2?.config?.hotbarSlot) - 1;
-      const gfbRunning = !!bot.greatFireballV2?.status?.().running;
+      if (!result || !Number.isFinite(slotIndex)) return result;
 
-      if (result && gfbRunning && Number.isFinite(slotIndex) && slotIndex === gfbSlotIndex) {
+      const gfbSlotIndex = Number(bot.greatFireballV2?.config?.hotbarSlot) - 1;
+      const fireballSlotIndex = Number(bot.fireball?.config?.hotbarSlot) - 1;
+      const gfbRunning = !!bot.greatFireballV2?.status?.().running;
+      const fireballRunning = !!bot.fireball?.status?.().running;
+
+      let moduleName = null;
+      let logName = null;
+      if (gfbRunning && slotIndex === gfbSlotIndex) {
+        moduleName = "greatFireballV2";
+        logName = "great fireball 2.0";
+      } else if (fireballRunning && slotIndex === fireballSlotIndex) {
+        moduleName = "fireball";
+        logName = "fireball";
+      }
+
+      if (moduleName) {
         if (pendingClickId != null) window.clearTimeout(pendingClickId);
         pendingClickId = window.setTimeout(() => {
           pendingClickId = null;
-          clickBestGfbTile(bot);
+          clickBestTile(bot, moduleName, logName);
         }, clickDelayMs);
       }
       return result;
