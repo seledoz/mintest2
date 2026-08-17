@@ -81,13 +81,39 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
       return position && position.z === playerPosition.z && tileDistance(playerPosition, position) <= config.maxRange;
     });
     if (!monsters.length) return null;
-    const candidates = new Map();
+
+    const monsterPositions = new Map();
     monsters.forEach((monster) => {
       const position = getPosition(monster);
-      if (position) candidates.set(positionKey(position), position);
+      if (position) monsterPositions.set(positionKey(position), position);
     });
-    const evaluations = Array.from(candidates.values()).map((position) => evaluateAtPosition(position, monsters));
-    evaluations.sort((left, right) => right.count - left.count || tileDistance(playerPosition, left.position) - tileDistance(playerPosition, right.position));
+
+    // Every center that could include at least one visible monster in the
+    // 13-tile diamond is worth evaluating. This includes empty ground tiles,
+    // so Fireball can shoot between monsters when that hits a larger group.
+    const candidates = new Map();
+    monsterPositions.forEach((monsterPosition) => {
+      getFireballTiles({ x: 0, y: 0, z: monsterPosition.z }).forEach((offsetTile) => {
+        const center = {
+          x: monsterPosition.x - offsetTile.x,
+          y: monsterPosition.y - offsetTile.y,
+          z: monsterPosition.z,
+        };
+        if (tileDistance(playerPosition, center) > config.maxRange) return;
+        if (!getTile(center)) return;
+        candidates.set(positionKey(center), center);
+      });
+    });
+
+    const evaluations = Array.from(candidates.values()).map((position) => ({
+      ...evaluateAtPosition(position, monsters),
+      occupiedByMonster: monsterPositions.has(positionKey(position)),
+    }));
+    evaluations.sort((left, right) =>
+      right.count - left.count ||
+      Number(right.occupiedByMonster) - Number(left.occupiedByMonster) ||
+      tileDistance(playerPosition, left.position) - tileDistance(playerPosition, right.position)
+    );
     return evaluations[0] || null;
   }
 
@@ -280,7 +306,7 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
     const section = document.createElement("div");
     section.id = sectionId;
     section.className = "mb-section";
-    section.innerHTML = `<div class="mb-label">Fireball — Crosshairs</div><label class="mb-toggle"><input type="checkbox" id="minibia-bot-fireball-enabled" /><span>Enable Fireball</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-fireball-highest-priority" /><span>Fireball Highest Priority</span></label><div class="mb-field-grid"><label class="mb-field"><span class="mb-field-label">Fireball Hotkey</span><input type="number" id="minibia-bot-fireball-hotkey" min="1" max="12" placeholder="8" /></label><label class="mb-field"><span class="mb-field-label">Minimum Creatures</span><input type="number" id="minibia-bot-fireball-monsters" min="1" placeholder="4" /></label><label class="mb-field"><span class="mb-field-label">Cooldown MS</span><input type="number" id="minibia-bot-fireball-cooldown" min="0" placeholder="2000" /></label></div><div class="mb-small-note">Uses the 13-tile Fireball diamond pattern: 1 / 3 / 5 / 3 / 1. Highest Priority blocks other configured AOE/rune hotkeys while enough creatures are inside that pattern, including while Fireball is cooling down.</div><div class="mb-small-note">Set the Fireball hotkey to Use with Crosshairs. The bot shoots the tile that hits the biggest group and waits until the minimum is met.</div><div class="mb-small-note" id="minibia-bot-fireball-status">Fireball: off</div>`;
+    section.innerHTML = `<div class="mb-label">Fireball — Crosshairs</div><label class="mb-toggle"><input type="checkbox" id="minibia-bot-fireball-enabled" /><span>Enable Fireball</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-fireball-highest-priority" /><span>Fireball Highest Priority</span></label><div class="mb-field-grid"><label class="mb-field"><span class="mb-field-label">Fireball Hotkey</span><input type="number" id="minibia-bot-fireball-hotkey" min="1" max="12" placeholder="8" /></label><label class="mb-field"><span class="mb-field-label">Minimum Creatures</span><input type="number" id="minibia-bot-fireball-monsters" min="1" placeholder="4" /></label><label class="mb-field"><span class="mb-field-label">Cooldown MS</span><input type="number" id="minibia-bot-fireball-cooldown" min="0" placeholder="2000" /></label></div><div class="mb-small-note">Uses the 13-tile Fireball diamond pattern: 1 / 3 / 5 / 3 / 1. Highest Priority blocks other configured AOE/rune hotkeys while enough creatures are inside that pattern, including while Fireball is cooling down.</div><div class="mb-small-note">Set the Fireball hotkey to Use with Crosshairs. The bot checks monster and empty ground centers, then shoots whichever tile hits the biggest group.</div><div class="mb-small-note" id="minibia-bot-fireball-status">Fireball: off</div>`;
 
     const gfbV2Section = document.getElementById("minibia-bot-gfb-v2-section");
     if (gfbV2Section?.parentElement) gfbV2Section.insertAdjacentElement("afterend", section);
