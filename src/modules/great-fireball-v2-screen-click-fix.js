@@ -3,6 +3,7 @@
   let installedBot = null;
   let originalClickHotbar = null;
   let pendingClickId = null;
+  let lastFireballCastAt = 0;
 
   function getGameCanvas() {
     return Array.from(document.querySelectorAll("canvas"))
@@ -93,25 +94,44 @@
     }
 
     installedBot = bot;
+    lastFireballCastAt = 0;
     originalClickHotbar = bot.clickHotbar.bind(bot);
     bot.clickHotbar = (...args) => {
-      const result = originalClickHotbar(...args);
       const slotIndex = Number(args[0]);
-      if (!result || !Number.isFinite(slotIndex)) return result;
+      if (!Number.isFinite(slotIndex)) return originalClickHotbar(...args);
 
       const gfbSlotIndex = Number(bot.greatFireballV2?.config?.hotbarSlot) - 1;
       const fireballSlotIndex = Number(bot.fireball?.config?.hotbarSlot) - 1;
       const gfbRunning = !!bot.greatFireballV2?.status?.().running;
       const fireballStatus = bot.fireball?.status?.() || null;
       const fireballRunning = !!fireballStatus?.running;
-      const fireballReady = !!fireballStatus?.ready;
+      const isFireballSlot = fireballRunning && slotIndex === fireballSlotIndex;
+
+      if (isFireballSlot) {
+        const now = Date.now();
+        const cooldownMs = Math.max(0, Number(bot.fireball?.config?.cooldownMs) || 0);
+        if (lastFireballCastAt && now - lastFireballCastAt < cooldownMs) {
+          bot.logDebug?.("blocked Fireball cast during configured cooldown", {
+            cooldownMs,
+            remainingMs: Math.max(0, cooldownMs - (now - lastFireballCastAt)),
+          });
+          return false;
+        }
+      }
+
+      const result = originalClickHotbar(...args);
+      if (!result) return result;
 
       let moduleName = null;
       let logName = null;
       if (gfbRunning && slotIndex === gfbSlotIndex) {
         moduleName = "greatFireballV2";
         logName = "great fireball 2.0";
-      } else if (fireballRunning && fireballReady && slotIndex === fireballSlotIndex) {
+      } else if (isFireballSlot) {
+        // A successful Fireball hotbar activation is the valid cast point.
+        // Start the configured cooldown immediately so no later scan or
+        // module can activate this slot again until Cooldown MS has elapsed.
+        lastFireballCastAt = Date.now();
         moduleName = "fireball";
         logName = "fireball";
       }
@@ -129,6 +149,7 @@
     bot.addCleanup?.(() => {
       if (pendingClickId != null) window.clearTimeout(pendingClickId);
       pendingClickId = null;
+      lastFireballCastAt = 0;
       if (bot.clickHotbar !== originalClickHotbar) bot.clickHotbar = originalClickHotbar;
       if (installedBot === bot) installedBot = null;
     });
