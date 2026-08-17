@@ -102,14 +102,16 @@
       const gfbSlotIndex = Number(bot.greatFireballV2?.config?.hotbarSlot) - 1;
       const fireballSlotIndex = Number(bot.fireball?.config?.hotbarSlot) - 1;
       const gfbRunning = !!bot.greatFireballV2?.status?.().running;
-      const fireballRunning = !!bot.fireball?.status?.().running;
+      const fireballStatus = bot.fireball?.status?.() || null;
+      const fireballRunning = !!fireballStatus?.running;
+      const fireballReady = !!fireballStatus?.ready;
 
       let moduleName = null;
       let logName = null;
       if (gfbRunning && slotIndex === gfbSlotIndex) {
         moduleName = "greatFireballV2";
         logName = "great fireball 2.0";
-      } else if (fireballRunning && slotIndex === fireballSlotIndex) {
+      } else if (fireballRunning && fireballReady && slotIndex === fireballSlotIndex) {
         moduleName = "fireball";
         logName = "fireball";
       }
