@@ -6,7 +6,7 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
   const configStorageKey = "minibiaBot.fireball.config";
   const sectionId = "minibia-bot-fireball-section";
   const state = { running: false, timerId: null, uiTimerId: null, lastCastAt: 0, lastMonsterCount: 0, lastTargetName: "", lastTargetPosition: null, currentBest: null };
-  const config = Object.assign({ enabled: false, highestPriority: false, hotbarSlot: null, minMonsters: 4, cooldownMs: 2000, scanMs: 250, maxRange: 7, respectTargetFilters: true }, bot.storage.get(configStorageKey, {}) || {});
+  const config = Object.assign({ enabled: false, highestPriority: false, hotbarSlot: null, minMonsters: 4, cooldownMs: 2000, scanMs: 100, maxRange: 7, respectTargetFilters: true }, bot.storage.get(configStorageKey, {}) || {});
 
   function normalizeHotbarSlot(value) { const slot = Math.trunc(Number(value)); return Number.isFinite(slot) && slot >= 1 && slot <= 12 ? slot : null; }
   function positiveInt(value, fallback) { const number = Math.trunc(Number(value)); return Number.isFinite(number) && number > 0 ? number : fallback; }
@@ -30,7 +30,7 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
   config.hotbarSlot = normalizeHotbarSlot(config.hotbarSlot);
   config.minMonsters = positiveInt(config.minMonsters, 4);
   config.cooldownMs = nonNegativeInt(config.cooldownMs, 2000);
-  config.scanMs = Math.max(100, positiveInt(config.scanMs, 250));
+  config.scanMs = Math.max(100, positiveInt(config.scanMs, 100));
   config.maxRange = Math.min(7, positiveInt(config.maxRange, 7));
   config.respectTargetFilters = config.respectTargetFilters !== false;
 
@@ -88,66 +88,35 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
       if (position) monsterPositions.set(positionKey(position), position);
     });
 
-    // Every center that could include at least one visible monster in the
-    // 13-tile diamond is worth evaluating. This includes empty ground tiles,
-    // so Fireball can shoot between monsters when that hits a larger group.
     const candidates = new Map();
     monsterPositions.forEach((monsterPosition) => {
       getFireballTiles({ x: 0, y: 0, z: monsterPosition.z }).forEach((offsetTile) => {
-        const center = {
-          x: monsterPosition.x - offsetTile.x,
-          y: monsterPosition.y - offsetTile.y,
-          z: monsterPosition.z,
-        };
+        const center = { x: monsterPosition.x - offsetTile.x, y: monsterPosition.y - offsetTile.y, z: monsterPosition.z };
         if (tileDistance(playerPosition, center) > config.maxRange) return;
         if (!getTile(center)) return;
         candidates.set(positionKey(center), center);
       });
     });
 
-    const evaluations = Array.from(candidates.values()).map((position) => ({
-      ...evaluateAtPosition(position, monsters),
-      occupiedByMonster: monsterPositions.has(positionKey(position)),
-    }));
-    evaluations.sort((left, right) =>
-      right.count - left.count ||
-      Number(right.occupiedByMonster) - Number(left.occupiedByMonster) ||
-      tileDistance(playerPosition, left.position) - tileDistance(playerPosition, right.position)
-    );
+    const evaluations = Array.from(candidates.values()).map((position) => ({ ...evaluateAtPosition(position, monsters), occupiedByMonster: monsterPositions.has(positionKey(position)) }));
+    evaluations.sort((left, right) => right.count - left.count || Number(right.occupiedByMonster) - Number(left.occupiedByMonster) || tileDistance(playerPosition, left.position) - tileDistance(playerPosition, right.position));
     return evaluations[0] || null;
   }
 
-  function getBestCandidate() {
-    return state.running && config.enabled ? (state.currentBest || calculateBestCandidate()) : null;
-  }
-
+  function getBestCandidate() { return state.running && config.enabled ? (state.currentBest || calculateBestCandidate()) : null; }
   function shouldReservePriority() {
     if (!state.running || !config.enabled || !config.highestPriority || !normalizeHotbarSlot(config.hotbarSlot)) return false;
     const best = state.currentBest || calculateBestCandidate();
     return !!best && best.count >= config.minMonsters;
   }
-
   function getSquare2Slot() {
-    try {
-      const saved = JSON.parse(window.localStorage.getItem("minibiaBot.attackAoe.square2.config") || "{}");
-      return normalizeHotbarSlot(saved.hotbarSlot);
-    } catch (_) { return null; }
+    try { const saved = JSON.parse(window.localStorage.getItem("minibiaBot.attackAoe.square2.config") || "{}"); return normalizeHotbarSlot(saved.hotbarSlot); } catch (_) { return null; }
   }
-
   function getBlockedSlots() {
     const slots = new Set();
-    [
-      bot.attack?.config?.runeHotbarSlot,
-      bot.attackAoe?.config?.spellHotbarSlot,
-      getSquare2Slot(),
-      bot.greatFireballV2?.config?.hotbarSlot,
-    ].forEach((slot) => {
-      const normalized = normalizeHotbarSlot(slot);
-      if (normalized) slots.add(normalized);
-    });
+    [bot.attack?.config?.runeHotbarSlot, bot.attackAoe?.config?.spellHotbarSlot, getSquare2Slot(), bot.greatFireballV2?.config?.hotbarSlot].forEach((slot) => { const normalized = normalizeHotbarSlot(slot); if (normalized) slots.add(normalized); });
     return slots;
   }
-
   function patchClickHotbar() {
     if (!bot.clickHotbar || bot.__fireballPriorityPatched) return;
     const originalClickHotbar = bot.clickHotbar.bind(bot);
@@ -203,13 +172,7 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
       state.lastMonsterCount = best.count;
       state.lastTargetName = best.target?.name || best.monsters?.[0]?.name || "Mob";
       state.lastTargetPosition = best.position;
-      bot.log("used fireball at biggest diamond-pattern group", {
-        slot: config.hotbarSlot,
-        monsterCount: best.count,
-        target: state.lastTargetName,
-        position: best.position,
-        minimum: config.minMonsters,
-      });
+      bot.log("used fireball at biggest diamond-pattern group", { slot: config.hotbarSlot, monsterCount: best.count, target: state.lastTargetName, position: best.position, minimum: config.minMonsters });
     }
     refreshUi();
     return fired;
@@ -217,25 +180,15 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
 
   function tick() {
     if (!state.running || !config.enabled) return;
-    try {
-      state.currentBest = calculateBestCandidate();
-      trigger();
-    } catch (error) {
-      bot.log("fireball tick failed", error?.message || error);
-    }
+    try { state.currentBest = calculateBestCandidate(); trigger(); } catch (error) { bot.log("fireball tick failed", error?.message || error); }
     if (state.running && config.enabled) state.timerId = window.setTimeout(tick, config.scanMs);
   }
 
-  function stopUiTimer() {
-    if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
-    state.uiTimerId = null;
-  }
-
+  function stopUiTimer() { if (state.uiTimerId != null) window.clearInterval(state.uiTimerId); state.uiTimerId = null; }
   function startUiTimer() {
     if (!state.running || !config.enabled || state.uiTimerId != null) return;
     state.uiTimerId = window.setInterval(refreshUi, 1000);
   }
-
   function start(overrides = {}) {
     updateConfig({ ...overrides, enabled: true }, { silent: true });
     if (state.running) { startUiTimer(); return false; }
@@ -246,63 +199,40 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
     refreshUi();
     return true;
   }
-
   function stop(options = {}) {
     state.running = false;
     state.currentBest = null;
     if (state.timerId != null) window.clearTimeout(state.timerId);
     state.timerId = null;
     stopUiTimer();
-    if (options.persistEnabled !== false) {
-      config.enabled = false;
-      persistConfig();
-    }
+    if (options.persistEnabled !== false) { config.enabled = false; persistConfig(); }
     refreshUi();
     return true;
   }
-
   function updateConfig(nextConfig = {}, options = {}) {
     if (Object.prototype.hasOwnProperty.call(nextConfig, "enabled")) nextConfig.enabled = !!nextConfig.enabled;
     if (Object.prototype.hasOwnProperty.call(nextConfig, "highestPriority")) nextConfig.highestPriority = !!nextConfig.highestPriority;
     if (Object.prototype.hasOwnProperty.call(nextConfig, "hotbarSlot")) nextConfig.hotbarSlot = normalizeHotbarSlot(nextConfig.hotbarSlot);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "minMonsters")) nextConfig.minMonsters = positiveInt(nextConfig.minMonsters, config.minMonsters || 4);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "cooldownMs")) nextConfig.cooldownMs = nonNegativeInt(nextConfig.cooldownMs, config.cooldownMs || 2000);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "scanMs")) nextConfig.scanMs = Math.max(100, positiveInt(nextConfig.scanMs, config.scanMs || 250));
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "scanMs")) nextConfig.scanMs = Math.max(100, positiveInt(nextConfig.scanMs, config.scanMs || 100));
     if (Object.prototype.hasOwnProperty.call(nextConfig, "maxRange")) nextConfig.maxRange = Math.min(7, positiveInt(nextConfig.maxRange, config.maxRange || 7));
     if (Object.prototype.hasOwnProperty.call(nextConfig, "respectTargetFilters")) nextConfig.respectTargetFilters = nextConfig.respectTargetFilters !== false;
     Object.assign(config, nextConfig);
     persistConfig();
-    if (!config.enabled) {
-      state.currentBest = null;
-      stopUiTimer();
-    } else if (state.running) {
-      startUiTimer();
-    }
+    if (!config.enabled) { state.currentBest = null; stopUiTimer(); } else if (state.running) { startUiTimer(); }
     if (!options.silent) refreshUi();
     return { ...config };
   }
-
   function status() {
     const best = state.running && config.enabled ? (state.currentBest || calculateBestCandidate()) : null;
-    return {
-      running: state.running,
-      config: { ...config },
-      bestMonsterCount: best?.count || 0,
-      bestTargetName: best?.target?.name || "",
-      bestTargetPosition: best?.position || null,
-      lastMonsterCount: state.lastMonsterCount,
-      lastTargetName: state.lastTargetName,
-      lastTargetPosition: state.lastTargetPosition,
-      priorityReserved: shouldReservePriority(),
-      ready: canCast(Date.now(), best),
-    };
+    return { running: state.running, config: { ...config }, bestMonsterCount: best?.count || 0, bestTargetName: best?.target?.name || "", bestTargetPosition: best?.position || null, lastMonsterCount: state.lastMonsterCount, lastTargetName: state.lastTargetName, lastTargetPosition: state.lastTargetPosition, priorityReserved: shouldReservePriority(), ready: canCast(Date.now(), best) };
   }
 
   function ensureUi() {
     const aoeSection = document.getElementById("minibia-bot-auto-attack-aoe-section");
     if (!aoeSection) return false;
     if (document.getElementById(sectionId)) return true;
-
     const section = document.createElement("div");
     section.id = sectionId;
     section.className = "mb-section";
