@@ -68,6 +68,16 @@
     };
   }
 
+  function captureModuleConfigs() {
+    const bot = window.minibiaBot;
+    const fireballConfig = bot?.fireball?.status?.()?.config || bot?.fireball?.config;
+    return {
+      fireball: fireballConfig && typeof fireballConfig === "object"
+        ? { ...fireballConfig }
+        : null,
+    };
+  }
+
   function restoreModuleLists(lists) {
     if (!lists || typeof lists !== "object") return { restored: 0, missing: 0 };
 
@@ -87,6 +97,30 @@
     if (Array.isArray(lists.attackExcludeCreatureNames)) {
       if (typeof bot?.attackExclude?.setNames === "function") {
         bot.attackExclude.setNames(lists.attackExcludeCreatureNames);
+        restored += 1;
+      } else {
+        missing += 1;
+      }
+    }
+
+    return { restored, missing };
+  }
+
+  function restoreModuleConfigs(configs) {
+    if (!configs || typeof configs !== "object") return { restored: 0, missing: 0 };
+
+    const bot = window.minibiaBot;
+    let restored = 0;
+    let missing = 0;
+
+    if (configs.fireball && typeof configs.fireball === "object") {
+      if (typeof bot?.fireball?.updateConfig === "function") {
+        const fireballConfig = { ...configs.fireball };
+        const enabled = !!fireballConfig.enabled;
+        delete fireballConfig.enabled;
+        bot.fireball.updateConfig(fireballConfig);
+        if (enabled) bot.fireball.start?.();
+        else bot.fireball.stop?.();
         restored += 1;
       } else {
         missing += 1;
@@ -196,16 +230,18 @@
 
     const controls = capturePanelControls();
     const lists = captureModuleLists();
+    const moduleConfigs = captureModuleConfigs();
     profiles[normalized] = {
       name: normalized,
       savedAt: new Date().toISOString(),
       controls,
       lists,
+      moduleConfigs,
     };
     writeProfiles(profiles);
     window.localStorage.setItem(ACTIVE_KEY, normalized);
     refreshPanel(normalized);
-    updateStatus(`Saved profile: ${normalized} (${Object.keys(controls).length} controls + priority/exclude lists)`);
+    updateStatus(`Saved profile: ${normalized} (${Object.keys(controls).length} controls + priority/exclude lists + Fireball settings)`);
     return profiles[normalized];
   }
 
@@ -219,15 +255,18 @@
 
     const controlResult = applyPanelControls(profile.controls);
     const listResult = restoreModuleLists(profile.lists);
+    const moduleConfigResult = restoreModuleConfigs(profile.moduleConfigs);
     const result = {
       restored: controlResult.restored,
       missing: controlResult.missing,
       listsRestored: listResult.restored,
       listsMissing: listResult.missing,
+      moduleConfigsRestored: moduleConfigResult.restored,
+      moduleConfigsMissing: moduleConfigResult.missing,
     };
     window.localStorage.setItem(ACTIVE_KEY, normalized);
     refreshPanel(normalized);
-    updateStatus(`Loaded profile: ${normalized} (${result.restored} controls, ${result.listsRestored} lists restored)`);
+    updateStatus(`Loaded profile: ${normalized} (${result.restored} controls, ${result.listsRestored} lists, ${result.moduleConfigsRestored} module configs restored)`);
     return result;
   }
 
