@@ -9,6 +9,7 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
     observer: null,
     alertTimerId: null,
     uiTimerId: null,
+    uiInstallTimerId: null,
     scanTimerId: null,
     mode: "watching",
     alertStartedAt: 0,
@@ -292,6 +293,20 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
     state.uiTimerId = null;
   }
 
+  function stopUiInstallTimer() {
+    if (state.uiInstallTimerId == null) return;
+    window.clearInterval(state.uiInstallTimerId);
+    state.uiInstallTimerId = null;
+  }
+
+  function startUiInstallTimer() {
+    if (state.uiInstallTimerId != null) return;
+    state.uiInstallTimerId = window.setInterval(() => {
+      ensureUi();
+      if (document.getElementById("k9x-red-text-alert-section")) stopUiInstallTimer();
+    }, 500);
+  }
+
   function inspectAddedNode(node) {
     if (!config.enabled || !state.running || state.mode !== "watching") return false;
     const element = node?.nodeType === Node.TEXT_NODE ? node.parentElement : node;
@@ -336,6 +351,7 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
     state.lastBeepAt = 0;
     state.lastNoCaptchaAt = 0;
     state.baselineCaptchaKeys = new Set(getCaptchaCandidates().map((candidate) => candidate.key).filter(Boolean));
+    stopUiInstallTimer();
     startObserver();
     startScanTimer();
     startUiTimer();
@@ -361,6 +377,8 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
     }
     bot.log("captcha alarm stopped");
     refreshUiValues();
+    ensureUi();
+    if (!document.getElementById("k9x-red-text-alert-section")) startUiInstallTimer();
     return true;
   }
 
@@ -460,11 +478,17 @@ window.__minibiaBotBundle.installRedTextAlertModule = function installRedTextAle
 
   function destroy() {
     stop({ persistEnabled: false });
+    stopUiInstallTimer();
     document.getElementById("k9x-red-text-alert-section")?.remove();
   }
 
   bot.redTextAlert = { start, stop, status, updateConfig, beep, resetSeenMessages, destroy, config };
   bot.addCleanup(destroy);
-  if (config.enabled) start(); else ensureUi();
+  if (config.enabled) {
+    start();
+  } else {
+    ensureUi();
+    if (!document.getElementById("k9x-red-text-alert-section")) startUiInstallTimer();
+  }
   return bot.redTextAlert;
 };
