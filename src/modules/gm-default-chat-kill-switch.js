@@ -217,6 +217,31 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     return true;
   }
 
+  function forceStopWalkingOnce() {
+    const candidates = [
+      [window.gameClient?.player, "stopWalking"],
+      [window.gameClient?.player, "stopAutoWalk"],
+      [window.gameClient?.world?.pathfinder, "stop"],
+      [window.gameClient?.world?.pathfinder, "cancel"],
+      [window.gameClient?.world?.pathfinder, "clearPath"],
+      [window.gameClient?.world, "stopWalking"],
+    ];
+
+    for (const [target, method] of candidates) {
+      if (typeof target?.[method] !== "function") continue;
+      try {
+        target[method]();
+        bot.log?.("GM kill switch forced walking stop", { method });
+        return true;
+      } catch (error) {
+        bot.log?.("GM kill switch walking stop command failed", { method, error: String(error) });
+      }
+    }
+
+    bot.log?.("GM kill switch could not find walking stop command");
+    return false;
+  }
+
   function triggerKillSwitch(source, speaker, message = "", details = {}) {
     const responderScheduled = source === "chat" ? scheduleResponder(speaker, message) : false;
     if (!config.killSwitchEnabled) {
@@ -224,11 +249,13 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
       return true;
     }
 
+    const walkingStopped = forceStopWalkingOnce();
     bot.log?.("game master kill switch triggered", {
       source,
       speaker,
       message,
       responderScheduled,
+      walkingStopped,
       ...details,
     });
     bot.cave?.stop?.();
