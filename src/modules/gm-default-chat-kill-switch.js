@@ -252,7 +252,6 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   }
 
   function triggerKillSwitch(source, speaker, message = "", details = {}) {
-    const responderScheduled = source === "chat" ? scheduleResponder(speaker, message) : false;
     if (!config.killSwitchEnabled) return false;
 
     const walkingStopped = forceStopWalkingOnce();
@@ -260,7 +259,6 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
       source,
       speaker,
       message,
-      responderScheduled,
       walkingStopped,
       ...details,
     });
