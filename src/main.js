@@ -84,78 +84,18 @@
       const githubSection = document.getElementById("minibia-bot-github-waypoints-section");
       if (!githubSection) return false;
 
-      document.getElementById("minibia-bot-gm-kill-switch-section")?.remove();
-      document.getElementById("minibia-bot-gm-kill-switch-enabled")?.closest?.("label")?.remove();
+      const gmModule = bot.gmDefaultChatKillSwitch;
+      if (typeof gmModule?.injectPanelControl === "function") {
+        gmModule.injectPanelControl();
+        const section = document.getElementById("minibia-bot-gm-kill-switch-section");
+        if (!section) return false;
+        if (githubSection.nextElementSibling !== section) {
+          githubSection.insertAdjacentElement("afterend", section);
+        }
+        return !!section.querySelector("#minibia-bot-gm-pause-enabled");
+      }
 
-      const section = document.createElement("div");
-      section.className = "mb-section mb-column-section";
-      section.id = "minibia-bot-gm-kill-switch-section";
-      section.innerHTML = `
-        <div class="mb-label">GM Kill Switch</div>
-        <div class="mb-stack">
-          <label class="mb-toggle">
-            <input type="checkbox" id="minibia-bot-gm-kill-switch-enabled" />
-            <span>Enable GM Kill Switch</span>
-          </label>
-          <label class="mb-field" id="minibia-bot-gm-exact-names-field">
-            <span class="mb-field-label">Exact GM Name(s)</span>
-            <textarea id="minibia-bot-gm-exact-names" placeholder="Enter the exact character name. One per line, or separate with commas."></textarea>
-            <span class="mb-small-note">Matching ignores capital letters but otherwise uses the full entered name.</span>
-          </label>
-          <label class="mb-toggle">
-            <input type="checkbox" id="minibia-bot-gm-responder-enabled" />
-            <span>Enable GM Responder</span>
-          </label>
-          <label class="mb-field">
-            <span class="mb-field-label">GM Auto Reply</span>
-            <textarea id="minibia-bot-gm-responder-message" placeholder="One reply after a GM speaks"></textarea>
-          </label>
-          <div class="mb-small-note">Replies once, then resets after 15 seconds. The same chat line will not trigger again.</div>
-        </div>
-      `;
-
-      githubSection.insertAdjacentElement("afterend", section);
-      const killToggle = section.querySelector("#minibia-bot-gm-kill-switch-enabled");
-      const responderToggle = section.querySelector("#minibia-bot-gm-responder-enabled");
-      const responderMessage = section.querySelector("#minibia-bot-gm-responder-message");
-      const exactNamesInput = section.querySelector("#minibia-bot-gm-exact-names");
-      const exactNamesStorageKey = "minibiaBot.gmKillSwitch.exactNames";
-
-      const loadExactNames = () => {
-        try { return String(window.localStorage.getItem(exactNamesStorageKey) || ""); } catch (_) { return ""; }
-      };
-      const saveExactNames = () => {
-        try { window.localStorage.setItem(exactNamesStorageKey, String(exactNamesInput?.value || "")); } catch (_) {}
-      };
-
-      if (exactNamesInput) exactNamesInput.value = loadExactNames();
-
-      const refresh = () => {
-        const status = bot.gmDefaultChatKillSwitch?.status?.() || {};
-        if (killToggle) killToggle.checked = !!status.running;
-        if (responderToggle) responderToggle.checked = !!status.config?.responderEnabled;
-        if (responderMessage && responderMessage !== document.activeElement) responderMessage.value = status.config?.responderMessage || "";
-      };
-
-      killToggle?.addEventListener("change", () => {
-        if (killToggle.checked) bot.gmDefaultChatKillSwitch?.start?.();
-        else bot.gmDefaultChatKillSwitch?.stop?.();
-        refresh();
-      });
-      responderToggle?.addEventListener("change", () => {
-        bot.gmDefaultChatKillSwitch?.updateResponderConfig?.({ responderEnabled: responderToggle.checked });
-        refresh();
-      });
-      const saveResponder = () => bot.gmDefaultChatKillSwitch?.updateResponderConfig?.({ responderMessage: responderMessage?.value || "" });
-      responderMessage?.addEventListener("input", saveResponder);
-      responderMessage?.addEventListener("change", saveResponder);
-      responderMessage?.addEventListener("blur", saveResponder);
-      exactNamesInput?.addEventListener("input", saveExactNames);
-      exactNamesInput?.addEventListener("change", saveExactNames);
-      exactNamesInput?.addEventListener("blur", saveExactNames);
-
-      refresh();
-      return true;
+      return false;
     };
 
     if (placeControl()) return;
