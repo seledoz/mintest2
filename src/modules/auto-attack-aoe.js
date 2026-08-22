@@ -23,7 +23,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     minMonsters: 3,
     squareRange: 3,
     cooldownMs: 2000,
-    tickMs: 250,
+    tickMs: 150,
     requireAutoAttackRunning: true,
     respectTargetFilters: true,
     gfbEnabled: false,
@@ -42,7 +42,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
   config.minMonsters = positiveInt(config.minMonsters, 3);
   config.squareRange = positiveInt(config.squareRange, 3);
   config.cooldownMs = nonNegativeInt(config.cooldownMs, 2000);
-  config.tickMs = positiveInt(config.tickMs, 250);
+  config.tickMs = positiveInt(config.tickMs, 150);
   config.requireAutoAttackRunning = config.requireAutoAttackRunning !== false;
   config.respectTargetFilters = config.respectTargetFilters !== false;
   config.gfbEnabled = !!config.gfbEnabled;
@@ -233,7 +233,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
   function tick() {
     if (!state.running) return;
     try { triggerSpell(); } catch (error) { bot.log("auto attack AoE tick failed", error?.message || error); }
-    state.timerId = window.setTimeout(tick, positiveInt(config.tickMs, 250));
+    state.timerId = window.setTimeout(tick, positiveInt(config.tickMs, 150));
   }
 
   function startUiTimer() {
@@ -303,7 +303,7 @@ window.__minibiaBotBundle.installAutoAttackAoeModule = function installAutoAttac
     if (Object.prototype.hasOwnProperty.call(cleaned, "minMonsters")) cleaned.minMonsters = positiveInt(cleaned.minMonsters, config.minMonsters || 3);
     if (Object.prototype.hasOwnProperty.call(cleaned, "squareRange")) cleaned.squareRange = positiveInt(cleaned.squareRange, config.squareRange || 3);
     if (Object.prototype.hasOwnProperty.call(cleaned, "cooldownMs")) cleaned.cooldownMs = nonNegativeInt(cleaned.cooldownMs, config.cooldownMs || 2000);
-    if (Object.prototype.hasOwnProperty.call(cleaned, "tickMs")) cleaned.tickMs = positiveInt(cleaned.tickMs, config.tickMs || 250);
+    if (Object.prototype.hasOwnProperty.call(cleaned, "tickMs")) cleaned.tickMs = positiveInt(cleaned.tickMs, config.tickMs || 150);
     if (Object.prototype.hasOwnProperty.call(cleaned, "requireAutoAttackRunning")) cleaned.requireAutoAttackRunning = cleaned.requireAutoAttackRunning !== false;
     if (Object.prototype.hasOwnProperty.call(cleaned, "respectTargetFilters")) cleaned.respectTargetFilters = cleaned.respectTargetFilters !== false;
     if (Object.prototype.hasOwnProperty.call(cleaned, "gfbEnabled")) cleaned.gfbEnabled = !!cleaned.gfbEnabled;
