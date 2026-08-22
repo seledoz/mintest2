@@ -14,8 +14,19 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
   const noopAction = "walk";
   const ropeAction = "rope";
   const shovelAction = "shovel";
+  const waitAction = "wait";
+  const waitDurationMs = 60 * 1000;
   let lastToolUseAt = 0;
   let lastHandledKey = null;
+  const waitState = {
+    active: false,
+    presetName: null,
+    index: -1,
+    startedAt: 0,
+    resumeAt: 0,
+    timerId: null,
+    completedKey: null,
+  };
 
   function normalizePresetName(value) {
     const normalized = String(value || "").trim().replace(/\s+/g, " ");
@@ -23,7 +34,7 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
   }
 
   function normalizeAction(action) {
-    if (action === ropeAction || action === shovelAction) return action;
+    if (action === ropeAction || action === shovelAction || action === waitAction) return action;
     return noopAction;
   }
 
@@ -203,6 +214,12 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
     return Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
   }
 
+  function isAtWaypoint(position, waypoint) {
+    if (!position || !waypoint || position.z !== waypoint.z) return false;
+    const tolerance = Math.max(1, Math.trunc(Number(bot.cave?.status?.()?.config?.waypointTolerance) || 1));
+    return Math.abs(position.x - waypoint.x) <= tolerance && Math.abs(position.y - waypoint.y) <= tolerance;
+  }
+
   function isBesideOrSameTile(a, b) {
     return !!a && !!b && a.z === b.z && Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1;
   }
@@ -281,6 +298,72 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
     });
   }
 
+  function stopCurrentMovement() {
+    const pathfinder = window.gameClient?.world?.pathfinder;
+    try { pathfinder?.setPathfindCache?.(null); } catch (_) {}
+    const targets = [pathfinder, window.gameClient?.player, window.gameClient?.world].filter(Boolean);
+    ["stop", "cancel", "clear", "clearPath", "stopWalking", "cancelWalking", "stopAutoWalk", "reset"].forEach((name) => {
+      targets.forEach((target) => {
+        if (typeof target?.[name] !== "function") return;
+        try { target[name](); } catch (_) {}
+      });
+    });
+  }
+
+  function clearWaitTimer() {
+    if (waitState.timerId != null) {
+      window.clearTimeout(waitState.timerId);
+      waitState.timerId = null;
+    }
+  }
+
+  function finishWaypointWait() {
+    if (!waitState.active) return false;
+    const presetName = waitState.presetName;
+    const index = waitState.index;
+    const waitKey = `${presetName}:${index}`;
+    clearWaitTimer();
+    waitState.active = false;
+    waitState.startedAt = 0;
+    waitState.resumeAt = 0;
+    waitState.completedKey = waitKey;
+
+    const actions = getWaypointActions();
+    const samePreset = getActivePresetName() === presetName;
+    const sameWaitWaypoint = actions[index] === waitAction;
+    const manuallyPaused = !!bot.pauseBreak?.status?.()?.paused;
+    const stillEnabled = bot.cave?.config?.enabled !== false;
+
+    if (!samePreset || !sameWaitWaypoint || manuallyPaused || !stillEnabled) {
+      bot.log("waypoint wait finished without auto-resume", { index: index + 1, samePreset, sameWaitWaypoint, manuallyPaused, stillEnabled });
+      return false;
+    }
+
+    bot.log("waypoint wait finished", { index: index + 1, waitMs: waitDurationMs });
+    return !!bot.cave?.start?.();
+  }
+
+  function startWaypointWait(status, index, waypoint) {
+    if (waitState.active) return true;
+    const presetName = getActivePresetName();
+    const waitKey = `${presetName}:${index}`;
+    if (waitState.completedKey === waitKey) return false;
+
+    waitState.active = true;
+    waitState.presetName = presetName;
+    waitState.index = index;
+    waitState.startedAt = Date.now();
+    waitState.resumeAt = waitState.startedAt + waitDurationMs;
+
+    stopCurrentMovement();
+    bot.cave?.stop?.({ persistEnabled: false });
+    stopCurrentMovement();
+    bot.log("waypoint wait started", { index: index + 1, waitMs: waitDurationMs, waypoint });
+
+    waitState.timerId = window.setTimeout(finishWaypointWait, waitDurationMs);
+    return true;
+  }
+
   function getNextRouteIndex(status) {
     const route = bot.cave?.getRoute?.() || [];
     if (route.length <= 1) return 0;
@@ -300,6 +383,12 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
 
   function runWaypointActionCheck() {
     const status = bot.cave?.status?.();
+
+    if (waitState.completedKey && status?.running) {
+      const currentKey = `${getActivePresetName()}:${Math.trunc(Number(status.currentIndex) || 0)}`;
+      if (currentKey !== waitState.completedKey) waitState.completedKey = null;
+    }
+
     if (!status?.running) return;
 
     const route = bot.cave?.getRoute?.() || [];
@@ -311,6 +400,11 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
     if (!waypoint || action === noopAction) return;
 
     const playerPosition = normalizePosition(bot.getPlayerPosition?.());
+    if (action === waitAction) {
+      if (isAtWaypoint(playerPosition, waypoint)) startWaypointWait(status, index, waypoint);
+      return;
+    }
+
     const distance = distanceOnSameFloor(playerPosition, waypoint);
     if (!Number.isFinite(distance) || distance > 2) return;
 
@@ -406,48 +500,73 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
     }
   }, 100);
 
-  bot.addCleanup(() => window.clearInterval(actionTimerId));
+  bot.addCleanup(() => {
+    window.clearInterval(actionTimerId);
+    clearWaitTimer();
+  });
 
   function installPanelControls() {
     const recordButton = document.getElementById("minibia-bot-cave-record");
-    if (!recordButton || document.getElementById("minibia-bot-cave-waypoint-action")) return;
+    if (!recordButton) return;
 
-    const wrapper = document.createElement("label");
-    wrapper.className = "mb-field";
-    wrapper.setAttribute("for", "minibia-bot-cave-waypoint-action");
+    let select = document.getElementById("minibia-bot-cave-waypoint-action");
+    if (!select) {
+      const wrapper = document.createElement("label");
+      wrapper.className = "mb-field";
+      wrapper.setAttribute("for", "minibia-bot-cave-waypoint-action");
 
-    const label = document.createElement("span");
-    label.className = "mb-field-label";
-    label.textContent = "Waypoint Action";
+      const label = document.createElement("span");
+      label.className = "mb-field-label";
+      label.textContent = "Waypoint Action";
 
-    const select = document.createElement("select");
-    select.id = "minibia-bot-cave-waypoint-action";
+      select = document.createElement("select");
+      select.id = "minibia-bot-cave-waypoint-action";
 
-    const walkOption = document.createElement("option");
-    walkOption.value = noopAction;
-    walkOption.textContent = "Walk";
+      const walkOption = document.createElement("option");
+      walkOption.value = noopAction;
+      walkOption.textContent = "Walk";
 
-    const ropeOption = document.createElement("option");
-    ropeOption.value = ropeAction;
-    ropeOption.textContent = "Use Rope";
+      const ropeOption = document.createElement("option");
+      ropeOption.value = ropeAction;
+      ropeOption.textContent = "Use Rope";
 
-    const shovelOption = document.createElement("option");
-    shovelOption.value = shovelAction;
-    shovelOption.textContent = "Use Shovel";
+      const shovelOption = document.createElement("option");
+      shovelOption.value = shovelAction;
+      shovelOption.textContent = "Use Shovel";
 
-    select.appendChild(walkOption);
-    select.appendChild(ropeOption);
-    select.appendChild(shovelOption);
-    wrapper.appendChild(label);
-    wrapper.appendChild(select);
+      const waitOption = document.createElement("option");
+      waitOption.value = waitAction;
+      waitOption.textContent = "Waypoint Wait (1 Minute)";
 
-    recordButton.closest(".mb-actions")?.insertAdjacentElement("beforebegin", wrapper);
+      select.appendChild(walkOption);
+      select.appendChild(ropeOption);
+      select.appendChild(shovelOption);
+      select.appendChild(waitOption);
+      wrapper.appendChild(label);
+      wrapper.appendChild(select);
 
-    recordButton.addEventListener("click", () => {
-      window.setTimeout(() => {
-        setLastWaypointAction(select.value);
-      }, 0);
-    });
+      recordButton.closest(".mb-actions")?.insertAdjacentElement("beforebegin", wrapper);
+
+      recordButton.addEventListener("click", () => {
+        window.setTimeout(() => {
+          setLastWaypointAction(select.value);
+        }, 0);
+      });
+    }
+
+    if (!document.getElementById("minibia-bot-cave-record-wait")) {
+      const waitButton = document.createElement("button");
+      waitButton.type = "button";
+      waitButton.id = "minibia-bot-cave-record-wait";
+      waitButton.className = recordButton.className;
+      waitButton.textContent = "Add Waypoint Wait";
+      waitButton.title = "Add a waypoint at your current position that pauses Cavebot movement for 1 minute";
+      waitButton.addEventListener("click", () => {
+        const added = bot.cave?.addWaypointCurrentSpot?.({ action: waitAction });
+        if (added) bot.log("waypoint wait added", { waypoint: added, waitMs: waitDurationMs });
+      });
+      recordButton.insertAdjacentElement("afterend", waitButton);
+    }
   }
 
   function patchUiInject() {
@@ -469,4 +588,12 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
   bot.cave.setLastWaypointAction = setLastWaypointAction;
   bot.cave.useRopeOnNearestHole = useRopeOnNearestHole;
   bot.cave.useShovelOnNearestHole = useShovelOnNearestHole;
+  bot.cave.waypointWaitStatus = () => ({
+    active: waitState.active,
+    index: waitState.index,
+    startedAt: waitState.startedAt,
+    resumeAt: waitState.resumeAt,
+    remainingMs: waitState.active ? Math.max(0, waitState.resumeAt - Date.now()) : 0,
+    durationMs: waitDurationMs,
+  });
 };
