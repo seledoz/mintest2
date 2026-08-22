@@ -143,10 +143,32 @@
     return true;
   }
 
+  function injectWaypointWaitButton() {
+    const addButton = document.getElementById("minibia-bot-cave-add");
+    if (!addButton) return false;
+    if (document.getElementById("minibia-bot-cave-record-wait")) return true;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.id = "minibia-bot-cave-record-wait";
+    button.className = addButton.className;
+    button.textContent = "Add Waypoint Wait";
+    button.title = "Add a waypoint at your current position that pauses Cavebot movement for 1 minute";
+    button.addEventListener("click", () => {
+      const added = window.minibiaBot?.cave?.addWaypointCurrentSpot?.({ action: "wait" });
+      if (added) window.minibiaBot?.log?.("waypoint wait added", { waypoint: added, waitMs: 60000 });
+    });
+    addButton.insertAdjacentElement("afterend", button);
+    return true;
+  }
+
   injectDeleteButton();
+  injectWaypointWaitButton();
   let attempts = 0;
   const timer = window.setInterval(() => {
     attempts += 1;
-    if (injectDeleteButton() || attempts >= 80) window.clearInterval(timer);
+    const deleteReady = injectDeleteButton();
+    const waitReady = injectWaypointWaitButton();
+    if ((deleteReady && waitReady) || attempts >= 80) window.clearInterval(timer);
   }, 250);
 })();
