@@ -67,11 +67,11 @@
 
   function removeWaypointActions() {
     const select = document.getElementById("minibia-bot-cave-waypoint-action");
-    if (!select) return true;
+    if (!select) return false;
     const wrapper = select.closest("label.mb-field") || select.parentElement;
     if (wrapper) wrapper.remove();
     else select.remove();
-    return !document.getElementById("minibia-bot-cave-waypoint-action");
+    return true;
   }
 
   function injectWaypointWaitButton() {
@@ -86,15 +86,31 @@
     return true;
   }
 
-  removeWaypointActions();
+  function enforceCaveControls() {
+    removeWaypointActions();
+    injectWaypointWaitButton();
+  }
+
   injectDeleteButton();
-  injectWaypointWaitButton();
+  enforceCaveControls();
+
   let attempts = 0;
   const timer = window.setInterval(() => {
     attempts += 1;
-    removeWaypointActions();
     const deleteReady = injectDeleteButton();
-    const waitReady = injectWaypointWaitButton();
-    if ((deleteReady && waitReady) || attempts >= 80) window.clearInterval(timer);
+    enforceCaveControls();
+    if (deleteReady && document.getElementById("minibia-bot-cave-record-wait") && attempts >= 8) window.clearInterval(timer);
+    if (attempts >= 80) window.clearInterval(timer);
   }, 250);
+
+  const observer = new MutationObserver(() => {
+    enforceCaveControls();
+  });
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+
+  const previousBot = window.minibiaBot;
+  previousBot?.addCleanup?.(() => {
+    window.clearInterval(timer);
+    observer.disconnect();
+  });
 })();
