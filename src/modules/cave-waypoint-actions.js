@@ -506,7 +506,7 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
   });
 
   function installPanelControls() {
-    const recordButton = document.getElementById("minibia-bot-cave-record");
+    const recordButton = document.getElementById("minibia-bot-cave-add");
     if (!recordButton) return;
 
     let select = document.getElementById("minibia-bot-cave-waypoint-action");
@@ -545,7 +545,7 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
       wrapper.appendChild(label);
       wrapper.appendChild(select);
 
-      recordButton.closest(".mb-actions")?.insertAdjacentElement("beforebegin", wrapper);
+      recordButton.closest(".mb-row")?.insertAdjacentElement("afterend", wrapper);
 
       recordButton.addEventListener("click", () => {
         window.setTimeout(() => {
