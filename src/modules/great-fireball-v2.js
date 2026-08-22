@@ -6,7 +6,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
   const configStorageKey = "minibiaBot.greatFireballV2.config";
   const sectionId = "minibia-bot-gfb-v2-section";
   const state = { running: false, timerId: null, uiTimerId: null, lastCastAt: 0, lastMonsterCount: 0, lastTargetName: "", lastTargetPosition: null, currentBest: null };
-  const config = Object.assign({ enabled: false, highestPriority: false, hotbarSlot: null, minMonsters: 4, cooldownMs: 2000, scanMs: 250, maxRange: 7, respectTargetFilters: true }, bot.storage.get(configStorageKey, {}) || {});
+  const config = Object.assign({ enabled: false, highestPriority: false, hotbarSlot: null, minMonsters: 4, cooldownMs: 2000, scanMs: 150, maxRange: 7, respectTargetFilters: true }, bot.storage.get(configStorageKey, {}) || {});
 
   function normalizeHotbarSlot(value) { const slot = Math.trunc(Number(value)); return Number.isFinite(slot) && slot >= 1 && slot <= 12 ? slot : null; }
   function positiveInt(value, fallback) { const number = Math.trunc(Number(value)); return Number.isFinite(number) && number > 0 ? number : fallback; }
@@ -30,7 +30,8 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
   config.hotbarSlot = normalizeHotbarSlot(config.hotbarSlot);
   config.minMonsters = positiveInt(config.minMonsters, 4);
   config.cooldownMs = nonNegativeInt(config.cooldownMs, 2000);
-  config.scanMs = Math.max(100, positiveInt(config.scanMs, 250));
+  config.scanMs = Math.max(100, positiveInt(config.scanMs, 150));
+  if (config.scanMs === 250) config.scanMs = 150;
   config.maxRange = Math.min(7, positiveInt(config.maxRange, 7));
   config.respectTargetFilters = config.respectTargetFilters !== false;
 
@@ -186,7 +187,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     if (Object.prototype.hasOwnProperty.call(nextConfig, "hotbarSlot")) nextConfig.hotbarSlot = normalizeHotbarSlot(nextConfig.hotbarSlot);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "minMonsters")) nextConfig.minMonsters = positiveInt(nextConfig.minMonsters, config.minMonsters || 4);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "cooldownMs")) nextConfig.cooldownMs = nonNegativeInt(nextConfig.cooldownMs, config.cooldownMs || 2000);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "scanMs")) nextConfig.scanMs = Math.max(100, positiveInt(nextConfig.scanMs, config.scanMs || 250));
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "scanMs")) nextConfig.scanMs = Math.max(100, positiveInt(nextConfig.scanMs, config.scanMs || 150));
     if (Object.prototype.hasOwnProperty.call(nextConfig, "maxRange")) nextConfig.maxRange = Math.min(7, positiveInt(nextConfig.maxRange, config.maxRange || 7));
     if (Object.prototype.hasOwnProperty.call(nextConfig, "respectTargetFilters")) nextConfig.respectTargetFilters = nextConfig.respectTargetFilters !== false;
     Object.assign(config, nextConfig); persistConfig();
