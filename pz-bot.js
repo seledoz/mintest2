@@ -60,6 +60,42 @@
     "src/modules/profiles.js",
   ];
 
+  function purgeLegacyCaveWaitDelay() {
+    const waitButton = document.getElementById("minibia-bot-cave-wait-add");
+    const waitInput = document.getElementById("minibia-bot-cave-wait-minutes");
+    const waitStatus = document.getElementById("minibia-bot-cave-wait-status");
+    const waitRow = waitButton?.closest?.(".mb-row") || waitInput?.closest?.(".mb-row") || waitStatus?.closest?.(".mb-row");
+    if (waitRow) waitRow.remove();
+    else {
+      waitButton?.remove();
+      waitInput?.remove();
+      waitStatus?.remove();
+    }
+
+    try { window.minibiaBot?.storage?.set?.("minibiaBot.cave.waitDelays", {}); } catch (_) {}
+    try { delete window.__minibiaCaveWaitDelayInstalled; } catch (_) { window.__minibiaCaveWaitDelayInstalled = false; }
+
+    const pathfinder = window.gameClient?.world?.pathfinder;
+    if (!pathfinder || typeof pathfinder.findPath !== "function") return;
+    let findPath = pathfinder.findPath;
+    for (let depth = 0; depth < 8; depth += 1) {
+      if (findPath?.__minibiaCaveWaitGuard && typeof findPath.__minibiaWaitBaseFindPath === "function") {
+        findPath = findPath.__minibiaWaitBaseFindPath;
+        continue;
+      }
+      if (findPath?.__minibiaWaitDelayGuard && typeof findPath.__minibiaWaitDelayOriginal === "function") {
+        findPath = findPath.__minibiaWaitDelayOriginal;
+        continue;
+      }
+      if (findPath?.__minibiaCaveWaitGuard && typeof findPath.__originalFindPath === "function") {
+        findPath = findPath.__originalFindPath;
+        continue;
+      }
+      break;
+    }
+    if (findPath !== pathfinder.findPath) pathfinder.findPath = findPath;
+  }
+
   function installUiCompatibilityShim() {
     if (document.__minNewUiCompatibilityShimInstalled) return;
     const originalGetElementById = document.getElementById.bind(document);
@@ -154,6 +190,7 @@
       ensureLeftCollapseButton();
       removePanelDebugSection();
       removePanicRunnerSection();
+      purgeLegacyCaveWaitDelay();
       attempts += 1;
       if (attempts >= 20) window.clearInterval(timerId);
     }, 250);
@@ -214,13 +251,16 @@
   }
 
   async function load() {
+    purgeLegacyCaveWaitDelay();
     if (window.minibiaBot?.destroy) {
       try { window.minibiaBot.destroy(); } catch (error) { console.warn("[minibia-bot] Existing bot cleanup failed", error); }
     }
+    purgeLegacyCaveWaitDelay();
     installUiCompatibilityShim();
     delete window.__minibiaBotBundle;
     window.__minibiaBotBundle = {};
     for (const path of sourceFiles) await loadSourceFile(path);
+    purgeLegacyCaveWaitDelay();
     keepPanelTitleBlank();
     console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);
   }
