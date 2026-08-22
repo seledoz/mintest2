@@ -98,7 +98,10 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
 
   function getChannels() {
     const manager = window.gameClient?.interface?.channelManager;
-    return Array.from(manager?.channels || manager?.channelList || []);
+    return Array.from(manager?.channels || manager?.channelList || []).filter((channel) => {
+      const channelName = String(channel?.name || channel?.title || channel?.label || channel?.type || "").trim();
+      return channelName === "Default";
+    });
   }
 
   function getChannelEntries(channel) {
