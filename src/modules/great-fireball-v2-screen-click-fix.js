@@ -3,6 +3,7 @@
   let installedBot = null;
   let originalClickHotbar = null;
   let pendingClickId = null;
+  let lastGfbCastAt = 0;
   let lastFireballCastAt = 0;
 
   function getGameCanvas() {
@@ -63,6 +64,7 @@
     if (!bot?.clickHotbar || !bot?.greatFireballV2 || !bot?.fireball || bot === installedBot) return false;
     if (installedBot && originalClickHotbar && installedBot.clickHotbar !== originalClickHotbar) installedBot.clickHotbar = originalClickHotbar;
     installedBot = bot;
+    lastGfbCastAt = 0;
     lastFireballCastAt = 0;
     originalClickHotbar = bot.clickHotbar.bind(bot);
     bot.clickHotbar = (...args) => {
@@ -73,7 +75,16 @@
       const gfbRunning = !!bot.greatFireballV2?.status?.().running;
       const fireballStatus = bot.fireball?.status?.() || null;
       const fireballRunning = !!fireballStatus?.running;
+      const isGfbSlot = gfbRunning && slotIndex === gfbSlotIndex;
       const isFireballSlot = fireballRunning && slotIndex === fireballSlotIndex;
+      if (isGfbSlot) {
+        const now = Date.now();
+        const cooldownMs = Math.max(0, Number(bot.greatFireballV2?.config?.cooldownMs) || 0);
+        if (lastGfbCastAt && now - lastGfbCastAt < cooldownMs) {
+          bot.logDebug?.("blocked GFB 2.0 cast during configured cooldown", { cooldownMs, remainingMs: Math.max(0, cooldownMs - (now - lastGfbCastAt)) });
+          return false;
+        }
+      }
       if (isFireballSlot) {
         const now = Date.now();
         const cooldownMs = Math.max(0, Number(bot.fireball?.config?.cooldownMs) || 0);
@@ -86,7 +97,7 @@
       if (!result) return result;
       let moduleName = null;
       let logName = null;
-      if (gfbRunning && slotIndex === gfbSlotIndex) { moduleName = "greatFireballV2"; logName = "great fireball 2.0"; }
+      if (isGfbSlot) { lastGfbCastAt = Date.now(); moduleName = "greatFireballV2"; logName = "great fireball 2.0"; }
       else if (isFireballSlot) { lastFireballCastAt = Date.now(); moduleName = "fireball"; logName = "fireball"; }
       if (moduleName) {
         if (pendingClickId != null) window.clearTimeout(pendingClickId);
@@ -97,6 +108,7 @@
     bot.addCleanup?.(() => {
       if (pendingClickId != null) window.clearTimeout(pendingClickId);
       pendingClickId = null;
+      lastGfbCastAt = 0;
       lastFireballCastAt = 0;
       if (bot.clickHotbar !== originalClickHotbar) bot.clickHotbar = originalClickHotbar;
       if (installedBot === bot) installedBot = null;
