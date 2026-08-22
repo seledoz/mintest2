@@ -37,6 +37,7 @@
     "src/modules/cave-forward-loop.js",
     "src/modules/cave-arrow-keys.js",
     "src/modules/cave-waypoint-actions.js",
+    "src/modules/cave-wait-delay.js",
     "src/modules/equip-ring.js",
     "src/modules/auto-eat.js",
     "src/modules/talk.js",
