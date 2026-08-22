@@ -5,7 +5,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   const exactNamesStorageKey = "minibiaBot.gmKillSwitch.exactNames";
   const RESPONDER_DELAY_MS = 2000;
   const RESPONDER_RESET_MS = 15000;
-  const GM_PAUSE_MS = 10000;
+  const GM_PAUSE_MS = 12000;
 
   const config = Object.assign(
     {
@@ -310,7 +310,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     if (snapshot.attack) bot.attack?.start?.();
     bot.ui?.refreshAutoAttackStatus?.();
     bot.ui?.refreshCaveStatus?.();
-    bot.log?.("GM pause resumed modules after 10 seconds", snapshot);
+    bot.log?.("GM pause resumed modules after 12 seconds", snapshot);
     return true;
   }
 
@@ -326,7 +326,16 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
 
     if (snapshot.cave) bot.cave?.stop?.({ persistEnabled: false });
     if (snapshot.attack) bot.attack?.stop?.({ persistEnabled: false });
-    const walkingStopped = forceStopWalkingOnce();
+    let walkingStopped = false;
+    try {
+      const setPathfindCache = window.gameClient?.world?.pathfinder?.setPathfindCache;
+      if (typeof setPathfindCache === "function") {
+        setPathfindCache.call(window.gameClient.world.pathfinder, null);
+        walkingStopped = true;
+      }
+    } catch (error) {
+      bot.log?.("GM pause failed to stop waypoint movement", { error: String(error) });
+    }
     bot.ui?.refreshAutoAttackStatus?.();
     bot.ui?.refreshCaveStatus?.();
 
@@ -485,7 +494,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
           </label>
           <label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-responder-enabled" /><span>Enable GM Responder</span></label>
           <label class="mb-field"><span class="mb-field-label">GM Auto Reply</span><textarea id="minibia-bot-gm-responder-message" placeholder="One reply after a GM speaks"></textarea></label>
-          <div class="mb-small-note">GM Pause force-stops walking, pauses Cavebot/Auto Attack for 10 seconds, then resumes only what was running. Responder replies once, then resets after 15 seconds.</div>
+          <div class="mb-small-note">GM Pause force-stops walking, pauses Cavebot/Auto Attack for 12 seconds, then resumes only what was running. Responder replies once, then resets after 15 seconds.</div>
         </div>
       `;
       githubSection.insertAdjacentElement("afterend", section);
@@ -509,7 +518,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     }
     if (responderToggle && responderToggle.dataset.gmBound !== "true") {
       responderToggle.dataset.gmBound = "true";
-      responderToggle.addEventListener("change", () => updateResponderConfig({ responderEnabled: responderToggle.checked }));
+      responderToggle.addEventListener("change", () => updateResponderConfig({ responderEnabled: responderToggle.checked));
     }
     if (responderMessage && responderMessage.dataset.gmBound !== "true") {
       responderMessage.dataset.gmBound = "true";
