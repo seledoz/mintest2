@@ -20,6 +20,8 @@
     suppressIndex: null,
     pathfinder: null,
     guardedFindPath: null,
+    waitTimerId: null,
+    cleanupAdded: false,
   };
 
   const bot = () => window.minibiaBot || null;
@@ -34,18 +36,33 @@
 
   function writeStore(value) {
     bot()?.storage?.set?.(STORAGE_KEY, value);
+    window.setTimeout(syncActivity, 0);
   }
 
   function getWaitDelays(name = presetName(), length = null) {
-    const routeLength = length == null ? (cave()?.getRoute?.().length || 0) : Math.max(0, Math.trunc(Number(length) || 0));
+    const routeLength = length == null
+      ? (cave()?.getRoute?.().length || 0)
+      : Math.max(0, Math.trunc(Number(length) || 0));
     const saved = readStore()[String(name || "Default")] || [];
     return Array.from({ length: routeLength }, (_, index) => Math.max(0, Number(saved[index]) || 0));
   }
 
+  function hasConfiguredWaitDelays() {
+    const c = cave();
+    const route = c?.getRoute?.() || [];
+    if (!route.length) return false;
+    return getWaitDelays(undefined, route.length).some((minutes) => minutes > 0);
+  }
+
   function setWaitDelays(delays, name = presetName(), length = null) {
-    const routeLength = length == null ? (cave()?.getRoute?.().length || 0) : Math.max(0, Math.trunc(Number(length) || 0));
+    const routeLength = length == null
+      ? (cave()?.getRoute?.().length || 0)
+      : Math.max(0, Math.trunc(Number(length) || 0));
     const store = readStore();
-    store[String(name || "Default")] = Array.from({ length: routeLength }, (_, index) => Math.max(0, Number(delays?.[index]) || 0));
+    store[String(name || "Default")] = Array.from(
+      { length: routeLength },
+      (_, index) => Math.max(0, Number(delays?.[index]) || 0)
+    );
     writeStore(store);
     return store[String(name || "Default")].slice();
   }
@@ -71,9 +88,13 @@
     return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
   }
 
-  function restoreOldGuard() {
-    const pf = state.pathfinder || window.gameClient?.world?.pathfinder;
-    if (pf && pf.findPath === state.guardedFindPath && typeof state.guardedFindPath?.__minibiaWaitBaseFindPath === "function") {
+  function restorePathGuard() {
+    const pf = state.pathfinder;
+    if (
+      pf &&
+      pf.findPath === state.guardedFindPath &&
+      typeof state.guardedFindPath?.__minibiaWaitBaseFindPath === "function"
+    ) {
       pf.findPath = state.guardedFindPath.__minibiaWaitBaseFindPath;
     }
     state.pathfinder = null;
@@ -81,12 +102,12 @@
   }
 
   function installPathGuard() {
+    if (!state.active) return false;
     const pf = window.gameClient?.world?.pathfinder;
     if (!pf || typeof pf.findPath !== "function") return false;
 
     if (pf === state.pathfinder && pf.findPath === state.guardedFindPath) return true;
-
-    if (state.pathfinder && state.pathfinder !== pf) restoreOldGuard();
+    if (state.pathfinder && state.pathfinder !== pf) restorePathGuard();
 
     const current = pf.findPath;
     if (current?.__minibiaCaveWaitGuard) {
@@ -100,13 +121,27 @@
       if (state.active) return null;
       return baseFindPath.apply(this, args);
     };
-
     guarded.__minibiaCaveWaitGuard = true;
     guarded.__minibiaWaitBaseFindPath = baseFindPath;
     pf.findPath = guarded;
     state.pathfinder = pf;
     state.guardedFindPath = guarded;
     return true;
+  }
+
+  function stopCurrentMovement() {
+    try { window.gameClient?.world?.pathfinder?.setPathfindCache?.(null); } catch (_) {}
+    const targets = [
+      window.gameClient?.world?.pathfinder,
+      window.gameClient?.player,
+      window.gameClient?.world,
+    ].filter(Boolean);
+    ["stop", "cancel", "clear", "clearPath", "stopWalking", "cancelWalking", "stopAutoWalk", "reset"].forEach((name) => {
+      targets.forEach((target) => {
+        if (typeof target?.[name] !== "function") return;
+        try { target[name](); } catch (_) {}
+      });
+    });
   }
 
   function beginWait(index, minutes) {
@@ -116,7 +151,7 @@
     state.minutes = minutes;
     state.until = Date.now() + Math.round(minutes * 60000);
     state.suppressIndex = index;
-    try { window.gameClient?.world?.pathfinder?.setPathfindCache?.(null); } catch (_) {}
+    stopCurrentMovement();
     installPathGuard();
     statusText(`Wait delay: ${remainingText(state.until - Date.now())} remaining`);
     bot()?.log?.("cave wait delay started", { waypoint: index + 1, minutes });
@@ -130,6 +165,7 @@
     state.index = -1;
     state.minutes = 0;
     state.until = 0;
+    restorePathGuard();
     statusText("Wait delay: finished");
     bot()?.log?.("cave wait delay finished", { waypoint: done.index + 1, minutes: done.minutes });
   }
@@ -139,11 +175,42 @@
     return Math.abs(Number(a.x) - Number(b.x)) + Math.abs(Number(a.y) - Number(b.y));
   }
 
+  function stopWaitTimer() {
+    if (state.waitTimerId != null) {
+      window.clearInterval(state.waitTimerId);
+      state.waitTimerId = null;
+    }
+  }
+
+  function syncActivity() {
+    const configured = hasConfiguredWaitDelays();
+    if (!configured && !state.active) {
+      stopWaitTimer();
+      restorePathGuard();
+      state.lastIndex = null;
+      state.lastRoute = [];
+      state.suppressIndex = null;
+      statusText("Wait delay: idle");
+      return false;
+    }
+
+    if (state.waitTimerId == null) {
+      state.waitTimerId = window.setInterval(tick, 50);
+    }
+    return true;
+  }
+
   function tick() {
     const c = cave();
     if (!c?.status || !c?.getRoute) return;
-    installPathGuard();
+
+    if (!state.active && !hasConfiguredWaitDelays()) {
+      syncActivity();
+      return;
+    }
+
     if (state.active) {
+      installPathGuard();
       if (Date.now() >= state.until) finishWait();
       else statusText(`Wait delay: ${remainingText(state.until - Date.now())} remaining`);
       return;
@@ -151,17 +218,20 @@
 
     const status = c.status();
     const route = c.getRoute() || [];
-    const index = Math.max(0, Math.min(Math.max(0, route.length - 1), Math.trunc(Number(status?.currentIndex) || 0)));
-    const position = bot()?.getPlayerPosition?.();
-    const tolerance = Math.max(1, Math.trunc(Number(status?.config?.waypointTolerance) || 1));
-    const delays = getWaitDelays(undefined, route.length);
-
     if (!status?.running || !route.length) {
-      state.lastIndex = index;
+      state.lastIndex = null;
       state.lastRoute = route;
       statusText("Wait delay: idle");
       return;
     }
+
+    const index = Math.max(
+      0,
+      Math.min(Math.max(0, route.length - 1), Math.trunc(Number(status?.currentIndex) || 0))
+    );
+    const position = bot()?.getPlayerPosition?.();
+    const tolerance = Math.max(1, Math.trunc(Number(status?.config?.waypointTolerance) || 1));
+    const delays = getWaitDelays(undefined, route.length);
 
     if (state.suppressIndex != null && index !== state.suppressIndex) state.suppressIndex = null;
     const currentDelay = delays[index] || 0;
@@ -171,7 +241,13 @@
       const oldIndex = state.lastIndex;
       const oldWaypoint = state.lastRoute[oldIndex] || route[oldIndex];
       const oldDelay = delays[oldIndex] || 0;
-      if (oldDelay > 0 && distance(position, oldWaypoint) <= tolerance + 1 && state.suppressIndex !== oldIndex) beginWait(oldIndex, oldDelay);
+      if (
+        oldDelay > 0 &&
+        distance(position, oldWaypoint) <= tolerance + 1 &&
+        state.suppressIndex !== oldIndex
+      ) {
+        beginWait(oldIndex, oldDelay);
+      }
     }
 
     state.lastIndex = index;
@@ -188,19 +264,64 @@
     const savePreset = c.savePreset?.bind(c);
     const createPreset = c.createPreset?.bind(c);
     const deletePreset = c.deletePreset?.bind(c);
+    const loadPreset = c.loadPreset?.bind(c);
 
-    if (add) c.addWaypoint = (...args) => { const before = c.getRoute?.().length || 0; const result = add(...args); if (result) setWaitDelays(getWaitDelays(undefined, before), undefined, c.getRoute?.().length || 0); return result; };
-    if (addHere) c.addWaypointCurrentSpot = (...args) => { const before = c.getRoute?.().length || 0; const result = addHere(...args); if (result) setWaitDelays(getWaitDelays(undefined, before), undefined, c.getRoute?.().length || 0); return result; };
-    if (remove) c.removeLastWaypoint = (...args) => { const delays = getWaitDelays(); const result = remove(...args); if (result) setWaitDelays(delays.slice(0, -1)); return result; };
-    if (clear) c.clearWaypoints = (...args) => { const result = clear(...args); setWaitDelays([]); return result; };
-    if (savePreset) c.savePreset = (name, ...args) => { const delays = getWaitDelays(); const result = savePreset(name, ...args); if (result?.name) setWaitDelays(delays, result.name, result.route?.length ?? c.getRoute?.().length ?? 0); return result; };
-    if (createPreset) c.createPreset = (...args) => { const result = createPreset(...args); if (result?.name) setWaitDelays([], result.name, 0); return result; };
-    if (deletePreset) c.deletePreset = (name, ...args) => { const result = deletePreset(name, ...args); if (result) { const store = readStore(); delete store[String(name || "Default")]; writeStore(store); } return result; };
+    if (add) c.addWaypoint = (...args) => {
+      const before = c.getRoute?.().length || 0;
+      const result = add(...args);
+      if (result) setWaitDelays(getWaitDelays(undefined, before), undefined, c.getRoute?.().length || 0);
+      return result;
+    };
+    if (addHere) c.addWaypointCurrentSpot = (...args) => {
+      const before = c.getRoute?.().length || 0;
+      const result = addHere(...args);
+      if (result) setWaitDelays(getWaitDelays(undefined, before), undefined, c.getRoute?.().length || 0);
+      return result;
+    };
+    if (remove) c.removeLastWaypoint = (...args) => {
+      const delays = getWaitDelays();
+      const result = remove(...args);
+      if (result) setWaitDelays(delays.slice(0, -1));
+      return result;
+    };
+    if (clear) c.clearWaypoints = (...args) => {
+      const result = clear(...args);
+      setWaitDelays([]);
+      return result;
+    };
+    if (savePreset) c.savePreset = (name, ...args) => {
+      const delays = getWaitDelays();
+      const result = savePreset(name, ...args);
+      if (result?.name) {
+        setWaitDelays(delays, result.name, result.route?.length ?? c.getRoute?.().length ?? 0);
+      }
+      return result;
+    };
+    if (createPreset) c.createPreset = (...args) => {
+      const result = createPreset(...args);
+      if (result?.name) setWaitDelays([], result.name, 0);
+      return result;
+    };
+    if (deletePreset) c.deletePreset = (name, ...args) => {
+      const result = deletePreset(name, ...args);
+      if (result) {
+        const store = readStore();
+        delete store[String(name || "Default")];
+        writeStore(store);
+      }
+      return result;
+    };
+    if (loadPreset) c.loadPreset = (...args) => {
+      const result = loadPreset(...args);
+      window.setTimeout(syncActivity, 0);
+      return result;
+    };
 
     c.getWaitDelays = getWaitDelays;
     c.setWaitDelays = setWaitDelays;
     c.setLastWaitDelay = setLastWaitDelay;
     c.__minuteWaitWrapped = true;
+    window.setTimeout(syncActivity, 0);
     return true;
   }
 
@@ -222,10 +343,28 @@
     return true;
   }
 
-  function encodePath(path) { return String(path || "").split("/").map(encodeURIComponent).join("/"); }
-  function token() { return String(library()?.getToken?.() || "").trim(); }
-  function headers(value) { return { Authorization: `Bearer ${value}`, Accept: "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28", "Content-Type": "application/json" }; }
-  function scriptPath(name) { const clean = String(name || "waypoints").trim().replace(/\.json$/i, "").replace(/[^a-z0-9 _.-]/gi, "").replace(/\s+/g, " ") || "waypoints"; return `waypoints/${clean}.json`; }
+  function encodePath(path) {
+    return String(path || "").split("/").map(encodeURIComponent).join("/");
+  }
+  function token() {
+    return String(library()?.getToken?.() || "").trim();
+  }
+  function headers(value) {
+    return {
+      Authorization: `Bearer ${value}`,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "Content-Type": "application/json",
+    };
+  }
+  function scriptPath(name) {
+    const clean = String(name || "waypoints")
+      .trim()
+      .replace(/\.json$/i, "")
+      .replace(/[^a-z0-9 _.-]/gi, "")
+      .replace(/\s+/g, " ") || "waypoints";
+    return `waypoints/${clean}.json`;
+  }
 
   async function saveGithub(name) {
     const c = cave();
@@ -237,15 +376,34 @@
     const route = c.getRoute?.() || [];
     if (!route.length) throw new Error("No waypoints to save");
     const delays = getWaitDelays(undefined, route.length);
-    const savedRoute = route.map((point, index) => delays[index] > 0 ? { x: point.x, y: point.y, z: point.z, waitMinutes: delays[index] } : { x: point.x, y: point.y, z: point.z });
+    const savedRoute = route.map((point, index) => delays[index] > 0
+      ? { x: point.x, y: point.y, z: point.z, waitMinutes: delays[index] }
+      : { x: point.x, y: point.y, z: point.z });
     const path = scriptPath(scriptName);
     let sha = null;
-    const read = await fetch(`${API_BASE}/${encodePath(path)}?ref=${BRANCH}`, { headers: headers(auth), cache: "no-store" });
+    const read = await fetch(`${API_BASE}/${encodePath(path)}?ref=${BRANCH}`, {
+      headers: headers(auth),
+      cache: "no-store",
+    });
     if (read.ok) sha = (await read.json())?.sha || null;
     else if (read.status !== 404) throw new Error(`GitHub read failed: HTTP ${read.status}`);
-    const body = { message: `Save waypoint script: ${scriptName}`, content: btoa(unescape(encodeURIComponent(JSON.stringify({ version: 2, name: scriptName, updatedAt: new Date().toISOString(), route: savedRoute, transitions: c.getTransitions?.() || [] }, null, 2) + "\n"))), branch: BRANCH };
+    const body = {
+      message: `Save waypoint script: ${scriptName}`,
+      content: btoa(unescape(encodeURIComponent(JSON.stringify({
+        version: 2,
+        name: scriptName,
+        updatedAt: new Date().toISOString(),
+        route: savedRoute,
+        transitions: c.getTransitions?.() || [],
+      }, null, 2) + "\n"))),
+      branch: BRANCH,
+    };
     if (sha) body.sha = sha;
-    const write = await fetch(`${API_BASE}/${encodePath(path)}`, { method: "PUT", headers: headers(auth), body: JSON.stringify(body) });
+    const write = await fetch(`${API_BASE}/${encodePath(path)}`, {
+      method: "PUT",
+      headers: headers(auth),
+      body: JSON.stringify(body),
+    });
     if (!write.ok) throw new Error(`GitHub save failed: HTTP ${write.status}`);
     c.savePreset?.(scriptName);
     return { name: scriptName, route: savedRoute, path };
@@ -259,31 +417,50 @@
     if (!path) throw new Error("Choose a script to load");
     if (!path.includes("/") || !/\.json$/i.test(path)) {
       const scripts = await lib.listScripts?.() || [];
-      const match = scripts.find((entry) => entry.path === path || String(entry.name || "").toLowerCase() === path.toLowerCase());
+      const match = scripts.find((entry) =>
+        entry.path === path || String(entry.name || "").toLowerCase() === path.toLowerCase()
+      );
       path = match?.path || scriptPath(path);
     }
     const response = await fetch(`${RAW_BASE}/${encodePath(path)}?t=${Date.now()}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`GitHub load failed: HTTP ${response.status}`);
     const raw = await response.json();
     const rawRoute = Array.isArray(raw?.route) ? raw.route : [];
-    const route = rawRoute.map((p) => ({ x: Math.trunc(Number(p.x)), y: Math.trunc(Number(p.y)), z: Math.trunc(Number(p.z)) })).filter((p) => [p.x,p.y,p.z].every(Number.isFinite));
+    const route = rawRoute
+      .map((p) => ({
+        x: Math.trunc(Number(p.x)),
+        y: Math.trunc(Number(p.y)),
+        z: Math.trunc(Number(p.z)),
+      }))
+      .filter((p) => [p.x, p.y, p.z].every(Number.isFinite));
     const delays = rawRoute.map((p) => Math.max(0, Number(p?.waitMinutes) || 0)).slice(0, route.length);
     if (!route.length) throw new Error("Script has no waypoints");
-    c.stop?.(); c.clearWaypoints?.(); c.clearTransitions?.(); route.forEach((p) => c.addWaypoint?.(p));
+    c.stop?.();
+    c.clearWaypoints?.();
+    c.clearTransitions?.();
+    route.forEach((p) => c.addWaypoint?.(p));
     const scriptName = String(raw?.name || path.split("/").pop()?.replace(/\.json$/i, "") || "Default");
     setWaitDelays(delays, scriptName, route.length);
-    c.savePreset?.(scriptName); c.loadPreset?.(scriptName); setWaitDelays(delays, scriptName, route.length);
+    c.savePreset?.(scriptName);
+    c.loadPreset?.(scriptName);
+    setWaitDelays(delays, scriptName, route.length);
+    syncActivity();
     return { name: scriptName, route, path };
   }
 
   async function captureGithub(event) {
-    const target = event.target?.closest?.("#minibia-bot-github-waypoints-save, #minibia-bot-github-waypoints-load");
+    const target = event.target?.closest?.(
+      "#minibia-bot-github-waypoints-save, #minibia-bot-github-waypoints-load"
+    );
     if (!target || !library()) return;
-    event.preventDefault(); event.stopImmediatePropagation();
+    event.preventDefault();
+    event.stopImmediatePropagation();
     const nameInput = document.getElementById("minibia-bot-github-waypoints-name");
     const select = document.getElementById("minibia-bot-github-waypoints-select");
     const ghStatus = document.getElementById("minibia-bot-github-waypoints-status");
-    const setGh = (text) => { if (ghStatus) ghStatus.textContent = `GitHub: ${text}`; };
+    const setGh = (text) => {
+      if (ghStatus) ghStatus.textContent = `GitHub: ${text}`;
+    };
     target.disabled = true;
     try {
       if (target.id === "minibia-bot-github-waypoints-save") {
@@ -300,25 +477,41 @@
       }
     } catch (error) {
       setGh(error?.message || String(error));
-    } finally { target.disabled = false; }
+    } finally {
+      target.disabled = false;
+    }
   }
 
-  restoreOldGuard();
-  document.addEventListener("click", captureGithub, true);
-  const installTimer = window.setInterval(() => { wrapCave(); injectControls(); installPathGuard(); }, 250);
-  const waitTimer = window.setInterval(tick, 50);
-
-  const cleanupTimer = window.setInterval(() => {
+  function installCleanup() {
     const b = bot();
-    if (!b?.addCleanup || b.__minuteWaitCleanupAdded) return;
-    b.__minuteWaitCleanupAdded = true;
+    if (!b?.addCleanup || state.cleanupAdded) return false;
+    state.cleanupAdded = true;
     b.addCleanup(() => {
-      window.clearInterval(installTimer);
-      window.clearInterval(waitTimer);
-      window.clearInterval(cleanupTimer);
+      stopWaitTimer();
+      restorePathGuard();
       document.removeEventListener("click", captureGithub, true);
-      restoreOldGuard();
       window.__minibiaCaveWaitDelayInstalled = false;
     });
-  }, 250);
+    return true;
+  }
+
+  restorePathGuard();
+  document.addEventListener("click", captureGithub, true);
+
+  let bootstrapTimerId = null;
+  function bootstrap() {
+    const wrapped = wrapCave();
+    const controls = injectControls();
+    const cleanup = installCleanup();
+    syncActivity();
+    if (wrapped && controls && cleanup && bootstrapTimerId != null) {
+      window.clearInterval(bootstrapTimerId);
+      bootstrapTimerId = null;
+    }
+  }
+
+  bootstrap();
+  if (!wrapCave() || !injectControls() || !installCleanup()) {
+    bootstrapTimerId = window.setInterval(bootstrap, 250);
+  }
 })();
