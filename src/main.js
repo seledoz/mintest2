@@ -137,6 +137,11 @@
       if (resumeSnapshot.greatFireballV2) bot.greatFireballV2.stop({ persistEnabled: false });
       if (resumeSnapshot.attack) bot.attack.stop({ persistEnabled: false });
       if (resumeSnapshot.cave || bot.cave?.status?.().running) bot.cave.stop({ persistEnabled: false });
+      try {
+        window.gameClient?.world?.pathfinder?.setPathfindCache?.(null);
+      } catch (error) {
+        bot.logDebug?.("Pause/Break failed to stop waypoint movement", { error: error?.message || error });
+      }
       paused = true;
       updatePanelState();
       bot.log("Pause/Break paused Cavebot, Auto Attack, GFB, Fireball, and Lure Mode", { ...resumeSnapshot });
