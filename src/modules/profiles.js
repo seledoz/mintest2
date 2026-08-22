@@ -29,29 +29,19 @@
     if (!element?.id || isProfileControl(element)) return false;
     if (element.disabled && element.type === "button") return false;
     if (element.tagName === "BUTTON") return false;
-    if (element.type === "button" || element.type === "submit" || element.type === "reset") return false;
+    if (["button", "submit", "reset"].includes(element.type)) return false;
     return element.matches("input, select, textarea");
   }
 
   function capturePanelControls() {
     const panel = document.getElementById("minibia-bot-panel");
     if (!panel) throw new Error("Bot panel was not found");
-
     const controls = {};
     panel.querySelectorAll("input, select, textarea").forEach((element) => {
       if (!isSavableControl(element)) return;
-
-      if (element.type === "checkbox" || element.type === "radio") {
-        controls[element.id] = {
-          kind: element.type,
-          checked: !!element.checked,
-        };
-      } else {
-        controls[element.id] = {
-          kind: element.tagName.toLowerCase(),
-          value: String(element.value ?? ""),
-        };
-      }
+      controls[element.id] = (element.type === "checkbox" || element.type === "radio")
+        ? { kind: element.type, checked: !!element.checked }
+        : { kind: element.tagName.toLowerCase(), value: String(element.value ?? "") };
     });
     return controls;
   }
@@ -72,47 +62,35 @@
     const bot = window.minibiaBot;
     const fireballConfig = bot?.fireball?.status?.()?.config || bot?.fireball?.config;
     return {
-      fireball: fireballConfig && typeof fireballConfig === "object"
-        ? { ...fireballConfig }
-        : null,
+      fireball: fireballConfig && typeof fireballConfig === "object" ? { ...fireballConfig } : null,
     };
   }
 
   function restoreModuleLists(lists) {
     if (!lists || typeof lists !== "object") return { restored: 0, missing: 0 };
-
     const bot = window.minibiaBot;
     let restored = 0;
     let missing = 0;
-
     if (Array.isArray(lists.attackPriorityCreatureNames)) {
       if (typeof bot?.attackPriority?.setNames === "function") {
         bot.attackPriority.setNames(lists.attackPriorityCreatureNames);
         restored += 1;
-      } else {
-        missing += 1;
-      }
+      } else missing += 1;
     }
-
     if (Array.isArray(lists.attackExcludeCreatureNames)) {
       if (typeof bot?.attackExclude?.setNames === "function") {
         bot.attackExclude.setNames(lists.attackExcludeCreatureNames);
         restored += 1;
-      } else {
-        missing += 1;
-      }
+      } else missing += 1;
     }
-
     return { restored, missing };
   }
 
   function restoreModuleConfigs(configs) {
     if (!configs || typeof configs !== "object") return { restored: 0, missing: 0 };
-
     const bot = window.minibiaBot;
     let restored = 0;
     let missing = 0;
-
     if (configs.fireball && typeof configs.fireball === "object") {
       if (typeof bot?.fireball?.updateConfig === "function") {
         const fireballConfig = { ...configs.fireball };
@@ -122,11 +100,8 @@
         if (enabled) bot.fireball.start?.();
         else bot.fireball.stop?.();
         restored += 1;
-      } else {
-        missing += 1;
-      }
+      } else missing += 1;
     }
-
     return { restored, missing };
   }
 
@@ -140,8 +115,6 @@
     let restored = 0;
     let missing = 0;
 
-    // Restore all values first so modules receive their complete configuration
-    // before enabled checkboxes are applied.
     entries.forEach(([id, saved]) => {
       if (saved?.kind === "checkbox" || saved?.kind === "radio") return;
       const element = document.getElementById(id);
@@ -154,8 +127,6 @@
       restored += 1;
     });
 
-    // Apply on/off states last. Existing change handlers start or stop modules
-    // exactly as if the user clicked each checkbox manually.
     entries.forEach(([id, saved]) => {
       if (saved?.kind !== "checkbox" && saved?.kind !== "radio") return;
       const element = document.getElementById(id);
@@ -171,6 +142,45 @@
     return { restored, missing };
   }
 
+  function savedChecked(controls, id) {
+    const saved = controls?.[id];
+    return saved && (saved.kind === "checkbox" || saved.kind === "radio")
+      ? !!saved.checked
+      : null;
+  }
+
+  function reconcileCombatRuntime(controls) {
+    const bot = window.minibiaBot;
+    if (!bot) return;
+
+    const autoTargetV2Enabled = savedChecked(controls, "minibia-bot-auto-target-v2-enabled");
+    const autoAttackEnabled = savedChecked(controls, "minibia-bot-auto-attack-enabled");
+    const highestHpEnabled = savedChecked(controls, "minibia-bot-auto-attack-highest-hp");
+
+    if (typeof highestHpEnabled === "boolean" && typeof bot.attackPriority?.updateConfig === "function") {
+      bot.attackPriority.updateConfig({ highestHpEnabled });
+    }
+
+    if (typeof autoTargetV2Enabled === "boolean" && bot.autoTargetV2) {
+      if (autoTargetV2Enabled) bot.autoTargetV2.start?.();
+      else bot.autoTargetV2.stop?.();
+    } else if (typeof autoAttackEnabled === "boolean" && bot.attack) {
+      if (autoAttackEnabled) bot.attack.start?.();
+      else bot.attack.stop?.();
+    }
+
+    if (typeof highestHpEnabled === "boolean" && typeof bot.attackPriority?.updateConfig === "function") {
+      bot.attackPriority.updateConfig({ highestHpEnabled });
+      if (highestHpEnabled) bot.attackPriority.trySelectPriorityTarget?.();
+    }
+  }
+
+  function scheduleCombatRuntimeReconcile(controls) {
+    reconcileCombatRuntime(controls);
+    window.setTimeout(() => reconcileCombatRuntime(controls), 100);
+    window.setTimeout(() => reconcileCombatRuntime(controls), 500);
+  }
+
   function findCaveSection(panel) {
     const knownControl =
       document.getElementById("minibia-bot-cave-status") ||
@@ -179,7 +189,6 @@
       document.getElementById("minibia-bot-cave-preset-select");
     const knownSection = knownControl?.closest?.(".mb-section");
     if (knownSection) return knownSection;
-
     const label = Array.from(panel.querySelectorAll(".mb-label")).find((element) =>
       String(element.textContent || "").trim().toLowerCase() === "cavebot"
     );
@@ -194,7 +203,6 @@
   function refreshPanel(preferredSelection = "") {
     const select = document.getElementById("minibia-bot-profile-select");
     if (!select) return;
-
     const names = profileNames();
     const active = window.localStorage.getItem(ACTIVE_KEY) || "";
     const current = preferredSelection || select.value;
@@ -224,20 +232,12 @@
   function saveProfile(name, mustBeNew = false) {
     const normalized = String(name || "").trim();
     if (!normalized) throw new Error("Profile name is required");
-
     const profiles = readProfiles();
     if (mustBeNew && profiles[normalized]) throw new Error(`Profile “${normalized}” already exists`);
-
     const controls = capturePanelControls();
     const lists = captureModuleLists();
     const moduleConfigs = captureModuleConfigs();
-    profiles[normalized] = {
-      name: normalized,
-      savedAt: new Date().toISOString(),
-      controls,
-      lists,
-      moduleConfigs,
-    };
+    profiles[normalized] = { name: normalized, savedAt: new Date().toISOString(), controls, lists, moduleConfigs };
     writeProfiles(profiles);
     window.localStorage.setItem(ACTIVE_KEY, normalized);
     refreshPanel(normalized);
@@ -256,6 +256,8 @@
     const controlResult = applyPanelControls(profile.controls);
     const listResult = restoreModuleLists(profile.lists);
     const moduleConfigResult = restoreModuleConfigs(profile.moduleConfigs);
+    scheduleCombatRuntimeReconcile(profile.controls);
+
     const result = {
       restored: controlResult.restored,
       missing: controlResult.missing,
@@ -274,12 +276,9 @@
     const normalized = String(name || "").trim();
     const profiles = readProfiles();
     if (!profiles[normalized]) return false;
-
     delete profiles[normalized];
     writeProfiles(profiles);
-    if (window.localStorage.getItem(ACTIVE_KEY) === normalized) {
-      window.localStorage.removeItem(ACTIVE_KEY);
-    }
+    if (window.localStorage.getItem(ACTIVE_KEY) === normalized) window.localStorage.removeItem(ACTIVE_KEY);
     refreshPanel();
     return true;
   }
@@ -312,12 +311,10 @@
       section.querySelector("#minibia-bot-profile-new").addEventListener("click", () => {
         const name = window.prompt("New profile name:")?.trim();
         if (!name) return;
-        try { saveProfile(name, true); }
-        catch (error) { window.alert(error?.message || String(error)); }
+        try { saveProfile(name, true); } catch (error) { window.alert(error?.message || String(error)); }
       });
       section.querySelector("#minibia-bot-profile-save").addEventListener("click", () => {
-        try { saveProfile(select.value); }
-        catch (error) { window.alert(error?.message || String(error)); }
+        try { saveProfile(select.value); } catch (error) { window.alert(error?.message || String(error)); }
       });
       section.querySelector("#minibia-bot-profile-load").addEventListener("click", () => {
         try { loadProfile(select.value); }
@@ -333,9 +330,7 @@
       select.addEventListener("change", () => refreshPanel(select.value));
     }
 
-    if (caveSection.nextElementSibling !== section) {
-      caveSection.insertAdjacentElement("afterend", section);
-    }
+    if (caveSection.nextElementSibling !== section) caveSection.insertAdjacentElement("afterend", section);
     section.hidden = false;
     section.style.display = "";
     refreshPanel();
