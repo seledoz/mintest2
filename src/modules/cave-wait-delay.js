@@ -72,24 +72,37 @@
   }
 
   function restoreOldGuard() {
-    const pf = window.gameClient?.world?.pathfinder;
-    const current = pf?.findPath;
-    if (pf && current?.__minibiaCaveWaitGuard && typeof current.__originalFindPath === "function") {
-      pf.findPath = current.__originalFindPath;
+    const pf = state.pathfinder || window.gameClient?.world?.pathfinder;
+    if (pf && pf.findPath === state.guardedFindPath && typeof state.guardedFindPath?.__minibiaWaitBaseFindPath === "function") {
+      pf.findPath = state.guardedFindPath.__minibiaWaitBaseFindPath;
     }
+    state.pathfinder = null;
+    state.guardedFindPath = null;
   }
 
   function installPathGuard() {
     const pf = window.gameClient?.world?.pathfinder;
     if (!pf || typeof pf.findPath !== "function") return false;
+
     if (pf === state.pathfinder && pf.findPath === state.guardedFindPath) return true;
+
+    if (state.pathfinder && state.pathfinder !== pf) restoreOldGuard();
+
     const current = pf.findPath;
-    const original = current?.__minibiaCaveWaitGuard && typeof current.__originalFindPath === "function"
-      ? current.__originalFindPath
-      : current.bind(pf);
-    const guarded = (...args) => state.active ? null : original(...args);
+    if (current?.__minibiaCaveWaitGuard) {
+      state.pathfinder = pf;
+      state.guardedFindPath = current;
+      return true;
+    }
+
+    const baseFindPath = current;
+    const guarded = function caveWaitGuard(...args) {
+      if (state.active) return null;
+      return baseFindPath.apply(this, args);
+    };
+
     guarded.__minibiaCaveWaitGuard = true;
-    guarded.__originalFindPath = original;
+    guarded.__minibiaWaitBaseFindPath = baseFindPath;
     pf.findPath = guarded;
     state.pathfinder = pf;
     state.guardedFindPath = guarded;
