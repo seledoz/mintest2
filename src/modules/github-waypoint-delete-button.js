@@ -65,13 +65,13 @@
     return true;
   }
 
-  function hideWaypointActions() {
+  function removeWaypointActions() {
     const select = document.getElementById("minibia-bot-cave-waypoint-action");
-    if (!select) return false;
+    if (!select) return true;
     const wrapper = select.closest("label.mb-field") || select.parentElement;
-    if (wrapper) wrapper.style.display = "none";
-    else select.style.display = "none";
-    return true;
+    if (wrapper) wrapper.remove();
+    else select.remove();
+    return !document.getElementById("minibia-bot-cave-waypoint-action");
   }
 
   function injectWaypointWaitButton() {
@@ -86,13 +86,15 @@
     return true;
   }
 
-  injectDeleteButton(); injectWaypointWaitButton(); hideWaypointActions();
+  removeWaypointActions();
+  injectDeleteButton();
+  injectWaypointWaitButton();
   let attempts = 0;
   const timer = window.setInterval(() => {
     attempts += 1;
+    removeWaypointActions();
     const deleteReady = injectDeleteButton();
     const waitReady = injectWaypointWaitButton();
-    const actionsHidden = hideWaypointActions();
-    if ((deleteReady && waitReady && actionsHidden) || attempts >= 80) window.clearInterval(timer);
+    if ((deleteReady && waitReady) || attempts >= 80) window.clearInterval(timer);
   }, 250);
 })();
