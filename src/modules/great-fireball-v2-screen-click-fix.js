@@ -3,6 +3,7 @@
   let installedBot = null;
   let originalClickHotbar = null;
   let pendingClickId = null;
+  let pendingModuleName = null;
   let lastGfbCastAt = 0;
   let lastFireballCastAt = 0;
   let lastFireballV2CastAt = 0;
@@ -60,6 +61,20 @@
     return clicked;
   }
 
+  function scheduleScreenClick(bot, moduleName, logName) {
+    if (pendingClickId != null) {
+      if (pendingModuleName === moduleName) return true;
+      window.clearTimeout(pendingClickId);
+    }
+    pendingModuleName = moduleName;
+    pendingClickId = window.setTimeout(() => {
+      pendingClickId = null;
+      pendingModuleName = null;
+      clickBestTile(bot, moduleName, logName);
+    }, clickDelayMs);
+    return true;
+  }
+
   function install() {
     const bot = window.minibiaBot;
     if (!bot?.clickHotbar || !bot?.greatFireballV2 || !bot?.fireball || !bot?.fireballV2 || bot === installedBot) return false;
@@ -68,6 +83,7 @@
     lastGfbCastAt = 0;
     lastFireballCastAt = 0;
     lastFireballV2CastAt = 0;
+    pendingModuleName = null;
     originalClickHotbar = bot.clickHotbar.bind(bot);
     bot.clickHotbar = (...args) => {
       const slotIndex = Number(args[0]);
@@ -81,6 +97,19 @@
       const isGfbSlot = gfbRunning && slotIndex === gfbSlotIndex;
       const isFireballSlot = fireballRunning && slotIndex === fireballSlotIndex;
       const isFireballV2Slot = fireballV2Running && slotIndex === fireballV2SlotIndex;
+
+      if (isFireballV2Slot) {
+        if (pendingClickId != null && pendingModuleName === "fireballV2") {
+          bot.logDebug?.("blocked duplicate Fireball 2.0 hotbar click while screen shot is pending");
+          return false;
+        }
+        const now = Date.now();
+        const cooldownMs = Math.max(0, Number(bot.fireballV2?.config?.cooldownMs) || 0);
+        if (lastFireballV2CastAt && now - lastFireballV2CastAt < cooldownMs) {
+          bot.logDebug?.("blocked Fireball 2.0 cast during configured cooldown", { cooldownMs, remainingMs: Math.max(0, cooldownMs - (now - lastFireballV2CastAt)) });
+          return false;
+        }
+      }
       if (isGfbSlot) {
         const now = Date.now();
         const cooldownMs = Math.max(0, Number(bot.greatFireballV2?.config?.cooldownMs) || 0);
@@ -89,7 +118,7 @@
           return false;
         }
       }
-      if (isFireballSlot) {
+      if (isFireballSlot && !isFireballV2Slot) {
         const now = Date.now();
         const cooldownMs = Math.max(0, Number(bot.fireball?.config?.cooldownMs) || 0);
         if (lastFireballCastAt && now - lastFireballCastAt < cooldownMs) {
@@ -97,34 +126,31 @@
           return false;
         }
       }
-      if (isFireballV2Slot) {
-        const now = Date.now();
-        const cooldownMs = Math.max(0, Number(bot.fireballV2?.config?.cooldownMs) || 0);
-        if (lastFireballV2CastAt && now - lastFireballV2CastAt < cooldownMs) {
-          bot.logDebug?.("blocked Fireball 2.0 cast during configured cooldown", { cooldownMs, remainingMs: Math.max(0, cooldownMs - (now - lastFireballV2CastAt)) });
-          return false;
-        }
-      }
+
       const result = originalClickHotbar(...args);
       if (!result) return result;
-      let moduleName = null;
-      let logName = null;
-      if (isGfbSlot) { lastGfbCastAt = Date.now(); moduleName = "greatFireballV2"; logName = "great fireball 2.0"; }
-      else if (isFireballV2Slot && !isFireballSlot) { lastFireballV2CastAt = Date.now(); moduleName = "fireballV2"; logName = "fireball 2.0"; }
-      else if (isFireballSlot) { lastFireballCastAt = Date.now(); moduleName = "fireball"; logName = "fireball"; }
-      else if (isFireballV2Slot) { lastFireballV2CastAt = Date.now(); moduleName = "fireballV2"; logName = "fireball 2.0"; }
-      if (moduleName) {
-        if (pendingClickId != null) window.clearTimeout(pendingClickId);
-        pendingClickId = window.setTimeout(() => { pendingClickId = null; clickBestTile(bot, moduleName, logName); }, clickDelayMs);
+
+      if (isGfbSlot) {
+        lastGfbCastAt = Date.now();
+        scheduleScreenClick(bot, "greatFireballV2", "great fireball 2.0");
+      } else if (isFireballV2Slot) {
+        lastFireballV2CastAt = Date.now();
+        scheduleScreenClick(bot, "fireballV2", "fireball 2.0");
+      } else if (isFireballSlot) {
+        lastFireballCastAt = Date.now();
+        scheduleScreenClick(bot, "fireball", "fireball");
       }
       return result;
     };
+    bot.__fireballScreenClickHelperInstalled = true;
     bot.addCleanup?.(() => {
       if (pendingClickId != null) window.clearTimeout(pendingClickId);
       pendingClickId = null;
+      pendingModuleName = null;
       lastGfbCastAt = 0;
       lastFireballCastAt = 0;
       lastFireballV2CastAt = 0;
+      bot.__fireballScreenClickHelperInstalled = false;
       if (bot.clickHotbar !== originalClickHotbar) bot.clickHotbar = originalClickHotbar;
       if (installedBot === bot) installedBot = null;
     });
