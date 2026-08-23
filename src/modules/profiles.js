@@ -61,8 +61,10 @@
   function captureModuleConfigs() {
     const bot = window.minibiaBot;
     const fireballConfig = bot?.fireball?.status?.()?.config || bot?.fireball?.config;
+    const fireballV2Config = bot?.fireballV2?.status?.()?.config || bot?.fireballV2?.config;
     return {
       fireball: fireballConfig && typeof fireballConfig === "object" ? { ...fireballConfig } : null,
+      fireballV2: fireballV2Config && typeof fireballV2Config === "object" ? { ...fireballV2Config } : null,
     };
   }
 
@@ -86,21 +88,30 @@
     return { restored, missing };
   }
 
+  function restoreSingleModuleConfig(module, savedConfig) {
+    if (!savedConfig || typeof savedConfig !== "object") return false;
+    if (typeof module?.updateConfig !== "function") return false;
+    const nextConfig = { ...savedConfig };
+    const enabled = !!nextConfig.enabled;
+    delete nextConfig.enabled;
+    module.updateConfig(nextConfig);
+    if (enabled) module.start?.();
+    else module.stop?.();
+    return true;
+  }
+
   function restoreModuleConfigs(configs) {
     if (!configs || typeof configs !== "object") return { restored: 0, missing: 0 };
     const bot = window.minibiaBot;
     let restored = 0;
     let missing = 0;
     if (configs.fireball && typeof configs.fireball === "object") {
-      if (typeof bot?.fireball?.updateConfig === "function") {
-        const fireballConfig = { ...configs.fireball };
-        const enabled = !!fireballConfig.enabled;
-        delete fireballConfig.enabled;
-        bot.fireball.updateConfig(fireballConfig);
-        if (enabled) bot.fireball.start?.();
-        else bot.fireball.stop?.();
-        restored += 1;
-      } else missing += 1;
+      if (restoreSingleModuleConfig(bot?.fireball, configs.fireball)) restored += 1;
+      else missing += 1;
+    }
+    if (configs.fireballV2 && typeof configs.fireballV2 === "object") {
+      if (restoreSingleModuleConfig(bot?.fireballV2, configs.fireballV2)) restored += 1;
+      else missing += 1;
     }
     return { restored, missing };
   }
@@ -241,7 +252,7 @@
     writeProfiles(profiles);
     window.localStorage.setItem(ACTIVE_KEY, normalized);
     refreshPanel(normalized);
-    updateStatus(`Saved profile: ${normalized} (${Object.keys(controls).length} controls + priority/exclude lists + Fireball settings)`);
+    updateStatus(`Saved profile: ${normalized} (${Object.keys(controls).length} controls + priority/exclude lists + Fireball/Fireball 2.0 settings)`);
     return profiles[normalized];
   }
 
