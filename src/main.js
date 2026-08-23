@@ -13,6 +13,7 @@
     ["attackAoe", "minibiaBot.attackAoe.config"],
     ["greatFireballV2", "minibiaBot.greatFireballV2.config"],
     ["fireball", "minibiaBot.fireball.config"],
+    ["fireballV2", "minibiaBot.fireballV2.config"],
     ["lureMode", "minibiaBot.lure.config"],
     ["attackExclude", "minibiaBot.attackExclude.config"],
     ["attackPriority", "minibiaBot.attackPriority.config"],
@@ -71,7 +72,6 @@
       debugSection.remove();
       return true;
     }
-
     const labels = Array.from(document.querySelectorAll("#minibia-bot-panel .mb-label"));
     const debugLabel = labels.find((label) => String(label.textContent || "").trim().toLowerCase() === "debug");
     debugLabel?.closest?.(".mb-section")?.remove();
@@ -83,21 +83,16 @@
     const placeControl = () => {
       const githubSection = document.getElementById("minibia-bot-github-waypoints-section");
       if (!githubSection) return false;
-
       const gmModule = bot.gmDefaultChatKillSwitch;
       if (typeof gmModule?.injectPanelControl === "function") {
         gmModule.injectPanelControl();
         const section = document.getElementById("minibia-bot-gm-kill-switch-section");
         if (!section) return false;
-        if (githubSection.nextElementSibling !== section) {
-          githubSection.insertAdjacentElement("afterend", section);
-        }
+        if (githubSection.nextElementSibling !== section) githubSection.insertAdjacentElement("afterend", section);
         return !!section.querySelector("#minibia-bot-gm-pause-enabled");
       }
-
       return false;
     };
-
     if (placeControl()) return;
     const timerId = window.setInterval(() => {
       attempts += 1;
@@ -108,7 +103,7 @@
 
   function installPauseBreakToggle(bot) {
     let paused = false;
-    let resumeSnapshot = { cave: false, attack: false, greatFireballV2: false, fireball: false, lureMode: false };
+    let resumeSnapshot = { cave: false, attack: false, greatFireballV2: false, fireball: false, fireballV2: false, lureMode: false };
 
     function isTypingTarget(target) {
       if (!(target instanceof Element)) return false;
@@ -120,7 +115,7 @@
       if (!panel) return;
       panel.dataset.pauseBreakPaused = paused ? "true" : "false";
       panel.style.outline = paused ? "3px solid #d93025" : "";
-      panel.title = paused ? "PAUSED — press Pause/Break to resume Cavebot, Auto Attack, GFB, Fireball, and Lure Mode" : "";
+      panel.title = paused ? "PAUSED — press Pause/Break to resume Cavebot, Auto Attack, GFB, Fireball, Fireball 2.0, and Lure Mode" : "";
     }
 
     function pause() {
@@ -130,16 +125,18 @@
         attack: !!bot.attack?.status?.().running,
         greatFireballV2: !!bot.greatFireballV2?.status?.().running,
         fireball: !!bot.fireball?.status?.().running,
+        fireballV2: !!bot.fireballV2?.status?.().running,
         lureMode: !!bot.lureMode?.status?.().running,
       };
       if (resumeSnapshot.lureMode) bot.lureMode.stop({ persistEnabled: false });
+      if (resumeSnapshot.fireballV2) bot.fireballV2.stop({ persistEnabled: false });
       if (resumeSnapshot.fireball) bot.fireball.stop({ persistEnabled: false });
       if (resumeSnapshot.greatFireballV2) bot.greatFireballV2.stop({ persistEnabled: false });
       if (resumeSnapshot.attack) bot.attack.stop({ persistEnabled: false });
       if (resumeSnapshot.cave || bot.cave?.status?.().running) bot.cave.stop({ persistEnabled: false });
       paused = true;
       updatePanelState();
-      bot.log("Pause/Break paused Cavebot, Auto Attack, GFB, Fireball, and Lure Mode", { ...resumeSnapshot });
+      bot.log("Pause/Break paused Cavebot, Auto Attack, GFB, Fireball, Fireball 2.0, and Lure Mode", { ...resumeSnapshot });
       return true;
     }
 
@@ -147,14 +144,15 @@
       if (!paused) return false;
       const snapshot = { ...resumeSnapshot };
       paused = false;
-      resumeSnapshot = { cave: false, attack: false, greatFireballV2: false, fireball: false, lureMode: false };
+      resumeSnapshot = { cave: false, attack: false, greatFireballV2: false, fireball: false, fireballV2: false, lureMode: false };
       if (snapshot.cave) bot.cave?.start?.();
       if (snapshot.attack) bot.attack?.start?.();
       if (snapshot.greatFireballV2) bot.greatFireballV2?.start?.();
       if (snapshot.fireball) bot.fireball?.start?.();
+      if (snapshot.fireballV2) bot.fireballV2?.start?.();
       if (snapshot.lureMode) bot.lureMode?.start?.();
       updatePanelState();
-      bot.log("Pause/Break resumed Cavebot, Auto Attack, GFB, Fireball, and Lure Mode", snapshot);
+      bot.log("Pause/Break resumed Cavebot, Auto Attack, GFB, Fireball, Fireball 2.0, and Lure Mode", snapshot);
       return true;
     }
 
@@ -178,78 +176,12 @@
     const originalStart = bot.cave.start.bind(bot.cave);
     const originalStop = bot.cave.stop.bind(bot.cave);
     const state = { pending: null, restoreCount: 0, lastRestoreAt: 0 };
-
-    function getLureMode() {
-      const lureStatus = bot.lureMode?.status?.() || null;
-      return Number(lureStatus?.config?.mode) === 2 ? 2 : 1;
-    }
-
-    function lureOwnsCave() {
-      const lureStatus = bot.lureMode?.status?.() || null;
-      if (!lureStatus?.running) return false;
-      const mode = getLureMode();
-      if (mode === 2) return !!lureStatus?.mode2?.active;
-      return !!lureStatus?.clearingPack;
-    }
-
-    function snapshotProgress() {
-      const caveStatus = bot.cave.status();
-      const routeLength = Array.isArray(caveStatus?.route) ? caveStatus.route.length : 0;
-      if (!caveStatus?.running || routeLength <= 0) return null;
-      return {
-        currentIndex: Math.max(0, Math.min(routeLength - 1, Math.trunc(Number(caveStatus.currentIndex) || 0))),
-        direction: Number(caveStatus.direction) < 0 ? -1 : 1,
-        routeLength,
-        waypoint: caveStatus.currentWaypoint ? { ...caveStatus.currentWaypoint } : null,
-        capturedAt: Date.now(),
-      };
-    }
-
-    function stopCurrentMovement() {
-      const targets = [window.gameClient?.world?.pathfinder, window.gameClient?.player, window.gameClient?.world].filter(Boolean);
-      ["stop", "cancel", "clear", "clearPath", "stopWalking", "cancelWalking", "stopAutoWalk", "reset"].forEach((name) => {
-        targets.forEach((target) => {
-          if (typeof target?.[name] !== "function") return;
-          try { target[name](); } catch (_) {}
-        });
-      });
-    }
-
-    bot.cave.stop = function lureAwareCaveStop(options = {}) {
-      if (lureOwnsCave()) {
-        const snapshot = snapshotProgress();
-        if (snapshot) {
-          state.pending = snapshot;
-          bot.log?.("lure preserved cave waypoint before takeover", { index: snapshot.currentIndex + 1, direction: snapshot.direction, routeLength: snapshot.routeLength, waypoint: snapshot.waypoint });
-        }
-        if (getLureMode() === 1 && bot.cave.status()?.running) {
-          stopCurrentMovement();
-          return true;
-        }
-      }
-      return originalStop(options);
-    };
-
-    bot.cave.start = function lureAwareCaveStart(...args) {
-      const pending = state.pending ? { ...state.pending } : null;
-      const alreadyRunning = !!bot.cave.status()?.running;
-      const result = alreadyRunning ? true : originalStart(...args);
-      if (!pending || !bot.cave.status()?.running) return result;
-      const currentStatus = bot.cave.status();
-      const routeLength = Array.isArray(currentStatus?.route) ? currentStatus.route.length : 0;
-      if (!routeLength) { state.pending = null; return result; }
-      const restoreIndex = Math.max(0, Math.min(routeLength - 1, pending.currentIndex));
-      bot.cave.setCurrentIndex(restoreIndex);
-      const restoredWaypoint = bot.cave.status()?.currentWaypoint || null;
-      stopCurrentMovement();
-      if (restoredWaypoint) { try { bot.cave.goToWaypoint?.(restoredWaypoint); } catch (_) {} }
-      state.pending = null;
-      state.restoreCount += 1;
-      state.lastRestoreAt = Date.now();
-      bot.log?.("lure restored cave waypoint after takeover", { index: restoreIndex + 1, directionBeforeLure: pending.direction, routeLength, waypoint: restoredWaypoint });
-      return result;
-    };
-
+    function getLureMode() { const lureStatus = bot.lureMode?.status?.() || null; return Number(lureStatus?.config?.mode) === 2 ? 2 : 1; }
+    function lureOwnsCave() { const lureStatus = bot.lureMode?.status?.() || null; if (!lureStatus?.running) return false; const mode = getLureMode(); return mode === 2 ? !!lureStatus?.mode2?.active : !!lureStatus?.clearingPack; }
+    function snapshotProgress() { const caveStatus = bot.cave.status(); const routeLength = Array.isArray(caveStatus?.route) ? caveStatus.route.length : 0; if (!caveStatus?.running || routeLength <= 0) return null; return { currentIndex: Math.max(0, Math.min(routeLength - 1, Math.trunc(Number(caveStatus.currentIndex) || 0))), direction: Number(caveStatus.direction) < 0 ? -1 : 1, routeLength, waypoint: caveStatus.currentWaypoint ? { ...caveStatus.currentWaypoint } : null, capturedAt: Date.now() }; }
+    function stopCurrentMovement() { const targets = [window.gameClient?.world?.pathfinder, window.gameClient?.player, window.gameClient?.world].filter(Boolean); ["stop", "cancel", "clear", "clearPath", "stopWalking", "cancelWalking", "stopAutoWalk", "reset"].forEach((name) => { targets.forEach((target) => { if (typeof target?.[name] !== "function") return; try { target[name](); } catch (_) {} }); }); }
+    bot.cave.stop = function lureAwareCaveStop(options = {}) { if (lureOwnsCave()) { const snapshot = snapshotProgress(); if (snapshot) { state.pending = snapshot; bot.log?.("lure preserved cave waypoint before takeover", { index: snapshot.currentIndex + 1, direction: snapshot.direction, routeLength: snapshot.routeLength, waypoint: snapshot.waypoint }); } if (getLureMode() === 1 && bot.cave.status()?.running) { stopCurrentMovement(); return true; } } return originalStop(options); };
+    bot.cave.start = function lureAwareCaveStart(...args) { const pending = state.pending ? { ...state.pending } : null; const alreadyRunning = !!bot.cave.status()?.running; const result = alreadyRunning ? true : originalStart(...args); if (!pending || !bot.cave.status()?.running) return result; const currentStatus = bot.cave.status(); const routeLength = Array.isArray(currentStatus?.route) ? currentStatus.route.length : 0; if (!routeLength) { state.pending = null; return result; } const restoreIndex = Math.max(0, Math.min(routeLength - 1, pending.currentIndex)); bot.cave.setCurrentIndex(restoreIndex); const restoredWaypoint = bot.cave.status()?.currentWaypoint || null; stopCurrentMovement(); if (restoredWaypoint) { try { bot.cave.goToWaypoint?.(restoredWaypoint); } catch (_) {} } state.pending = null; state.restoreCount += 1; state.lastRestoreAt = Date.now(); bot.log?.("lure restored cave waypoint after takeover", { index: restoreIndex + 1, directionBeforeLure: pending.direction, routeLength, waypoint: restoredWaypoint }); return result; };
     bot.lureCaveProgressPreserver = { status: () => ({ pending: state.pending ? { ...state.pending } : null, restoreCount: state.restoreCount, lastRestoreAt: state.lastRestoreAt }) };
     return bot.lureCaveProgressPreserver;
   }
@@ -300,6 +232,7 @@
     currentBundle.installAutoAttackPriorityModule?.(bot);
     currentBundle.installGreatFireballV2Module?.(bot);
     currentBundle.installFireballModule?.(bot);
+    currentBundle.installFireballV2Module?.(bot);
     currentBundle.installLureModeModule?.(bot);
     installPauseBreakToggle(bot);
     installLureCaveProgressPreserver(bot);
@@ -334,6 +267,7 @@
       attackAoe: bot.attackAoe?.status?.() || null,
       greatFireballV2: bot.greatFireballV2?.status?.() || null,
       fireball: bot.fireball?.status?.() || null,
+      fireballV2: bot.fireballV2?.status?.() || null,
       lureMode: bot.lureMode?.status?.() || null,
       redTextAlert: bot.redTextAlert?.status?.() || null,
       cave: bot.cave.status(),
@@ -357,7 +291,7 @@
       branch: bot.version.branch,
       commit: bot.version.commit,
       buildDate: bot.version.date,
-      modules: ["pz", "xray", "panic", "gmDefaultChatKillSwitch", "rune", "runeV2", "runeV3", "heal", "antiParalyze", "damageTtsAlert", "invisible", "magicShield", "attack", "attackExclude", "attackPriority", "attackAoe", "greatFireballV2", "fireball", "lureMode", "redTextAlert", "cave", "caveForwardLoop", "caveArrowKeys", "caveWaypointActions", "githubWaypointLibrary", "equipRing", "mining", "eat", "talk", "runeMakerDrop", "maxLight", "pauseBreak", "ui"],
+      modules: ["pz", "xray", "panic", "gmDefaultChatKillSwitch", "rune", "runeV2", "runeV3", "heal", "antiParalyze", "damageTtsAlert", "invisible", "magicShield", "attack", "attackExclude", "attackPriority", "attackAoe", "greatFireballV2", "fireball", "fireballV2", "lureMode", "redTextAlert", "cave", "caveForwardLoop", "caveArrowKeys", "caveWaypointActions", "githubWaypointLibrary", "equipRing", "mining", "eat", "talk", "runeMakerDrop", "maxLight", "pauseBreak", "ui"],
     });
     console.log("minibiaBot.reload()");
     console.log("minibiaBot.attackExclude.addName(\"monster name\")");
@@ -371,6 +305,8 @@
     console.log("minibiaBot.greatFireballV2.stop()");
     console.log("minibiaBot.fireball.start({ hotbarSlot: 8, minMonsters: 4 })");
     console.log("minibiaBot.fireball.stop()");
+    console.log("minibiaBot.fireballV2.start({ hotbarSlot: 8, minMonsters: 4 })");
+    console.log("minibiaBot.fireballV2.stop()");
     console.log("minibiaBot.lureMode.updateConfig({ enabled: true, minMonsters: 3, maxDistance: 4 })");
     console.log("minibiaBot.redTextAlert.start()");
     console.log("minibiaBot.redTextAlert.stop()");
