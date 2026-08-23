@@ -4,7 +4,7 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   const configStorageKey = "minibiaBot.gmKillSwitch.config";
   const exactNamesStorageKey = "minibiaBot.gmKillSwitch.exactNames";
   const RESPONDER_DELAY_MS = 2000;
-  const RESPONDER_RESET_MS = 15000;
+  const RESPONDER_RESET_MS = 30000;
   const GM_PAUSE_MS = 10000;
 
   const config = Object.assign(
@@ -346,7 +346,6 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   function handleGameMasterDetection(source, speaker, message = "", details = {}) {
     const responderScheduled = source === "chat" ? scheduleResponder(speaker, message) : false;
 
-    // Kill switch takes precedence when both safety modes are enabled.
     if (config.killSwitchEnabled) {
       return triggerKillSwitch(source, speaker, message, { responderScheduled, ...details });
     }
@@ -409,169 +408,140 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
     state.watcherRunning = true;
     rememberExistingEntries();
     tick();
-    bot.log?.("GM chat/visible watcher started", { exactNames: readExactNames() });
     return true;
   }
 
   function stopWatcher() {
-    if (!state.watcherRunning && state.timerId == null) return false;
     state.watcherRunning = false;
     if (state.timerId != null) window.clearTimeout(state.timerId);
     state.timerId = null;
+    if (state.pendingReplyTimerId != null) window.clearTimeout(state.pendingReplyTimerId);
+    state.pendingReplyTimerId = null;
+    state.responderPending = false;
+    state.responderLockedUntil = 0;
     state.visibleGmKey = null;
-    bot.log?.("GM chat/visible watcher stopped");
+    state.seenEntryKeys.clear();
     return true;
   }
 
   function syncWatcher() {
     if (shouldWatch()) startWatcher();
     else stopWatcher();
-    refreshPanelControls();
   }
 
-  function start() {
-    if (config.killSwitchEnabled) return false;
-    config.killSwitchEnabled = true;
-    persistConfig();
-    syncWatcher();
-    return true;
-  }
+  function ensurePanelControls() {
+    const panel = document.getElementById("k9x-panel");
+    if (!panel) return false;
 
-  function stop() {
-    if (!config.killSwitchEnabled) return false;
-    config.killSwitchEnabled = false;
-    persistConfig();
-    syncWatcher();
-    return true;
-  }
-
-  function setPauseEnabled(enabled) {
-    const next = !!enabled;
-    if (config.pauseEnabled === next) return false;
-    config.pauseEnabled = next;
-    persistConfig();
-    syncWatcher();
-    return true;
-  }
-
-  function updateResponderConfig(nextConfig = {}) {
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "responderEnabled")) config.responderEnabled = !!nextConfig.responderEnabled;
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "responderMessage")) config.responderMessage = String(nextConfig.responderMessage || "").trim();
-    persistConfig();
-    syncWatcher();
-    return { ...config };
-  }
-
-  function injectPanelControl() {
-    const githubSection = document.getElementById("minibia-bot-github-waypoints-section");
-    const panel = document.getElementById("minibia-bot-panel");
-    if (!panel || !githubSection) return false;
-
-    let section = document.getElementById("minibia-bot-gm-kill-switch-section");
-    if (!section || !section.querySelector("#minibia-bot-gm-exact-names") || !section.querySelector("#minibia-bot-gm-pause-enabled") || !section.querySelector("#minibia-bot-gm-responder-message")) {
-      section?.remove();
-      section = document.createElement("div");
-      section.className = "mb-section mb-column-section";
-      section.id = "minibia-bot-gm-kill-switch-section";
-      section.innerHTML = `
+    let killSwitchSection = document.getElementById("minibia-bot-gm-kill-switch-section");
+    if (!killSwitchSection) {
+      const anchor = panel.querySelector("#minibia-bot-xray-section, #minibia-bot-player-screen-alarm-section, #minibia-bot-mining-section");
+      killSwitchSection = document.createElement("div");
+      killSwitchSection.id = "minibia-bot-gm-kill-switch-section";
+      killSwitchSection.className = "mb-section mb-column-section";
+      killSwitchSection.innerHTML = `
         <div class="mb-label">GM Kill Switch</div>
         <div class="mb-stack">
           <label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-kill-switch-enabled" /><span>Enable GM Kill Switch</span></label>
           <label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-pause-enabled" /><span>GM Pause</span></label>
-          <label class="mb-field" id="minibia-bot-gm-exact-names-field">
-            <span class="mb-field-label">Exact GM Name(s)</span>
-            <textarea id="minibia-bot-gm-exact-names" placeholder="Enter the exact character name. One per line, or separate with commas."></textarea>
-            <span class="mb-small-note">Kill Switch and GM Pause trigger if this exact name appears on screen or sends a chat/private message. Matching ignores capital letters.</span>
-          </label>
-          <label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-responder-enabled" /><span>Enable GM Responder</span></label>
-          <label class="mb-field"><span class="mb-field-label">GM Auto Reply</span><textarea id="minibia-bot-gm-responder-message" placeholder="One reply after a GM speaks"></textarea></label>
-          <div class="mb-small-note">GM Pause force-stops walking, pauses Cavebot/Auto Attack for 10 seconds, then resumes only what was running. Responder replies once, then resets after 15 seconds.</div>
-        </div>
-      `;
-      githubSection.insertAdjacentElement("afterend", section);
-    } else if (githubSection.nextElementSibling !== section) {
-      githubSection.insertAdjacentElement("afterend", section);
+          <label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-responder-enabled" /><span>GM Auto Response</span></label>
+          <label>GM Response<input id="minibia-bot-gm-responder-message" type="text" placeholder="Message to send" /></label>
+          <label>Exact GM names<textarea id="minibia-bot-gm-exact-names" rows="3" placeholder="One exact name per line"></textarea></label>
+          <div class="mb-small-note">Kill switch: stop walking + stop Cavebot/Auto Attack. GM Pause: stop walking + pause Cavebot/Auto Attack for 10s. Auto Response: reply once after 2s, then reset after 30s. Exact-name matches work for visible players and chat/private messages.</div>
+        </div>`;
+      if (anchor?.parentNode) anchor.parentNode.insertBefore(killSwitchSection, anchor.nextSibling);
+      else (panel.querySelector(".mb-side-column") || panel.querySelector(".mb-main-column") || panel).appendChild(killSwitchSection);
     }
 
-    const killToggle = section.querySelector("#minibia-bot-gm-kill-switch-enabled");
-    const pauseToggle = section.querySelector("#minibia-bot-gm-pause-enabled");
-    const responderToggle = section.querySelector("#minibia-bot-gm-responder-enabled");
-    const responderMessage = section.querySelector("#minibia-bot-gm-responder-message");
-    const exactNamesInput = section.querySelector("#minibia-bot-gm-exact-names");
+    const killToggle = document.getElementById("minibia-bot-gm-kill-switch-enabled");
+    const pauseToggle = document.getElementById("minibia-bot-gm-pause-enabled");
+    const responderToggle = document.getElementById("minibia-bot-gm-responder-enabled");
+    const responderMessage = document.getElementById("minibia-bot-gm-responder-message");
+    const exactNamesInput = document.getElementById("minibia-bot-gm-exact-names");
 
-    if (killToggle && killToggle.dataset.gmBound !== "true") {
-      killToggle.dataset.gmBound = "true";
-      killToggle.addEventListener("change", () => killToggle.checked ? start() : stop());
+    if (killToggle && !killToggle.dataset.gmKillBound) {
+      killToggle.dataset.gmKillBound = "1";
+      killToggle.addEventListener("change", () => {
+        config.killSwitchEnabled = !!killToggle.checked;
+        persistConfig();
+        syncWatcher();
+        refreshPanelControls();
+      });
     }
-    if (pauseToggle && pauseToggle.dataset.gmBound !== "true") {
-      pauseToggle.dataset.gmBound = "true";
-      pauseToggle.addEventListener("change", () => setPauseEnabled(pauseToggle.checked));
+    if (pauseToggle && !pauseToggle.dataset.gmPauseBound) {
+      pauseToggle.dataset.gmPauseBound = "1";
+      pauseToggle.addEventListener("change", () => {
+        config.pauseEnabled = !!pauseToggle.checked;
+        persistConfig();
+        syncWatcher();
+        refreshPanelControls();
+      });
     }
-    if (responderToggle && responderToggle.dataset.gmBound !== "true") {
-      responderToggle.dataset.gmBound = "true";
-      responderToggle.addEventListener("change", () => updateResponderConfig({ responderEnabled: responderToggle.checked }));
+    if (responderToggle && !responderToggle.dataset.gmResponderBound) {
+      responderToggle.dataset.gmResponderBound = "1";
+      responderToggle.addEventListener("change", () => {
+        config.responderEnabled = !!responderToggle.checked;
+        persistConfig();
+        syncWatcher();
+        refreshPanelControls();
+      });
     }
-    if (responderMessage && responderMessage.dataset.gmBound !== "true") {
-      responderMessage.dataset.gmBound = "true";
-      const save = () => updateResponderConfig({ responderMessage: responderMessage.value });
-      responderMessage.addEventListener("input", save);
-      responderMessage.addEventListener("change", save);
-      responderMessage.addEventListener("blur", save);
+    if (responderMessage && !responderMessage.dataset.gmResponderMessageBound) {
+      responderMessage.dataset.gmResponderMessageBound = "1";
+      const saveResponderMessage = () => {
+        config.responderMessage = String(responderMessage.value || "").trim();
+        persistConfig();
+      };
+      responderMessage.addEventListener("change", saveResponderMessage);
+      responderMessage.addEventListener("blur", saveResponderMessage);
     }
-    if (exactNamesInput && exactNamesInput.dataset.gmBound !== "true") {
-      exactNamesInput.dataset.gmBound = "true";
-      const save = () => writeExactNames(exactNamesInput.value);
-      exactNamesInput.addEventListener("input", save);
-      exactNamesInput.addEventListener("change", save);
-      exactNamesInput.addEventListener("blur", save);
+    if (exactNamesInput && !exactNamesInput.dataset.gmNamesBound) {
+      exactNamesInput.dataset.gmNamesBound = "1";
+      const saveNames = () => writeExactNames(exactNamesInput.value);
+      exactNamesInput.addEventListener("change", saveNames);
+      exactNamesInput.addEventListener("blur", saveNames);
     }
 
     refreshPanelControls();
     return true;
   }
 
-  persistConfig();
-  bot.gmDefaultChatKillSwitch = {
-    start,
-    stop,
-    setPauseEnabled,
-    status: () => ({
-      running: !!config.killSwitchEnabled,
-      pauseEnabled: !!config.pauseEnabled,
-      pauseActive: state.pauseActive,
-      pauseResumeSnapshot: state.pauseResumeSnapshot ? { ...state.pauseResumeSnapshot } : null,
-      watcherRunning: state.watcherRunning,
-      responderPending: state.responderPending,
-      responderLockedUntil: state.responderLockedUntil,
-      exactNames: readExactNames(),
-      configuredGameMasterNames: getConfiguredGameMasterNames(),
-      config: { ...config },
-    }),
-    updateResponderConfig,
-    getExactNames: readExactNames,
-    setExactNames: writeExactNames,
-    injectPanelControl,
-  };
+  function startPanelWatcher() {
+    if (state.panelTimerId != null) return;
+    ensurePanelControls();
+    state.panelTimerId = window.setInterval(ensurePanelControls, 1000);
+  }
 
-  syncWatcher();
-  let attempts = 0;
-  state.panelTimerId = window.setInterval(() => {
-    attempts += 1;
-    if (injectPanelControl() || attempts >= 120) {
-      window.clearInterval(state.panelTimerId);
-      state.panelTimerId = null;
-    }
-  }, 250);
-
-  bot.addCleanup?.(() => {
+  function stopPanelWatcher() {
     if (state.panelTimerId != null) window.clearInterval(state.panelTimerId);
-    if (state.timerId != null) window.clearTimeout(state.timerId);
-    if (state.pendingReplyTimerId != null) window.clearTimeout(state.pendingReplyTimerId);
+    state.panelTimerId = null;
+  }
+
+  function destroy() {
+    stopWatcher();
+    stopPanelWatcher();
     if (state.pauseTimerId != null) window.clearTimeout(state.pauseTimerId);
-    state.pendingReplyTimerId = null;
     state.pauseTimerId = null;
-    state.responderPending = false;
     state.pauseActive = false;
     state.pauseResumeSnapshot = null;
-  });
+  }
+
+  bot.gmKillSwitch = {
+    get config() { return { ...config }; },
+    get exactNames() { return readExactNames(); },
+    setExactNames: writeExactNames,
+    startWatcher,
+    stopWatcher,
+    syncWatcher,
+    triggerKillSwitch,
+    triggerGmPause,
+    forceStopWalkingOnce,
+    destroy,
+  };
+
+  bot.addCleanup?.(destroy);
+  persistConfig();
+  startPanelWatcher();
+  syncWatcher();
+  return bot.gmKillSwitch;
 };
