@@ -97,6 +97,29 @@
     }
   }
 
+  function enforceBottomSectionOrder() {
+    const github = document.getElementById("minibia-bot-github-waypoints-section");
+    const gm = document.getElementById("minibia-bot-gm-kill-switch-section");
+    const mining = document.getElementById("minibia-bot-mining-section");
+    if (!github) return;
+
+    const column = github.parentElement;
+    if (!column) return;
+
+    if (gm) {
+      if (gm.parentElement !== column || github.nextElementSibling !== gm) {
+        github.insertAdjacentElement("afterend", gm);
+      }
+    }
+
+    if (mining) {
+      const anchor = gm && gm.parentElement === column ? gm : github;
+      if (mining.parentElement !== column || anchor.nextElementSibling !== mining) {
+        anchor.insertAdjacentElement("afterend", mining);
+      }
+    }
+  }
+
   function restoreLayout() {
     const bot = window.minibiaBot;
     const column = getFourthColumn();
@@ -110,6 +133,7 @@
     if (!lure) lure = makeLureSection(bot);
     if (lure.parentElement !== column) column.appendChild(lure);
     refreshLureUi(bot);
+    enforceBottomSectionOrder();
     return true;
   }
 
