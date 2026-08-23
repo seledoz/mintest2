@@ -121,6 +121,8 @@
   }
 
   function restoreLayout() {
+    enforceBottomSectionOrder();
+
     const bot = window.minibiaBot;
     const column = getFourthColumn();
     if (!bot || !column) return false;
