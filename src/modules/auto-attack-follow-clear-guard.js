@@ -84,10 +84,27 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
   function patch() {
     wrapFollowPacket();
-    wrapSend(window.gameClient);
+    const client = window.gameClient;
+    if (!client) return false;
+    wrapSend(client);
+    return !!(
+      window.FollowPacket?.__minibiaFollowClearGuardWrapped &&
+      client.__minibiaFollowClearGuardSendWrapped
+    );
   }
 
-  patch();
-  const timerId = window.setInterval(patch, 500);
+  if (patch()) {
+    window.__minibiaAutoAttackFollowClearGuardTimerId = null;
+    return;
+  }
+
+  let attempts = 0;
+  const timerId = window.setInterval(() => {
+    attempts += 1;
+    if (patch() || attempts >= 40) {
+      window.clearInterval(timerId);
+      window.__minibiaAutoAttackFollowClearGuardTimerId = null;
+    }
+  }, 500);
   window.__minibiaAutoAttackFollowClearGuardTimerId = timerId;
 })();
