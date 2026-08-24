@@ -63,14 +63,14 @@
       return;
     }
 
-    const tickMs = Math.max(100, Number(bot.attackKeepDistance?.status?.().config?.tickMs) || 200);
+    const tickMs = 300;
     if (pathingTimerId == null) {
       pathingTimerId = window.setInterval(() => bot.attackKeepDistance?.tick?.(), tickMs);
     }
     if (followGuardTimerId == null) {
       // The game can apply follow immediately after selecting an attack target.
       // This guard only runs while Keep Distance is enabled.
-      followGuardTimerId = window.setInterval(clearFollowTarget, 25);
+      followGuardTimerId = window.setInterval(clearFollowTarget, 100);
     }
   }
 
@@ -79,8 +79,6 @@
     else stopTimers();
   }
 
-  // External callers that toggle Keep Distance through the module API should
-  // immediately start/stop its recurring work.
   const originalUpdateConfig = bot.attackKeepDistance?.updateConfig?.bind(bot.attackKeepDistance);
   if (originalUpdateConfig) {
     bot.attackKeepDistance.updateConfig = (nextConfig = {}) => {
@@ -90,9 +88,6 @@
     };
   }
 
-  // The UI listener inside the base module closes over its private updateConfig,
-  // so add a second listener after installation to synchronize timers after the
-  // checkbox changes. The base listener was registered first.
   const enabledInput = document.getElementById("minibia-bot-auto-attack-keep-distance-enabled");
   const onEnabledChange = () => window.setTimeout(syncTimers, 0);
   enabledInput?.addEventListener("change", onEnabledChange);
