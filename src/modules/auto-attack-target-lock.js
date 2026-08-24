@@ -150,12 +150,28 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   function patch() {
     wrapTargetPacket();
     const client = window.gameClient;
-    if (!client) return;
+    if (!client) return false;
     wrapSend(client);
     wrapPlayerSetTarget(client.player);
+    return !!(
+      window.TargetPacket?.__minibiaTargetLockWrapped &&
+      client.__minibiaTargetLockSendWrapped &&
+      client.player?.__minibiaTargetLockSetTargetWrapped
+    );
   }
 
-  patch();
-  const timerId = window.setInterval(patch, 500);
+  if (patch()) {
+    window.__minibiaAutoAttackTargetLockTimerId = null;
+    return;
+  }
+
+  let attempts = 0;
+  const timerId = window.setInterval(() => {
+    attempts += 1;
+    if (patch() || attempts >= 40) {
+      window.clearInterval(timerId);
+      window.__minibiaAutoAttackTargetLockTimerId = null;
+    }
+  }, 500);
   window.__minibiaAutoAttackTargetLockTimerId = timerId;
 })();
