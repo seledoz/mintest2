@@ -6,7 +6,7 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
   const configStorageKey = "minibiaBot.fireball.config";
   const sectionId = "minibia-bot-fireball-section";
   const state = { running: false, timerId: null, uiTimerId: null, lastCastAt: 0, lastMonsterCount: 0, lastTargetName: "", lastTargetPosition: null, currentBest: null };
-  const config = Object.assign({ enabled: false, highestPriority: false, hotbarSlot: null, minMonsters: 4, cooldownMs: 2000, scanMs: 100, maxRange: 7, respectTargetFilters: true }, bot.storage.get(configStorageKey, {}) || {});
+  const config = Object.assign({ enabled: false, highestPriority: false, hotbarSlot: null, minMonsters: 4, cooldownMs: 2000, scanMs: 250, maxRange: 7, respectTargetFilters: true }, bot.storage.get(configStorageKey, {}) || {});
 
   function normalizeHotbarSlot(value) { const slot = Math.trunc(Number(value)); return Number.isFinite(slot) && slot >= 1 && slot <= 12 ? slot : null; }
   function positiveInt(value, fallback) { const number = Math.trunc(Number(value)); return Number.isFinite(number) && number > 0 ? number : fallback; }
@@ -30,7 +30,7 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
   config.hotbarSlot = normalizeHotbarSlot(config.hotbarSlot);
   config.minMonsters = positiveInt(config.minMonsters, 4);
   config.cooldownMs = nonNegativeInt(config.cooldownMs, 2000);
-  config.scanMs = Math.max(100, positiveInt(config.scanMs, 100));
+  config.scanMs = Math.max(250, positiveInt(config.scanMs, 250));
   config.maxRange = Math.min(7, positiveInt(config.maxRange, 7));
   config.respectTargetFilters = config.respectTargetFilters !== false;
 
@@ -215,7 +215,7 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
     if (Object.prototype.hasOwnProperty.call(nextConfig, "hotbarSlot")) nextConfig.hotbarSlot = normalizeHotbarSlot(nextConfig.hotbarSlot);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "minMonsters")) nextConfig.minMonsters = positiveInt(nextConfig.minMonsters, config.minMonsters || 4);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "cooldownMs")) nextConfig.cooldownMs = nonNegativeInt(nextConfig.cooldownMs, config.cooldownMs || 2000);
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "scanMs")) nextConfig.scanMs = Math.max(100, positiveInt(nextConfig.scanMs, config.scanMs || 100));
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "scanMs")) nextConfig.scanMs = Math.max(250, positiveInt(nextConfig.scanMs, config.scanMs || 250));
     if (Object.prototype.hasOwnProperty.call(nextConfig, "maxRange")) nextConfig.maxRange = Math.min(7, positiveInt(nextConfig.maxRange, config.maxRange || 7));
     if (Object.prototype.hasOwnProperty.call(nextConfig, "respectTargetFilters")) nextConfig.respectTargetFilters = nextConfig.respectTargetFilters !== false;
     Object.assign(config, nextConfig);
@@ -241,13 +241,11 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
     const gfbV2Section = document.getElementById("minibia-bot-gfb-v2-section");
     if (gfbV2Section?.parentElement) gfbV2Section.insertAdjacentElement("afterend", section);
     else aoeSection.querySelector(".mb-stack")?.appendChild(section);
-
     const enabled = section.querySelector("#minibia-bot-fireball-enabled");
     const priority = section.querySelector("#minibia-bot-fireball-highest-priority");
     const hotkey = section.querySelector("#minibia-bot-fireball-hotkey");
     const monsters = section.querySelector("#minibia-bot-fireball-monsters");
     const cooldown = section.querySelector("#minibia-bot-fireball-cooldown");
-
     enabled?.addEventListener("change", () => enabled.checked ? start() : stop());
     priority?.addEventListener("change", () => updateConfig({ highestPriority: priority.checked }));
     hotkey?.addEventListener("change", () => updateConfig({ hotbarSlot: hotkey.value }));
@@ -265,7 +263,6 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
     const cooldown = document.getElementById("minibia-bot-fireball-cooldown");
     const statusLabel = document.getElementById("minibia-bot-fireball-status");
     const best = state.running && config.enabled ? (state.currentBest || calculateBestCandidate()) : null;
-
     if (enabled) enabled.checked = !!state.running;
     if (priority) priority.checked = !!config.highestPriority;
     if (hotkey && document.activeElement !== hotkey) hotkey.value = config.hotbarSlot || "";
@@ -283,7 +280,6 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
   patchClickHotbar();
   bot.fireball = { start, stop, trigger, status, updateConfig, shouldReservePriority, getBestCandidate, evaluateAtPosition, getFireballTiles, destroy, config };
   bot.addCleanup(destroy);
-
   if (!ensureUi()) {
     let attempts = 0;
     state.uiTimerId = window.setInterval(() => {
@@ -295,7 +291,6 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
       }
     }, 250);
   }
-
   if (config.enabled) start();
   return bot.fireball;
 };
