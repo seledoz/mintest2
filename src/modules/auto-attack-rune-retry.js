@@ -1,5 +1,5 @@
 (() => {
-  const retryMs = 100;
+  const retryMs = 250;
   const globalKey = "__minibiaAutoAttackRuneRetry";
 
   const previous = window[globalKey];
@@ -50,8 +50,8 @@
     const attack = window.minibiaBot?.attack;
     if (!attack || attack.__runeRetryTimerWrapped) return !!attack;
 
-    // Keep the shared Auto Attack / Auto Target 2.0 scan loop at 200 ms.
-    attack.updateConfig?.({ tickMs: 200 });
+    // Keep the shared Auto Attack / Auto Target 2.0 scan loop at 250 ms.
+    attack.updateConfig?.({ tickMs: 250 });
 
     const originalStart = attack.start?.bind(attack);
     const originalStop = attack.stop?.bind(attack);
@@ -91,7 +91,7 @@
     const startupId = window.setInterval(() => {
       attempts += 1;
       if (install() || attempts >= 40) window.clearInterval(startupId);
-    }, 100);
+    }, 250);
   }
 
   window[globalKey] = state;
