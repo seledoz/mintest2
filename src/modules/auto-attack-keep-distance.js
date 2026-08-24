@@ -6,10 +6,11 @@ window.__minibiaBotBundle.installAutoAttackKeepDistanceModule = function install
     {
       enabled: false,
       distance: 3,
-      tickMs: 200,
+      tickMs: 300,
     },
     bot.storage.get(configStorageKey, {}) || {}
   );
+  config.tickMs = 300;
 
   const state = {
     timerId: null,
@@ -235,7 +236,7 @@ window.__minibiaBotBundle.installAutoAttackKeepDistanceModule = function install
       return false;
     }
     if (state.timerId == null) {
-      state.timerId = window.setInterval(tick, Math.max(100, Number(config.tickMs) || 200));
+      state.timerId = window.setInterval(tick, 300);
     }
     return true;
   }
@@ -247,7 +248,11 @@ window.__minibiaBotBundle.installAutoAttackKeepDistanceModule = function install
     if (Object.prototype.hasOwnProperty.call(nextConfig, "distance")) {
       nextConfig.distance = Math.max(1, Math.min(7, Math.trunc(Number(nextConfig.distance) || config.distance || 3)));
     }
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "tickMs")) {
+      nextConfig.tickMs = 300;
+    }
     Object.assign(config, nextConfig);
+    config.tickMs = 300;
     persistConfig();
     syncAttackMode();
     syncTimer();
