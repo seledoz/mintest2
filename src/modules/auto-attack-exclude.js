@@ -7,7 +7,6 @@ window.__minibiaBotBundle.installAutoAttackExcludeModule = function installAutoA
   const state = {
     installed: false,
     originalGetVisibleMonsters: null,
-    uiTimerId: null,
   };
 
   const config = Object.assign(
@@ -53,6 +52,16 @@ window.__minibiaBotBundle.installAutoAttackExcludeModule = function installAutoA
     }
   }
 
+  function clearCurrentTargetIfExcluded() {
+    const player = window.gameClient?.player;
+    const currentTarget = player?.__target || null;
+    if (!currentTarget || !isExcluded(currentTarget)) return false;
+    if (typeof window.gameClient?.send !== "function" || typeof TargetPacket !== "function") return false;
+    player.setTarget(null);
+    window.gameClient.send(new TargetPacket(0));
+    return true;
+  }
+
   function addName(name) {
     const normalized = normalizeName(name);
     if (!normalized) return false;
@@ -60,6 +69,7 @@ window.__minibiaBotBundle.installAutoAttackExcludeModule = function installAutoA
       config.excludedCreatureNames.push(normalized);
       config.excludedCreatureNames.sort();
       persistConfig();
+      clearCurrentTargetIfExcluded();
     }
     refreshUiValues();
     return true;
@@ -78,6 +88,7 @@ window.__minibiaBotBundle.installAutoAttackExcludeModule = function installAutoA
   function setNames(names) {
     config.excludedCreatureNames = normalizeNameList(names);
     persistConfig();
+    clearCurrentTargetIfExcluded();
     refreshUiValues();
     return [...config.excludedCreatureNames];
   }
@@ -90,6 +101,7 @@ window.__minibiaBotBundle.installAutoAttackExcludeModule = function installAutoA
       config.excludedCreatureNames = normalizeNameList(nextConfig.excludedCreatureNames);
     }
     persistConfig();
+    clearCurrentTargetIfExcluded();
     refreshUiValues();
     return { ...config };
   }
@@ -229,7 +241,6 @@ window.__minibiaBotBundle.installAutoAttackExcludeModule = function installAutoA
 
   function destroy() {
     uninstallFilter();
-    if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
     document.getElementById("minibia-bot-auto-attack-exclude-section")?.remove();
   }
 
@@ -247,7 +258,6 @@ window.__minibiaBotBundle.installAutoAttackExcludeModule = function installAutoA
   };
 
   installFilter();
-  state.uiTimerId = window.setInterval(() => { ensureUi(); refreshUiValues(); }, 1000);
   bot.addCleanup(destroy);
   ensureUi();
   return bot.attackExclude;
