@@ -64,38 +64,24 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     });
 
     for (const offset of offsets) {
-      const candidate = {
-        x: target.x + offset.x,
-        y: target.y + offset.y,
-        z: target.z,
-      };
+      const candidate = { x: target.x + offset.x, y: target.y + offset.y, z: target.z };
       const tile = getTile(candidate);
       if (!tile?.isWalkable?.()) continue;
       if (candidate.x === player.x && candidate.y === player.y) return candidate;
-
       try {
         const path = pathfinder.search(startTile, tile);
         if (Array.isArray(path) && path.length > 0) return candidate;
       } catch (error) {
-        bot.logDebug?.("auto target v2 reachability check failed", {
-          targetPosition: target,
-          candidate,
-          error: error?.message || error,
-        });
+        bot.logDebug?.("auto target v2 reachability check failed", { targetPosition: target, candidate, error: error?.message || error });
       }
     }
-
     return null;
   }
 
   function pruneCaches(now = Date.now()) {
-    for (const [id, entry] of state.unreachableTargets.entries()) {
-      if (!entry || entry.until <= now) state.unreachableTargets.delete(id);
-    }
+    for (const [id, entry] of state.unreachableTargets.entries()) if (!entry || entry.until <= now) state.unreachableTargets.delete(id);
     for (const [key, entry] of state.reachabilityCache.entries()) {
-      if (!entry || now - entry.at > Math.max(100, Number(config.reachabilityCacheMs) || 350)) {
-        state.reachabilityCache.delete(key);
-      }
+      if (!entry || now - entry.at > Math.max(100, Number(config.reachabilityCacheMs) || 350)) state.reachabilityCache.delete(key);
     }
   }
 
@@ -104,37 +90,20 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     const playerPosition = normalizePosition(bot.getPlayerPosition?.());
     const targetPosition = normalizePosition(monster?.getPosition?.() || monster?.__position);
     if (!playerPosition || !targetPosition || playerPosition.z !== targetPosition.z) return false;
-
     pruneCaches(now);
-
-    const targetKey = getPositionKey(targetPosition);
-    const playerKey = getPositionKey(playerPosition);
-    const id = monster?.id;
+    const targetKey = getPositionKey(targetPosition), playerKey = getPositionKey(playerPosition), id = monster?.id;
     const skipped = id != null ? state.unreachableTargets.get(id) : null;
     if (skipped && skipped.positionKey === targetKey && skipped.until > now) return false;
     if (skipped && skipped.positionKey !== targetKey) state.unreachableTargets.delete(id);
-
     const cacheKey = `${playerKey}|${id ?? "no-id"}|${targetKey}`;
     const cached = state.reachabilityCache.get(cacheKey);
-    if (cached && now - cached.at <= Math.max(100, Number(config.reachabilityCacheMs) || 350)) {
-      return cached.reachable;
-    }
-
+    if (cached && now - cached.at <= Math.max(100, Number(config.reachabilityCacheMs) || 350)) return cached.reachable;
     const reachable = !!findReachableAdjacentPosition(targetPosition, playerPosition);
     state.reachabilityCache.set(cacheKey, { reachable, at: now });
-
     if (!reachable && id != null) {
-      state.unreachableTargets.set(id, {
-        until: now + Math.max(500, Number(config.unreachableSkipMs) || 4000),
-        positionKey: targetKey,
-      });
-      bot.logDebug?.("auto target v2 filtered unreachable monster", {
-        id,
-        name: monster?.name || "Mob",
-        position: targetPosition,
-      });
+      state.unreachableTargets.set(id, { until: now + Math.max(500, Number(config.unreachableSkipMs) || 4000), positionKey: targetKey });
+      bot.logDebug?.("auto target v2 filtered unreachable monster", { id, name: monster?.name || "Mob", position: targetPosition });
     }
-
     return reachable;
   }
 
@@ -144,14 +113,11 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     return getter(options) || [];
   }
 
-  function getReachableCandidates(now = Date.now()) {
-    return getRawVisibleMonsters({ sameFloorOnly: true }).filter((monster) => isMonsterReachable(monster, now));
-  }
+  function getReachableCandidates(now = Date.now()) { return getRawVisibleMonsters({ sameFloorOnly: true }).filter((monster) => isMonsterReachable(monster, now)); }
 
   function installReachabilityFilter() {
     if (state.filterInstalled) return true;
     if (!bot.xray || typeof bot.xray.getVisibleMonsters !== "function") return false;
-
     state.originalGetVisibleMonsters = bot.xray.getVisibleMonsters.bind(bot.xray);
     bot.xray.getVisibleMonsters = function getVisibleMonstersWithAutoTargetV2Reachability(options = {}) {
       const monsters = state.originalGetVisibleMonsters(options) || [];
@@ -166,13 +132,8 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
 
   function uninstallReachabilityFilter() {
     if (!state.filterInstalled) return;
-    if (bot.xray && bot.xray.getVisibleMonsters?.__autoTargetV2ReachabilityFilter && state.originalGetVisibleMonsters) {
-      bot.xray.getVisibleMonsters = state.originalGetVisibleMonsters;
-    }
-    state.originalGetVisibleMonsters = null;
-    state.filterInstalled = false;
-    state.unreachableTargets.clear();
-    state.reachabilityCache.clear();
+    if (bot.xray && bot.xray.getVisibleMonsters?.__autoTargetV2ReachabilityFilter && state.originalGetVisibleMonsters) bot.xray.getVisibleMonsters = state.originalGetVisibleMonsters;
+    state.originalGetVisibleMonsters = null; state.filterInstalled = false; state.unreachableTargets.clear(); state.reachabilityCache.clear();
   }
 
   function syncUi() {
@@ -184,176 +145,78 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
 
   function startUiSync() {
     if (state.uiSyncTimerId != null) return;
-    state.uiSyncTimerId = window.setInterval(() => {
-      if (!state.running) return;
-      syncUi();
-    }, 100);
+    state.uiSyncTimerId = window.setInterval(() => { if (!state.running) return; syncUi(); }, 250);
   }
-
-  function stopUiSync() {
-    if (state.uiSyncTimerId != null) window.clearInterval(state.uiSyncTimerId);
-    state.uiSyncTimerId = null;
-  }
+  function stopUiSync() { if (state.uiSyncTimerId != null) window.clearInterval(state.uiSyncTimerId); state.uiSyncTimerId = null; }
 
   function withOriginalToggleHidden(callback) {
     const v1Toggle = document.getElementById("minibia-bot-auto-attack-enabled");
     const v1Label = v1Toggle?.closest?.("label") || null;
     const previousVisibility = v1Label?.style?.visibility || "";
     if (v1Label) v1Label.style.visibility = "hidden";
-    try {
-      return callback();
-    } finally {
+    try { return callback(); } finally {
       syncUi();
-      window.requestAnimationFrame?.(() => {
-        syncUi();
-        if (v1Label) v1Label.style.visibility = previousVisibility;
-      });
+      window.requestAnimationFrame?.(() => { syncUi(); if (v1Label) v1Label.style.visibility = previousVisibility; });
     }
   }
 
   function start() {
-    config.enabled = true;
-    persistConfig();
+    config.enabled = true; persistConfig();
     if (state.running) return false;
-    if (!installReachabilityFilter()) {
-      bot.log("auto target v2 could not install reachability filter");
-      return false;
-    }
-
-    state.running = true;
-    startUiSync();
+    if (!installReachabilityFilter()) { bot.log("auto target v2 could not install reachability filter"); return false; }
+    state.running = true; startUiSync(); syncUi();
+    if (!bot.attack?.status?.().running) withOriginalToggleHidden(() => bot.attack?.start?.());
     syncUi();
-
-    if (!bot.attack?.status?.().running) {
-      withOriginalToggleHidden(() => bot.attack?.start?.());
-    }
-
-    syncUi();
-    bot.log("auto target v2 started with full original auto attack behavior", {
-      reachabilityOnly: true,
-      attackEngineRunning: !!bot.attack?.status?.().running,
-      originalToggleHiddenByV2: true,
-    });
+    bot.log("auto target v2 started with full original auto attack behavior", { reachabilityOnly: true, attackEngineRunning: !!bot.attack?.status?.().running, originalToggleHiddenByV2: true });
     return true;
   }
 
   function stop(options = {}) {
     const stopAttack = options.stopAttack !== false;
-    state.running = false;
-    stopUiSync();
-    uninstallReachabilityFilter();
-
-    if (stopAttack && bot.attack?.status?.().running) {
-      bot.attack.stop();
-    }
-
-    if (options.persistEnabled !== false) {
-      config.enabled = false;
-      persistConfig();
-    }
-
-    syncUi();
-    bot.log("auto target v2 stopped", { stoppedAttack: stopAttack });
-    return true;
+    state.running = false; stopUiSync(); uninstallReachabilityFilter();
+    if (stopAttack && bot.attack?.status?.().running) bot.attack.stop();
+    if (options.persistEnabled !== false) { config.enabled = false; persistConfig(); }
+    syncUi(); bot.log("auto target v2 stopped", { stoppedAttack: stopAttack }); return true;
   }
 
-  function tryTarget() {
-    if (!state.running) return false;
-    return !!bot.attack?.tryAttack?.();
-  }
+  function tryTarget() { if (!state.running) return false; return !!bot.attack?.tryAttack?.(); }
 
   function updateConfig(nextConfig = {}) {
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "unreachableSkipMs")) {
-      nextConfig.unreachableSkipMs = Math.max(500, Math.trunc(Number(nextConfig.unreachableSkipMs) || config.unreachableSkipMs || 4000));
-    }
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "reachabilityCacheMs")) {
-      nextConfig.reachabilityCacheMs = Math.max(100, Math.trunc(Number(nextConfig.reachabilityCacheMs) || config.reachabilityCacheMs || 350));
-    }
-    Object.assign(config, nextConfig);
-    persistConfig();
-    state.unreachableTargets.clear();
-    state.reachabilityCache.clear();
-    return { ...config };
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "unreachableSkipMs")) nextConfig.unreachableSkipMs = Math.max(500, Math.trunc(Number(nextConfig.unreachableSkipMs) || config.unreachableSkipMs || 4000));
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "reachabilityCacheMs")) nextConfig.reachabilityCacheMs = Math.max(100, Math.trunc(Number(nextConfig.reachabilityCacheMs) || config.reachabilityCacheMs || 350));
+    Object.assign(config, nextConfig); persistConfig(); state.unreachableTargets.clear(); state.reachabilityCache.clear(); return { ...config };
   }
 
   function installUi() {
-    if (document.getElementById("minibia-bot-auto-target-v2-enabled")) {
-      syncUi();
-      return true;
-    }
-
+    if (document.getElementById("minibia-bot-auto-target-v2-enabled")) { syncUi(); return true; }
     const v1Toggle = document.getElementById("minibia-bot-auto-attack-enabled");
     const v1Label = v1Toggle?.closest?.("label");
     if (!v1Label) return false;
-
-    const label = document.createElement("label");
-    label.className = "mb-toggle";
+    const label = document.createElement("label"); label.className = "mb-toggle";
     label.innerHTML = '<input type="checkbox" id="minibia-bot-auto-target-v2-enabled" /><span>Auto Target 2.0</span>';
     v1Label.insertAdjacentElement("afterend", label);
-
     const v2Toggle = label.querySelector("#minibia-bot-auto-target-v2-enabled");
     v2Toggle.checked = state.running;
-    v2Toggle.addEventListener("change", () => {
-      if (v2Toggle.checked) start();
-      else stop();
-      syncUi();
-    });
-
-    v1Toggle.addEventListener("change", () => {
-      if (v1Toggle.checked && state.running) {
-        stop({ stopAttack: false });
-        v1Toggle.checked = !!bot.attack?.status?.().running;
-      }
-    });
-
+    v2Toggle.addEventListener("change", () => { if (v2Toggle.checked) start(); else stop(); syncUi(); });
+    v1Toggle.addEventListener("change", () => { if (v1Toggle.checked && state.running) { stop({ stopAttack: false }); v1Toggle.checked = !!bot.attack?.status?.().running; } });
     return true;
   }
 
   function status() {
     const attackStatus = bot.attack?.status?.() || {};
-    return {
-      ...attackStatus,
-      running: state.running,
-      config: { ...config },
-      attackConfig: attackStatus.config ? { ...attackStatus.config } : null,
-      reachableCandidates: state.running
-        ? getReachableCandidates().map((monster) => ({ id: monster?.id, name: monster?.name || "Mob" }))
-        : [],
-      unreachableTargetIds: Array.from(state.unreachableTargets.keys()),
-      fullOriginalCombatEngine: true,
-      runeAndHotbarInherited: true,
-      meleeChaseInherited: true,
-      creaturePriorityInherited: true,
-    };
+    return { ...attackStatus, running: state.running, config: { ...config }, attackConfig: attackStatus.config ? { ...attackStatus.config } : null,
+      reachableCandidates: state.running ? getReachableCandidates().map((monster) => ({ id: monster?.id, name: monster?.name || "Mob" })) : [],
+      unreachableTargetIds: Array.from(state.unreachableTargets.keys()), fullOriginalCombatEngine: true, runeAndHotbarInherited: true, meleeChaseInherited: true, creaturePriorityInherited: true };
   }
 
-  bot.autoTargetV2 = {
-    start,
-    stop,
-    status,
-    updateConfig,
-    tryTarget,
-    getReachableCandidates,
-    findReachableAdjacentPosition,
-    isMonsterReachable,
-    config,
-  };
-
-  bot.addCleanup?.(() => {
-    stop({ persistEnabled: false, stopAttack: false });
-    if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
-    state.uiTimerId = null;
-    stopUiSync();
-  });
+  bot.autoTargetV2 = { start, stop, status, updateConfig, tryTarget, getReachableCandidates, findReachableAdjacentPosition, isMonsterReachable, config };
+  bot.addCleanup?.(() => { stop({ persistEnabled: false, stopAttack: false }); if (state.uiTimerId != null) window.clearInterval(state.uiTimerId); state.uiTimerId = null; stopUiSync(); });
 
   if (!installUi()) {
     let attempts = 0;
     state.uiTimerId = window.setInterval(() => {
       attempts += 1;
-      if (installUi() || attempts >= 80) {
-        window.clearInterval(state.uiTimerId);
-        state.uiTimerId = null;
-      }
+      if (installUi() || attempts >= 80) { window.clearInterval(state.uiTimerId); state.uiTimerId = null; }
     }, 250);
   }
 
@@ -369,10 +232,8 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     const bot = window.minibiaBot;
     if (bot && bot !== lastBot && window.__minibiaBotBundle?.installAutoTargetV2Module) {
       lastBot = bot;
-      if (!bot.autoTargetV2) {
-        window.__minibiaBotBundle.installAutoTargetV2Module(bot);
-      }
+      if (!bot.autoTargetV2) window.__minibiaBotBundle.installAutoTargetV2Module(bot);
     }
-    if (attempts >= 120) window.clearInterval(timer);
-  }, 250);
+    if (attempts >= 20) window.clearInterval(timer);
+  }, 500);
 })();
