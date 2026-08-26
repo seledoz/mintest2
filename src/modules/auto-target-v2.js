@@ -187,7 +187,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     state.uiSyncTimerId = window.setInterval(() => {
       if (!state.running) return;
       syncUi();
-    }, 100);
+    }, 250);
   }
 
   function stopUiSync() {
@@ -373,6 +373,6 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
         window.__minibiaBotBundle.installAutoTargetV2Module(bot);
       }
     }
-    if (attempts >= 120) window.clearInterval(timer);
-  }, 250);
+    if (attempts >= 20) window.clearInterval(timer);
+  }, 500);
 })();
