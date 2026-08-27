@@ -12,7 +12,7 @@ window.__minibiaBotBundle.installAutoEatModule = function installAutoEatModule(b
 
   const config = Object.assign(
     {
-      tickMs: 1000,
+      tickMs: 5000,
       eatCooldownMs: 60000,
       eatHotbarSlot: 10,
       timedEatEnabled: false,
@@ -21,7 +21,7 @@ window.__minibiaBotBundle.installAutoEatModule = function installAutoEatModule(b
     },
     bot.storage.get(configStorageKey, {})
   );
-  config.tickMs = 1000;
+  config.tickMs = 5000;
   config.timedEatEnabled = !!config.timedEatEnabled;
   config.timedEatIntervalMs = Math.max(60000, Number(config.timedEatIntervalMs) || 600000);
 
@@ -167,7 +167,7 @@ window.__minibiaBotBundle.installAutoEatModule = function installAutoEatModule(b
 
   function start(overrides = {}) {
     Object.assign(config, overrides, { enabled: true });
-    config.tickMs = 1000;
+    config.tickMs = 5000;
     config.timedEatEnabled = !!config.timedEatEnabled;
     config.timedEatIntervalMs = normalizeTimedEatIntervalMs(config.timedEatIntervalMs);
     if (config.timedEatEnabled && !state.lastTimedEatAt) {
@@ -238,7 +238,7 @@ window.__minibiaBotBundle.installAutoEatModule = function installAutoEatModule(b
     }
 
     Object.assign(config, nextConfig);
-    config.tickMs = 1000;
+    config.tickMs = 5000;
     config.timedEatIntervalMs = normalizeTimedEatIntervalMs(config.timedEatIntervalMs);
 
     if (config.timedEatEnabled && !previousTimedEatEnabled) {
