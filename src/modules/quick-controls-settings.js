@@ -140,7 +140,7 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
       } finally {
         scheduleRuneV2Tick();
       }
-    }, 100);
+    }, 1000);
   }
 
   function startRuneV2(overrides = {}) {
