@@ -5,7 +5,7 @@ window.__minibiaBotBundle.installPlayerUhModule = function installPlayerUhModule
 
   const configStorageKey = "minibiaBot.playerUh.config";
   const sectionId = "minibia-bot-player-uh-section";
-  const state = { running: false, timerId: null, lastAttemptAt: 0, lastUseAt: 0, uiObserver: null };
+  const state = { running: false, timerId: null, targetTimerId: null, lastAttemptAt: 0, lastUseAt: 0, uiObserver: null };
   const config = Object.assign({
     enabled: false,
     playerName: "",
@@ -14,6 +14,7 @@ window.__minibiaBotBundle.installPlayerUhModule = function installPlayerUhModule
     scanMs: 100,
     retryMs: 250,
     cooldownMs: 2040,
+    targetDelayMs: 100,
   }, bot.storage.get(configStorageKey, {}) || {});
 
   function persistConfig() { bot.storage.set(configStorageKey, { ...config }); }
@@ -27,6 +28,7 @@ window.__minibiaBotBundle.installPlayerUhModule = function installPlayerUhModule
   config.scanMs = Math.max(75, Math.trunc(Number(config.scanMs) || 100));
   config.retryMs = Math.max(100, Math.trunc(Number(config.retryMs) || 250));
   config.cooldownMs = Math.max(0, Math.trunc(Number(config.cooldownMs) || 2040));
+  config.targetDelayMs = 100;
   config.enabled = !!config.enabled;
 
   function readHealthPercent(player) {
@@ -74,8 +76,29 @@ window.__minibiaBotBundle.installPlayerUhModule = function installPlayerUhModule
     return false;
   }
 
-  function tryHeal(now = Date.now()) {
+  function finishPendingTarget() {
+    state.targetTimerId = null;
     if (!state.running || !config.enabled) return false;
+
+    const refreshedTarget = findTarget();
+    const refreshedPercent = readHealthPercent(refreshedTarget);
+    if (!refreshedTarget || refreshedPercent == null || refreshedPercent > config.hpPercent) {
+      bot.log?.("UH player target invalid after hotkey delay", { playerName: config.playerName, slot: config.hotbarSlot, delayMs: config.targetDelayMs });
+      return false;
+    }
+
+    const used = useRuneOnPlayer(refreshedTarget);
+    if (used) {
+      state.lastUseAt = Date.now();
+      bot.log?.("used UH rune on player", { player: refreshedTarget.name, hpPercent: Math.round(refreshedPercent), slot: config.hotbarSlot, targetDelayMs: config.targetDelayMs });
+    } else {
+      bot.log?.("UH player target click failed", { player: refreshedTarget.name, slot: config.hotbarSlot });
+    }
+    return used;
+  }
+
+  function tryHeal(now = Date.now()) {
+    if (!state.running || !config.enabled || state.targetTimerId != null) return false;
     const slot = normalizeSlot(config.hotbarSlot);
     if (!slot || now - state.lastUseAt < config.cooldownMs || now - state.lastAttemptAt < config.retryMs) return false;
 
@@ -86,21 +109,9 @@ window.__minibiaBotBundle.installPlayerUhModule = function installPlayerUhModule
     state.lastAttemptAt = now;
     if (!bot.clickHotbar?.(slot - 1)) return false;
 
-    const refreshedTarget = findTarget();
-    const refreshedPercent = readHealthPercent(refreshedTarget);
-    if (!refreshedTarget || refreshedPercent == null || refreshedPercent > config.hpPercent) {
-      bot.log?.("UH player target invalid after hotkey", { playerName: config.playerName, slot });
-      return false;
-    }
-
-    const used = useRuneOnPlayer(refreshedTarget);
-    if (used) {
-      state.lastUseAt = now;
-      bot.log?.("used UH rune on player", { player: refreshedTarget.name, hpPercent: Math.round(refreshedPercent), slot });
-    } else {
-      bot.log?.("UH player target click failed", { player: refreshedTarget.name, slot });
-    }
-    return used;
+    state.targetTimerId = window.setTimeout(finishPendingTarget, config.targetDelayMs);
+    bot.logDebug?.("UH player hotkey clicked; waiting to target player", { player: target.name, hpPercent: Math.round(hpPercent), slot, delayMs: config.targetDelayMs });
+    return true;
   }
 
   function tick() {
@@ -138,7 +149,7 @@ window.__minibiaBotBundle.installPlayerUhModule = function installPlayerUhModule
         <label class="mb-field"><span class="mb-field-label">Heal at HP %</span><input type="number" id="minibia-bot-player-uh-percent" min="1" max="100" /></label>
         <label class="mb-field"><span class="mb-field-label">UH Hotkey</span><input type="number" id="minibia-bot-player-uh-hotkey" min="1" max="12" /></label>
         <label class="mb-toggle"><input type="checkbox" id="minibia-bot-player-uh-enabled" /><span>Enable UH Player</span></label>
-        <div class="mb-small-note">Exact-name, visible, same-floor players only.</div>
+        <div class="mb-small-note">Exact-name, visible, same-floor players only. Waits 100 ms after the UH hotkey before targeting the player.</div>
       </div>`;
     autoHealSection.insertAdjacentElement("afterend", section);
 
@@ -168,7 +179,7 @@ window.__minibiaBotBundle.installPlayerUhModule = function installPlayerUhModule
     if (Object.prototype.hasOwnProperty.call(nextConfig, "hpPercent")) nextConfig.hpPercent = normalizePercent(nextConfig.hpPercent);
     if (Object.prototype.hasOwnProperty.call(nextConfig, "hotbarSlot")) nextConfig.hotbarSlot = normalizeSlot(nextConfig.hotbarSlot) || config.hotbarSlot;
     if (Object.prototype.hasOwnProperty.call(nextConfig, "enabled")) nextConfig.enabled = !!nextConfig.enabled;
-    Object.assign(config, nextConfig);
+    Object.assign(config, nextConfig, { targetDelayMs: 100 });
     persistConfig();
     syncUi();
     return { ...config };
@@ -188,6 +199,7 @@ window.__minibiaBotBundle.installPlayerUhModule = function installPlayerUhModule
   function stop(options = {}) {
     state.running = false;
     if (state.timerId != null) { window.clearTimeout(state.timerId); state.timerId = null; }
+    if (state.targetTimerId != null) { window.clearTimeout(state.targetTimerId); state.targetTimerId = null; }
     stopUiObserver();
     if (options.persistEnabled !== false) { config.enabled = false; persistConfig(); }
     syncUi();
@@ -203,6 +215,7 @@ window.__minibiaBotBundle.installPlayerUhModule = function installPlayerUhModule
       target: target ? { name: target.name, hpPercent: readHealthPercent(target), position: target.__position || null } : null,
       lastAttemptAt: state.lastAttemptAt,
       lastUseAt: state.lastUseAt,
+      targetPending: state.targetTimerId != null,
     };
   }
 
