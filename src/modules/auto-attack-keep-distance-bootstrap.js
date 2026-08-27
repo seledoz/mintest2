@@ -109,3 +109,32 @@
 
   console.log("[minibia-bot] auto attack keep-distance ready");
 })();
+
+(async () => {
+  const bot = window.minibiaBot;
+  if (!bot || bot.playerUh) return;
+
+  const install = () => {
+    const installer = window.__minibiaBotBundle?.installPlayerUhModule;
+    if (typeof installer !== "function" || bot.playerUh) return false;
+    installer(bot);
+    const originalStatus = bot.status;
+    if (typeof originalStatus === "function" && !bot.__playerUhStatusPatched) {
+      bot.status = () => ({ ...originalStatus(), playerUh: bot.playerUh?.status?.() || null });
+      bot.__playerUhStatusPatched = true;
+    }
+    return true;
+  };
+
+  if (install()) return;
+
+  try {
+    const response = await fetch(`https://raw.githubusercontent.com/seledoz/mintest2/main/src/modules/player-uh.js?t=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const code = await response.text();
+    (0, eval)(`${code}\n//# sourceURL=https://raw.githubusercontent.com/seledoz/mintest2/main/src/modules/player-uh.js`);
+    install();
+  } catch (error) {
+    bot.log?.("player UH module load failed", error?.message || error);
+  }
+})();
