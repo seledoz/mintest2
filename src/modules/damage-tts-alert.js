@@ -6,7 +6,7 @@ window.__minibiaBotBundle.installDamageTtsAlertModule = function installDamageTt
     enabled: false,
     tickMs: 250,
     repeatMs: 3000,
-    durationMs: 30000,
+    durationMs: 10000,
     text: "player under attack",
   };
 
@@ -205,7 +205,7 @@ window.__minibiaBotBundle.installDamageTtsAlertModule = function installDamageTt
 
     const note = document.createElement("div");
     note.className = "mb-small-note";
-    note.textContent = "When HP drops, says “player under attack” every 3 seconds for 30 seconds.";
+    note.textContent = "When HP drops, says “player under attack” every 3 seconds for 10 seconds.";
 
     label.appendChild(input);
     label.appendChild(text);
