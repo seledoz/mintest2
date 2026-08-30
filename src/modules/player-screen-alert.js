@@ -9,7 +9,7 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
     enabled: false,
     tickMs: scanIntervalMs,
     repeatMs: 3000,
-    durationMs: 15000,
+    durationMs: 10000,
     text: "player on screen",
     safeNames: [],
   };
@@ -309,7 +309,7 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
 
     const note = document.createElement("div");
     note.className = "mb-small-note";
-    note.textContent = "Checks every 2 seconds while enabled. Repeats ‘player on screen’ for 15 seconds when a new non-safe player enters.";
+    note.textContent = "Checks every 2 seconds while enabled. Repeats ‘player on screen’ for 10 seconds when a new non-safe player enters.";
 
     const inputRow = document.createElement("div");
     inputRow.style.display = "flex";
