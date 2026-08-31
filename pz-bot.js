@@ -52,6 +52,7 @@
     "src/modules/anti-paralyze-toggle-fix.js",
     "src/modules/player-screen-alert.js",
     "src/modules/monster-xray-alarm.js",
+    "src/modules/emergency-mana-ring.js",
     "src/modules/auto-attack-keep-distance.js",
     "src/modules/auto-attack-keep-distance-bootstrap.js",
     "src/modules/great-fireball-v2-screen-click-fix.js",
