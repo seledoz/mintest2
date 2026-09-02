@@ -5,7 +5,8 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   const state = {
     running: false,
     timerId: null,
-    lastTargetHotkeyAt: 0,
+    targetHotkeyUiTimerId: null,
+    lastTargetAt: 0,
     lastRuneHotkeyAt: 0,
     engagedTargetId: null,
     combatStartedAt: 0,
@@ -22,7 +23,6 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   const config = Object.assign(
     {
       tickMs: 300,
-      targetHotbarSlot: 3,
       runeHotbarSlot: null,
       targetCooldownMs: 1200,
       runeCooldownMs: 1200,
@@ -33,12 +33,12 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
     },
     storedConfig
   );
-  if (config.targetHotbarSlot == null && storedConfig.hotbarSlot != null) {
-    config.targetHotbarSlot = storedConfig.hotbarSlot;
-  }
+  delete config.targetHotbarSlot;
+  delete config.hotbarSlot;
 
   function persistConfig() {
-    bot.storage.set(configStorageKey, { ...config });
+    const { targetHotbarSlot, hotbarSlot, ...persistedConfig } = config;
+    bot.storage.set(configStorageKey, persistedConfig);
   }
 
   function normalizeHotbarSlot(slot) {
@@ -469,12 +469,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function canAttack(now = Date.now()) {
-    const slot = normalizeHotbarSlot(config.targetHotbarSlot);
-    if (!slot) {
-      return false;
-    }
-
-    if (now - state.lastTargetHotkeyAt < Math.max(0, Number(config.targetCooldownMs) || 0)) {
+    if (now - state.lastTargetAt < Math.max(0, Number(config.targetCooldownMs) || 0)) {
       return false;
     }
 
@@ -494,34 +489,18 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
     const preferredTarget = engagedTarget && !isTargetSkipped(engagedTarget, now) && !shouldGiveUpTarget(engagedTarget)
       ? engagedTarget
       : (getMonsterCandidates(now)[0] || null);
-    if (preferredTarget && setCurrentTarget(preferredTarget)) {
-      state.lastTargetHotkeyAt = now;
-      markCombatActive(now);
-      bot.log("selected auto attack target", {
-        id: preferredTarget.id,
-        name: preferredTarget.name || "Mob",
-        reason: isSameCreature(preferredTarget, engagedTarget) ? "engaged target" : "nearest candidate",
-      });
-      return true;
-    }
-
-    if (config.meleeMode) {
+    if (!preferredTarget || !setCurrentTarget(preferredTarget)) {
       return false;
     }
 
-    const slot = normalizeHotbarSlot(config.targetHotbarSlot);
-    const clicked = bot.clickHotbar(slot - 1);
-    if (clicked) {
-      const monsters = getMonsterCandidates(now);
-      state.lastTargetHotkeyAt = now;
-      markCombatActive(now);
-      bot.log("used auto attack target hotkey", {
-        slot,
-        nearbyMonsters: monsters.map((creature) => creature.name || "Mob"),
-      });
-    }
-
-    return clicked;
+    state.lastTargetAt = now;
+    markCombatActive(now);
+    bot.log("selected auto attack target", {
+      id: preferredTarget.id,
+      name: preferredTarget.name || "Mob",
+      reason: isSameCreature(preferredTarget, engagedTarget) ? "engaged target" : "nearest candidate",
+    });
+    return true;
   }
 
   function canUseRune(now = Date.now()) {
@@ -628,7 +607,12 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function start(overrides = {}) {
-    Object.assign(config, overrides, { enabled: true });
+    const nextOverrides = { ...overrides };
+    delete nextOverrides.targetHotbarSlot;
+    delete nextOverrides.hotbarSlot;
+    Object.assign(config, nextOverrides, { enabled: true });
+    delete config.targetHotbarSlot;
+    delete config.hotbarSlot;
     persistConfig();
 
     if (state.running) {
@@ -669,7 +653,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
     return {
       running: state.running,
       config: { ...config },
-      lastTargetHotkeyAt: state.lastTargetHotkeyAt,
+      lastTargetAt: state.lastTargetAt,
       lastRuneHotkeyAt: state.lastRuneHotkeyAt,
       engagedTargetId: state.engagedTargetId,
       combatActive,
@@ -695,33 +679,55 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function updateConfig(nextConfig = {}) {
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "targetHotbarSlot")) {
-      nextConfig.targetHotbarSlot = normalizeHotbarSlot(nextConfig.targetHotbarSlot) ?? config.targetHotbarSlot;
+    const sanitizedConfig = { ...nextConfig };
+    delete sanitizedConfig.targetHotbarSlot;
+    delete sanitizedConfig.hotbarSlot;
+
+    if (Object.prototype.hasOwnProperty.call(sanitizedConfig, "runeHotbarSlot")) {
+      sanitizedConfig.runeHotbarSlot = normalizeHotbarSlot(sanitizedConfig.runeHotbarSlot);
     }
 
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "runeHotbarSlot")) {
-      nextConfig.runeHotbarSlot = normalizeHotbarSlot(nextConfig.runeHotbarSlot);
+    if (Object.prototype.hasOwnProperty.call(sanitizedConfig, "maxTargetDistance")) {
+      const legacyDistance = Math.max(1, Math.trunc(Number(sanitizedConfig.maxTargetDistance) || 0));
+      sanitizedConfig.maxTargetDistanceX = legacyDistance;
+      sanitizedConfig.maxTargetDistanceY = legacyDistance;
+      delete sanitizedConfig.maxTargetDistance;
     }
 
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "maxTargetDistance")) {
-      const legacyDistance = Math.max(1, Math.trunc(Number(nextConfig.maxTargetDistance) || 0));
-      nextConfig.maxTargetDistanceX = legacyDistance;
-      nextConfig.maxTargetDistanceY = legacyDistance;
-      delete nextConfig.maxTargetDistance;
+    if (Object.prototype.hasOwnProperty.call(sanitizedConfig, "maxTargetDistanceX")) {
+      sanitizedConfig.maxTargetDistanceX = Math.max(1, Math.trunc(Number(sanitizedConfig.maxTargetDistanceX) || config.maxTargetDistanceX || 7));
     }
 
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "maxTargetDistanceX")) {
-      nextConfig.maxTargetDistanceX = Math.max(1, Math.trunc(Number(nextConfig.maxTargetDistanceX) || config.maxTargetDistanceX || 7));
+    if (Object.prototype.hasOwnProperty.call(sanitizedConfig, "maxTargetDistanceY")) {
+      sanitizedConfig.maxTargetDistanceY = Math.max(1, Math.trunc(Number(sanitizedConfig.maxTargetDistanceY) || config.maxTargetDistanceY || 5));
     }
 
-    if (Object.prototype.hasOwnProperty.call(nextConfig, "maxTargetDistanceY")) {
-      nextConfig.maxTargetDistanceY = Math.max(1, Math.trunc(Number(nextConfig.maxTargetDistanceY) || config.maxTargetDistanceY || 5));
-    }
-
-    Object.assign(config, nextConfig);
+    Object.assign(config, sanitizedConfig);
+    delete config.targetHotbarSlot;
+    delete config.hotbarSlot;
     persistConfig();
     bot.log("auto attack config updated", { ...config });
     return { ...config };
+  }
+
+  function removeLegacyTargetHotkeyControl() {
+    const input = document.getElementById("minibia-bot-auto-attack-hotkey");
+    if (!input) return false;
+    const field = input.closest?.(".mb-field") || input.parentElement || input;
+    field.remove?.();
+    return true;
+  }
+
+  function watchForLegacyTargetHotkeyControl() {
+    if (removeLegacyTargetHotkeyControl()) return;
+    let attempts = 0;
+    state.targetHotkeyUiTimerId = window.setInterval(() => {
+      attempts += 1;
+      if (removeLegacyTargetHotkeyControl() || attempts >= 40) {
+        window.clearInterval(state.targetHotkeyUiTimerId);
+        state.targetHotkeyUiTimerId = null;
+      }
+    }, 250);
   }
 
   if (config.enabled) {
@@ -729,6 +735,10 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   bot.addCleanup(() => {
+    if (state.targetHotkeyUiTimerId != null) {
+      window.clearInterval(state.targetHotkeyUiTimerId);
+      state.targetHotkeyUiTimerId = null;
+    }
     stop({ persistEnabled: false });
   });
 
@@ -750,4 +760,6 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
     normalizeHotbarSlot,
     config,
   };
+
+  window.setTimeout(watchForLegacyTargetHotkeyControl, 0);
 };
