@@ -8,6 +8,7 @@ window.__minibiaBotBundle.installMonsterXrayAlarmModule = function installMonste
   const alertDurationMs = 10000;
   const cooldownMs = 30000;
   const doubleBeepRepeatMs = 1000;
+  const pauseDurationMs = 15000;
 
   const defaultConfig = {
     enabled: false,
@@ -22,6 +23,9 @@ window.__minibiaBotBundle.installMonsterXrayAlarmModule = function installMonste
     activeAlerts: new Map(),
     cooldownUntilByName: new Map(),
     lastDetectedNames: [],
+    pauseActive: false,
+    pauseTimerId: null,
+    pauseResumeSnapshot: null,
   };
 
   const storedConfig = bot.storage.get(configStorageKey, {}) || {};
@@ -129,6 +133,99 @@ window.__minibiaBotBundle.installMonsterXrayAlarmModule = function installMonste
     return true;
   }
 
+  function forceStopWalkingOnce() {
+    if (typeof bot.gmKillSwitch?.forceStopWalkingOnce === "function") {
+      try {
+        return !!bot.gmKillSwitch.forceStopWalkingOnce();
+      } catch (error) {
+        bot.log?.("X-ray monster pause reused GM stop-walk command failed", { error: String(error) });
+      }
+    }
+
+    const player = window.gameClient?.player;
+    const world = window.gameClient?.world;
+    const pathfinder = world?.pathfinder;
+    const candidates = [
+      [player, "stopWalking"],
+      [player, "stopAutoWalk"],
+      [player, "cancelWalk"],
+      [player, "cancelWalking"],
+      [player, "clearPath"],
+      [pathfinder, "stop"],
+      [pathfinder, "cancel"],
+      [pathfinder, "abort"],
+      [pathfinder, "reset"],
+      [pathfinder, "clearPath"],
+      [world, "stopWalking"],
+      [world, "cancelWalk"],
+    ];
+
+    for (const [target, method] of candidates) {
+      if (typeof target?.[method] !== "function") continue;
+      try {
+        target[method]();
+        bot.log?.("X-ray monster pause forced walking stop", { method });
+        return true;
+      } catch (error) {
+        bot.log?.("X-ray monster pause walking stop command failed", { method, error: String(error) });
+      }
+    }
+
+    const current = bot.getPlayerPosition?.();
+    if (current && typeof pathfinder?.findPath === "function") {
+      try {
+        const currentTile = typeof Position === "function"
+          ? new Position(Number(current.x), Number(current.y), Number(current.z))
+          : current;
+        pathfinder.findPath(current, currentTile);
+        bot.log?.("X-ray monster pause forced walking stop", { method: "pathfinder.findPath(current,current)" });
+        return true;
+      } catch (error) {
+        bot.log?.("X-ray monster pause walking stop command failed", { method: "pathfinder.findPath(current,current)", error: String(error) });
+      }
+    }
+
+    bot.log?.("X-ray monster pause could not find walking stop command");
+    return false;
+  }
+
+  function resumeMonsterPause() {
+    if (!state.pauseActive) return false;
+    const snapshot = state.pauseResumeSnapshot || { cave: false, attack: false };
+    state.pauseTimerId = null;
+    state.pauseActive = false;
+    state.pauseResumeSnapshot = null;
+    if (snapshot.cave) bot.cave?.start?.();
+    if (snapshot.attack) bot.attack?.start?.();
+    bot.ui?.refreshAutoAttackStatus?.();
+    bot.ui?.refreshCaveStatus?.();
+    bot.log?.("X-ray monster pause resumed modules after 15 seconds", snapshot);
+    return true;
+  }
+
+  function triggerMonsterPause(monsterName) {
+    if (state.pauseActive) return false;
+    const snapshot = {
+      cave: !!bot.cave?.status?.().running,
+      attack: !!bot.attack?.status?.().running,
+    };
+    state.pauseActive = true;
+    state.pauseResumeSnapshot = snapshot;
+    if (snapshot.cave) bot.cave?.stop?.({ persistEnabled: false });
+    if (snapshot.attack) bot.attack?.stop?.({ persistEnabled: false });
+    const walkingStopped = forceStopWalkingOnce();
+    bot.ui?.refreshAutoAttackStatus?.();
+    bot.ui?.refreshCaveStatus?.();
+    state.pauseTimerId = window.setTimeout(resumeMonsterPause, pauseDurationMs);
+    bot.log?.("X-ray monster pause triggered", {
+      monster: monsterName,
+      walkingStopped,
+      pauseMs: pauseDurationMs,
+      resumeSnapshot: snapshot,
+    });
+    return true;
+  }
+
   function triggerName(name, now = Date.now()) {
     const normalized = normalizeName(name);
     if (!normalized) return false;
@@ -144,10 +241,13 @@ window.__minibiaBotBundle.installMonsterXrayAlarmModule = function installMonste
     });
     // The 30-second lockout begins after the 10-second alarm finishes.
     state.cooldownUntilByName.set(normalized, now + alertDurationMs + cooldownMs);
+    const paused = triggerMonsterPause(display);
     bot.log?.("X-ray monster alarm triggered", {
       monster: display,
       alertDurationMs,
       cooldownMs,
+      pauseDurationMs,
+      paused,
     });
     return true;
   }
@@ -183,7 +283,7 @@ window.__minibiaBotBundle.installMonsterXrayAlarmModule = function installMonste
     const now = Date.now();
     const alarming = [...state.activeAlerts.values()].map((entry) => entry.name);
     if (alarming.length) {
-      status.textContent = `ALARM: ${alarming.join(", ")} — double beep for 10s`;
+      status.textContent = `ALARM: ${alarming.join(", ")} — double beep for 10s; Cavebot/Auto Attack paused for 15s`;
       return;
     }
 
@@ -356,7 +456,7 @@ window.__minibiaBotBundle.installMonsterXrayAlarmModule = function installMonste
           <input type="checkbox" id="minibia-bot-monster-xray-alarm-enabled" />
           <span>Enable X-ray Monster Alarm</span>
         </label>
-        <div class="mb-small-note">Detects watched monster names using X-ray creature data. Double-beeps for 10 seconds, then that name has a 30-second cooldown.</div>
+        <div class="mb-small-note">Detects watched monster names using X-ray creature data. On trigger: stop Cavebot/Auto Attack, send one stop-walk command, pause them for 15 seconds, then resume only what was running. Double-beeps for 10 seconds, then that name has a 30-second cooldown.</div>
         <div style="display:flex; gap:6px; margin-top:6px;">
           <input type="text" id="minibia-bot-monster-xray-alarm-name-input" class="mb-input" placeholder="Monster name" style="flex:1 1 auto;" />
           <button type="button" class="mb-button" id="minibia-bot-monster-xray-alarm-add">Add</button>
@@ -416,16 +516,25 @@ window.__minibiaBotBundle.installMonsterXrayAlarmModule = function installMonste
       activeAlerts: [...state.activeAlerts.values()].map((entry) => ({ ...entry })),
       cooldownUntilByName: Object.fromEntries(state.cooldownUntilByName),
       detectedNames: [...state.lastDetectedNames],
+      pauseActive: state.pauseActive,
+      pauseResumeSnapshot: state.pauseResumeSnapshot ? { ...state.pauseResumeSnapshot } : null,
       scanIntervalMs,
       alertDurationMs,
       cooldownMs,
+      pauseDurationMs,
     };
   }
 
   bot.addCleanup?.(() => {
     if (state.timerId != null) window.clearTimeout(state.timerId);
     if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
+    if (state.pauseTimerId != null) window.clearTimeout(state.pauseTimerId);
+    state.timerId = null;
+    state.uiTimerId = null;
+    state.pauseTimerId = null;
     state.running = false;
+    state.pauseActive = false;
+    state.pauseResumeSnapshot = null;
     state.activeAlerts.clear();
     try { state.audioContext?.close?.(); } catch (_) {}
     state.audioContext = null;
@@ -438,6 +547,8 @@ window.__minibiaBotBundle.installMonsterXrayAlarmModule = function installMonste
     removeMonsterName,
     checkMonsters,
     getDetectedWatchedMonsters,
+    triggerMonsterPause,
+    forceStopWalkingOnce,
     status,
     config,
   };
