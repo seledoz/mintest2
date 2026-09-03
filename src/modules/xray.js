@@ -193,6 +193,12 @@ window.__minibiaBotBundle.installXrayModule = function installXrayModule(bot) {
         return isWithinVisibleRange(me, pos);
       }
 
+      // Players should always keep an X-Ray marker on the current floor,
+      // including while they are inside the normal visible viewport.
+      if (creature?.type === 0) {
+        return true;
+      }
+
       return !isWithinVisibleRange(me, pos);
     });
   }
@@ -318,7 +324,10 @@ window.__minibiaBotBundle.installXrayModule = function installXrayModule(bot) {
       }
 
       if (pos.z === me.z) {
-        marker.classList.add("mb-xray-marker-offscreen");
+        const isVisible = isWithinVisibleRange(me, pos);
+        if (!isVisible) {
+          marker.classList.add("mb-xray-marker-offscreen");
+        }
         marker.textContent = getSameFloorOffscreenMarkerText(creature, healthLabel);
         marker.style.left = `${clamp(
           viewportRect.left + ((dx + 8.5) * tileWidth),
