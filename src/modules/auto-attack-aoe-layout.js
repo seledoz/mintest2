@@ -166,7 +166,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 })();
 
 // Adds a second square hotkey as a lower-priority fallback.
-// Square Hotkey #1 wins whenever it is actually ready to cast; while #1 is
+// Square Hotkey #1 gets an authoritative cast attempt before #2. If #1 is
 // cooling down, Square Hotkey #2 may cast if its own conditions are met.
 (function installSecondSquareHotkey() {
   const storageKey = "minibiaBot.attackAoe.square2.config";
@@ -273,30 +273,51 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     }
   }
 
-  function primarySquareIsEligible(status) {
+  function primarySquareConditionsMet(status) {
     const primaryConfig = status?.config || {};
     if (!status?.running || !primaryConfig.enabled || !normalizeSlot(primaryConfig.spellHotbarSlot)) return false;
     if (primaryConfig.requireAutoAttackRunning !== false && !window.minibiaBot?.attack?.status?.().running) return false;
     const primaryCount = countMonsters(positiveInt(primaryConfig.squareRange, 3), primaryConfig);
-    if (primaryCount < positiveInt(primaryConfig.minMonsters, 3)) return false;
-    return status?.ready === true;
+    return primaryCount >= positiveInt(primaryConfig.minMonsters, 3);
   }
 
-  function canCastSecond(now = Date.now()) {
+  function primarySquareIsReady(status) {
+    return primarySquareConditionsMet(status) && status?.ready === true;
+  }
+
+  function secondConditionsMet(now = Date.now(), status = getPrimaryStatus()) {
     const bot = window.minibiaBot;
-    const status = getPrimaryStatus();
     const primaryConfig = status?.config || {};
     if (!bot || !status?.running || !primaryConfig.enabled || !normalizeSlot(config.hotbarSlot)) return false;
     if (primaryConfig.requireAutoAttackRunning !== false && !bot.attack?.status?.().running) return false;
-    if (primarySquareIsEligible(status)) return false;
+    if (bot.attackAoe?.shouldReservePriority?.()) return false;
     if (now - state.lastHotkeyAt < nonNegativeInt(config.cooldownMs, 2000)) return false;
     return countMonsters(positiveInt(config.squareRange, 3), primaryConfig) >= positiveInt(config.minMonsters, 2);
   }
 
+  function canCastSecond(now = Date.now()) {
+    const status = getPrimaryStatus();
+    if (!secondConditionsMet(now, status)) return false;
+    if (primarySquareIsReady(status)) return false;
+    return true;
+  }
+
   function triggerSecond(now = Date.now()) {
-    if (!canCastSecond(now)) return false;
     const bot = window.minibiaBot;
     const status = getPrimaryStatus();
+    if (!secondConditionsMet(now, status)) return false;
+
+    // Strict priority handoff: if #1 meets its monster/range conditions, let the
+    // primary module make the authoritative cooldown check and cast attempt first.
+    // Only when that attempt returns false (for example #1 is cooling down) may #2 fire.
+    if (primarySquareConditionsMet(status)) {
+      const primaryCast = bot?.attackAoe?.triggerSquareSpell?.(now);
+      if (primaryCast) {
+        refreshUi();
+        return false;
+      }
+    }
+
     const primaryConfig = status?.config || {};
     const slot = normalizeSlot(config.hotbarSlot);
     const monsterCount = countMonsters(positiveInt(config.squareRange, 3), primaryConfig);
@@ -372,7 +393,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
         return;
       }
       const count = countMonsters(positiveInt(config.squareRange, 3), primaryConfig);
-      if (primarySquareIsEligible(status)) label.textContent = `Square #2: waiting — #1 ready (${count}/${config.minMonsters})`;
+      if (primarySquareIsReady(status)) label.textContent = `Square #2: waiting — #1 ready (${count}/${config.minMonsters})`;
       else label.textContent = `Square #2: watching (${count}/${config.minMonsters})`;
     }
   }
