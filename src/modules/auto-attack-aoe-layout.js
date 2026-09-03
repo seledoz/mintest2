@@ -166,7 +166,8 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 })();
 
 // Adds a second square hotkey as a lower-priority fallback.
-// Square Hotkey #1 always wins whenever its configured monster requirement is met.
+// Square Hotkey #1 wins whenever it is actually ready to cast; while #1 is
+// cooling down, Square Hotkey #2 may cast if its own conditions are met.
 (function installSecondSquareHotkey() {
   const storageKey = "minibiaBot.attackAoe.square2.config";
   const sectionId = "minibia-bot-auto-attack-aoe-square2-section";
@@ -277,7 +278,8 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     if (!status?.running || !primaryConfig.enabled || !normalizeSlot(primaryConfig.spellHotbarSlot)) return false;
     if (primaryConfig.requireAutoAttackRunning !== false && !window.minibiaBot?.attack?.status?.().running) return false;
     const primaryCount = countMonsters(positiveInt(primaryConfig.squareRange, 3), primaryConfig);
-    return primaryCount >= positiveInt(primaryConfig.minMonsters, 3);
+    if (primaryCount < positiveInt(primaryConfig.minMonsters, 3)) return false;
+    return status?.ready === true;
   }
 
   function canCastSecond(now = Date.now()) {
@@ -370,7 +372,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
         return;
       }
       const count = countMonsters(positiveInt(config.squareRange, 3), primaryConfig);
-      if (primarySquareIsEligible(status)) label.textContent = `Square #2: waiting — #1 has priority (${count}/${config.minMonsters})`;
+      if (primarySquareIsEligible(status)) label.textContent = `Square #2: waiting — #1 ready (${count}/${config.minMonsters})`;
       else label.textContent = `Square #2: watching (${count}/${config.minMonsters})`;
     }
   }
