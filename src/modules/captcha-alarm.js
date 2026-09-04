@@ -16,6 +16,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   const cooldownMs = 5000;
   const alarmDurationMs = 10000;
   const beepIntervalMs = 1000;
+  const ignoredSelector = "#minibia-bot-panel, #k9x-panel, #minibia-bot-style, script, style";
 
   function normalizeText(value) {
     return String(value || "")
@@ -34,8 +35,12 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     return normalized.includes("anti-bot verification") || normalized.includes("anti bot verification");
   }
 
+  function isIgnoredElement(element) {
+    return !!element?.closest?.(ignoredSelector);
+  }
+
   function isActuallyVisible(element) {
-    if (!(element instanceof Element) || !element.isConnected) return false;
+    if (!(element instanceof Element) || !element.isConnected || isIgnoredElement(element)) return false;
 
     const rect = element.getBoundingClientRect?.();
     if (!rect || rect.width <= 0 || rect.height <= 0) return false;
@@ -51,21 +56,51 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     return true;
   }
 
-  function matchingVisibleTextNode(root) {
+  function isPopupWindow(element) {
+    if (!(element instanceof Element) || !isActuallyVisible(element)) return false;
+    if (element.matches?.("dialog, [role='dialog'], [aria-modal='true']")) return true;
+
+    const rect = element.getBoundingClientRect?.();
+    if (!rect || rect.width < 180 || rect.height < 100) return false;
+    if (rect.width > Math.max(900, window.innerWidth * 0.95) || rect.height > Math.max(800, window.innerHeight * 0.95)) return false;
+
+    const style = window.getComputedStyle(element);
+    const positioned = style.position === "fixed" || style.position === "absolute" || style.position === "sticky";
+    const zIndex = Number.parseInt(style.zIndex, 10);
+    const layered = Number.isFinite(zIndex) && zIndex > 0;
+    return positioned || layered;
+  }
+
+  function popupForTitleNode(textNode) {
+    const titleElement = textNode?.nodeType === Node.TEXT_NODE ? textNode.parentElement : textNode;
+    if (!(titleElement instanceof Element) || !isActuallyVisible(titleElement) || isIgnoredElement(titleElement)) return null;
+
+    let current = titleElement;
+    for (let depth = 0; current && current instanceof Element && depth < 8; depth += 1, current = current.parentElement) {
+      if (isPopupWindow(current) && containsAntiBotTitle(current.textContent || "")) return current;
+      if (current === document.body || current === document.documentElement) break;
+    }
+    return null;
+  }
+
+  function matchingVisiblePopup(root) {
     if (!root) return null;
 
     if (root.nodeType === Node.TEXT_NODE) {
       if (!containsAntiBotTitle(root.textContent || "")) return null;
-      const parent = root.parentElement;
-      return isActuallyVisible(parent) ? root : null;
+      return popupForTitleNode(root);
     }
 
     if (!(root instanceof Element) && root !== document) return null;
+    if (root instanceof Element && isIgnoredElement(root)) return null;
 
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
     while (node) {
-      if (containsAntiBotTitle(node.textContent || "") && isActuallyVisible(node.parentElement)) return node;
+      if (containsAntiBotTitle(node.textContent || "")) {
+        const popup = popupForTitleNode(node);
+        if (popup) return popup;
+      }
       node = walker.nextNode();
     }
     return null;
@@ -75,6 +110,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     if (!root) return false;
     if (root.nodeType === Node.TEXT_NODE) return containsAntiBotTitle(root.textContent || "");
     if (!(root instanceof Element) && root !== document) return false;
+    if (root instanceof Element && isIgnoredElement(root)) return false;
 
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
@@ -86,7 +122,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   }
 
   function currentVisibleCaptcha() {
-    return !!matchingVisibleTextNode(document.body || document.documentElement);
+    return !!matchingVisiblePopup(document.body || document.documentElement);
   }
 
   function clearAlarmTimers() {
@@ -131,7 +167,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
       state.lastTriggerAt = now;
       playTenSecondAlarm();
       bot.log?.("captcha alarm triggered", {
-        type: "anti-bot-verification",
+        type: "anti-bot-verification-popup",
         sound: "normal-captcha-beep",
         durationMs: alarmDurationMs,
       });
@@ -154,12 +190,12 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     if (!alarmEnabled()) return false;
 
     if (mutation.type === "characterData") {
-      if (matchingVisibleTextNode(mutation.target)) return handleVisibleChange(true);
+      if (matchingVisiblePopup(mutation.target)) return handleVisibleChange(true);
       return false;
     }
 
     for (const node of mutation.addedNodes || []) {
-      if (matchingVisibleTextNode(node)) return handleVisibleChange(true);
+      if (matchingVisiblePopup(node)) return handleVisibleChange(true);
     }
 
     for (const node of mutation.removedNodes || []) {
