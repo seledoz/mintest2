@@ -15,7 +15,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   function alarmEnabled() { return !!bot.redTextAlert?.config?.enabled; }
   function containsTitle(text) {
     const value = normalizeText(text);
-    return value.includes("anti-bot verification") || value.includes("anti bot verification") || value.includes("anti-bot check") || value.includes("anti bot check");
+    return value.includes("anti-bot verification") || value.includes("anti bot verification") || value.includes("anti-bot check") || value.includes("anti bot check") || value.includes("anti-bot rune check") || value.includes("anti bot rune check");
   }
 
   function visible(element) {
