@@ -5,6 +5,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
 
   const state = {
     active: false,
+    visible: false,
     observer: null,
     pollTimerId: null,
     beepTimerId: null,
@@ -15,6 +16,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   const cooldownMs = 5000;
   const alarmDurationMs = 10000;
   const beepIntervalMs = 1000;
+  const fallbackPollMs = 2000;
 
   function normalizeText(value) {
     return String(value || "")
@@ -30,35 +32,26 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     return !!bot.redTextAlert?.config?.enabled;
   }
 
-  function isVisibleElement(element) {
-    if (!(element instanceof Element)) return false;
-    const rect = element.getBoundingClientRect?.();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-    const style = window.getComputedStyle(element);
-    return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0.02;
-  }
-
   function containsAntiBotTitle(text) {
     const normalized = normalizeText(text);
     return normalized.includes("anti-bot verification") || normalized.includes("anti bot verification");
   }
 
-  function captchaVisible() {
-    const elements = Array.from(document.body?.querySelectorAll?.("*") || []);
-    for (const element of elements) {
-      if (!isVisibleElement(element)) continue;
-      const ownText = normalizeText(
-        Array.from(element.childNodes || [])
-          .filter((node) => node.nodeType === Node.TEXT_NODE)
-          .map((node) => node.textContent || "")
-          .join(" ")
-      );
-      if (containsAntiBotTitle(ownText)) return true;
-    }
+  function nodeContainsAntiBotTitle(node) {
+    if (!node) return false;
+    if (node.nodeType === Node.TEXT_NODE) return containsAntiBotTitle(node.textContent || "");
+    if (!(node instanceof Element)) return false;
 
-    // Fallback for clients that render the title as one larger text block.
-    const bodyText = normalizeText(document.body?.innerText || "");
-    return containsAntiBotTitle(bodyText);
+    if (containsAntiBotTitle(node.textContent || "")) return true;
+
+    for (const child of Array.from(node.querySelectorAll?.("*") || [])) {
+      if (containsAntiBotTitle(child.textContent || "")) return true;
+    }
+    return false;
+  }
+
+  function fullPageFallbackCheck() {
+    return containsAntiBotTitle(document.body?.innerText || document.body?.textContent || "");
   }
 
   function clearAlarmTimers() {
@@ -87,17 +80,18 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     }, alarmDurationMs);
   }
 
-  function check() {
+  function handleVisibleChange(visible) {
     if (!alarmEnabled()) {
       state.active = false;
+      state.visible = false;
       clearAlarmTimers();
       return false;
     }
 
-    const visible = captchaVisible();
+    state.visible = !!visible;
     const now = Date.now();
 
-    if (visible && !state.active && now - state.lastTriggerAt >= cooldownMs) {
+    if (state.visible && !state.active && now - state.lastTriggerAt >= cooldownMs) {
       state.active = true;
       state.lastTriggerAt = now;
       playTenSecondAlarm();
@@ -109,24 +103,56 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
       return true;
     }
 
-    if (!visible) state.active = false;
+    if (!state.visible) state.active = false;
     return false;
+  }
+
+  function inspectMutation(mutation) {
+    if (!alarmEnabled()) return false;
+
+    if (mutation.type === "characterData") {
+      return nodeContainsAntiBotTitle(mutation.target) ? handleVisibleChange(true) : false;
+    }
+
+    for (const node of mutation.addedNodes || []) {
+      if (nodeContainsAntiBotTitle(node)) return handleVisibleChange(true);
+    }
+
+    for (const node of mutation.removedNodes || []) {
+      if (nodeContainsAntiBotTitle(node)) {
+        window.setTimeout(() => handleVisibleChange(fullPageFallbackCheck()), 0);
+        break;
+      }
+    }
+
+    return false;
+  }
+
+  function fallbackCheck() {
+    if (!alarmEnabled()) {
+      handleVisibleChange(false);
+      return false;
+    }
+    return handleVisibleChange(fullPageFallbackCheck());
   }
 
   function start() {
     if (state.observer || state.pollTimerId) return false;
 
-    state.observer = new MutationObserver(check);
+    state.observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (inspectMutation(mutation)) return;
+      }
+    });
+
     state.observer.observe(document.documentElement || document.body, {
       childList: true,
       subtree: true,
       characterData: true,
-      attributes: true,
-      attributeFilter: ["class", "style", "hidden", "aria-hidden"],
     });
 
-    state.pollTimerId = window.setInterval(check, 500);
-    window.setTimeout(check, 0);
+    state.pollTimerId = window.setInterval(fallbackCheck, fallbackPollMs);
+    window.setTimeout(fallbackCheck, 0);
     return true;
   }
 
@@ -139,19 +165,21 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     }
     clearAlarmTimers();
     state.active = false;
+    state.visible = false;
   }
 
   bot.captchaAlarm = {
     start,
     stop,
-    check,
+    check: fallbackCheck,
     status: () => ({
       active: state.active,
       enabled: alarmEnabled(),
-      visible: captchaVisible(),
+      visible: state.visible,
       lastTriggerAt: state.lastTriggerAt,
       alarmDurationMs,
       beepIntervalMs,
+      fallbackPollMs,
     }),
   };
 
