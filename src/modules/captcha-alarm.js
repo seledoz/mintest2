@@ -19,6 +19,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   function normalizeText(value) {
     return String(value || "")
       .toLowerCase()
+      .replace(/[‐‑‒–—−]/g, "-")
       .replace(/\s+/g, " ")
       .trim();
   }
@@ -29,19 +30,35 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     return !!bot.redTextAlert?.config?.enabled;
   }
 
+  function isVisibleElement(element) {
+    if (!(element instanceof Element)) return false;
+    const rect = element.getBoundingClientRect?.();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+    const style = window.getComputedStyle(element);
+    return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0.02;
+  }
+
+  function containsAntiBotTitle(text) {
+    const normalized = normalizeText(text);
+    return normalized.includes("anti-bot verification") || normalized.includes("anti bot verification");
+  }
+
   function captchaVisible() {
-    const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || "");
-    if (!bodyText) return false;
+    const elements = Array.from(document.body?.querySelectorAll?.("*") || []);
+    for (const element of elements) {
+      if (!isVisibleElement(element)) continue;
+      const ownText = normalizeText(
+        Array.from(element.childNodes || [])
+          .filter((node) => node.nodeType === Node.TEXT_NODE)
+          .map((node) => node.textContent || "")
+          .join(" ")
+      );
+      if (containsAntiBotTitle(ownText)) return true;
+    }
 
-    const hasTitle = bodyText.includes("anti-bot verification");
-    const hasPatternPrompt =
-      bodyText.includes("watch the symbols light up") ||
-      bodyText.includes("repeat the order");
-    const hasVerificationControls =
-      bodyText.includes("time left") &&
-      (bodyText.includes("show again") || bodyText.includes("delay 30s") || bodyText.includes("delay"));
-
-    return hasTitle || hasPatternPrompt || hasVerificationControls;
+    // Fallback for clients that render the title as one larger text block.
+    const bodyText = normalizeText(document.body?.innerText || "");
+    return containsAntiBotTitle(bodyText);
   }
 
   function clearAlarmTimers() {
