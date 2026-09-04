@@ -15,7 +15,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   function alarmEnabled() { return !!bot.redTextAlert?.config?.enabled; }
   function containsTitle(text) {
     const value = normalizeText(text);
-    return value.includes("anti-bot verification") || value.includes("anti bot verification");
+    return value.includes("anti-bot verification") || value.includes("anti bot verification") || value.includes("anti-bot check") || value.includes("anti bot check");
   }
 
   function visible(element) {
@@ -94,7 +94,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
       state.active = true;
       state.lastTriggerAt = Date.now();
       playAlarm();
-      bot.log?.("captcha alarm triggered", { type: "anti-bot-verification-popup", durationMs: alarmDurationMs });
+      bot.log?.("captcha alarm triggered", { type: "anti-bot-popup", durationMs: alarmDurationMs });
       return true;
     }
     if (!state.visible) state.active = false;
