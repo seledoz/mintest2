@@ -15,16 +15,6 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   const cooldownMs = 5000;
   const alarmDurationMs = 10000;
   const beepIntervalMs = 1000;
-  const strongMarkers = [
-    "anti-bot verification",
-    "watch the symbols light up",
-    "repeat the order",
-  ];
-  const supportingMarkers = [
-    "show again",
-    "time left",
-    "delay 30s",
-  ];
 
   function normalizeText(value) {
     return String(value || "")
@@ -33,13 +23,25 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
       .trim();
   }
 
+  function alarmEnabled() {
+    const status = bot.redTextAlert?.status?.();
+    if (status?.config && typeof status.config.enabled === "boolean") return !!status.config.enabled;
+    return !!bot.redTextAlert?.config?.enabled;
+  }
+
   function captchaVisible() {
     const bodyText = normalizeText(document.body?.innerText || document.body?.textContent || "");
     if (!bodyText) return false;
 
-    const strongMatches = strongMarkers.filter((marker) => bodyText.includes(marker)).length;
-    const supportingMatches = supportingMarkers.filter((marker) => bodyText.includes(marker)).length;
-    return strongMatches >= 2 || (strongMatches >= 1 && supportingMatches >= 2);
+    const hasTitle = bodyText.includes("anti-bot verification");
+    const hasPatternPrompt =
+      bodyText.includes("watch the symbols light up") ||
+      bodyText.includes("repeat the order");
+    const hasVerificationControls =
+      bodyText.includes("time left") &&
+      (bodyText.includes("show again") || bodyText.includes("delay 30s") || bodyText.includes("delay"));
+
+    return hasTitle || hasPatternPrompt || hasVerificationControls;
   }
 
   function clearAlarmTimers() {
@@ -53,12 +55,15 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     }
   }
 
+  function normalCaptchaBeep() {
+    if (typeof bot.redTextAlert?.beep === "function") return bot.redTextAlert.beep();
+    return false;
+  }
+
   function playTenSecondAlarm() {
     clearAlarmTimers();
-
-    // Use the exact same existing alarm/beep function as the older alerts.
-    bot.playAlarm?.();
-    state.beepTimerId = window.setInterval(() => bot.playAlarm?.(), beepIntervalMs);
+    normalCaptchaBeep();
+    state.beepTimerId = window.setInterval(normalCaptchaBeep, beepIntervalMs);
     state.stopTimerId = window.setTimeout(() => {
       clearAlarmTimers();
       bot.log?.("captcha alarm finished", { durationMs: alarmDurationMs });
@@ -66,6 +71,12 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   }
 
   function check() {
+    if (!alarmEnabled()) {
+      state.active = false;
+      clearAlarmTimers();
+      return false;
+    }
+
     const visible = captchaVisible();
     const now = Date.now();
 
@@ -75,6 +86,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
       playTenSecondAlarm();
       bot.log?.("captcha alarm triggered", {
         type: "anti-bot-verification",
+        sound: "normal-captcha-beep",
         durationMs: alarmDurationMs,
       });
       return true;
@@ -87,7 +99,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   function start() {
     if (state.observer || state.pollTimerId) return false;
 
-    state.observer = new MutationObserver(() => check());
+    state.observer = new MutationObserver(check);
     state.observer.observe(document.documentElement || document.body, {
       childList: true,
       subtree: true,
@@ -96,8 +108,8 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
       attributeFilter: ["class", "style", "hidden", "aria-hidden"],
     });
 
-    state.pollTimerId = window.setInterval(check, 1000);
-    check();
+    state.pollTimerId = window.setInterval(check, 500);
+    window.setTimeout(check, 0);
     return true;
   }
 
@@ -118,6 +130,8 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     check,
     status: () => ({
       active: state.active,
+      enabled: alarmEnabled(),
+      visible: captchaVisible(),
       lastTriggerAt: state.lastTriggerAt,
       alarmDurationMs,
       beepIntervalMs,
