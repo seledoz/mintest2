@@ -3,262 +3,131 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAlarmModule(bot) {
   if (!bot || bot.captchaAlarm) return bot?.captchaAlarm || null;
 
-  const state = {
-    active: false,
-    visible: false,
-    observer: null,
-    beepTimerId: null,
-    stopTimerId: null,
-    clearCheckTimerId: null,
-    lastTriggerAt: 0,
-  };
-
-  const cooldownMs = 5000;
+  const state = { active: false, visible: false, observer: null, beepTimerId: null, stopTimerId: null, lastTriggerAt: 0 };
   const alarmDurationMs = 10000;
   const beepIntervalMs = 1000;
   const ignoredSelector = "#minibia-bot-panel, #k9x-panel, #minibia-bot-style, script, style";
 
   function normalizeText(value) {
-    return String(value || "")
-      .toLowerCase()
-      .replace(/[‐‑‒–—−]/g, "-")
-      .replace(/\s+/g, " ")
-      .trim();
+    return String(value || "").toLowerCase().replace(/[‐‑‒–—−]/g, "-").replace(/\s+/g, " ").trim();
   }
 
-  function alarmEnabled() {
-    return !!bot.redTextAlert?.config?.enabled;
+  function alarmEnabled() { return !!bot.redTextAlert?.config?.enabled; }
+  function containsTitle(text) {
+    const value = normalizeText(text);
+    return value.includes("anti-bot verification") || value.includes("anti bot verification");
   }
 
-  function containsAntiBotTitle(text) {
-    const normalized = normalizeText(text);
-    return normalized.includes("anti-bot verification") || normalized.includes("anti bot verification");
-  }
-
-  function isIgnoredElement(element) {
-    return !!element?.closest?.(ignoredSelector);
-  }
-
-  function isActuallyVisible(element) {
-    if (!(element instanceof Element) || !element.isConnected || isIgnoredElement(element)) return false;
-
-    const rect = element.getBoundingClientRect?.();
-    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-
-    let current = element;
-    while (current && current instanceof Element) {
-      const style = window.getComputedStyle(current);
+  function visible(element) {
+    if (!(element instanceof Element) || !element.isConnected || element.closest?.(ignoredSelector)) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    for (let node = element; node && node instanceof Element; node = node.parentElement) {
+      const style = getComputedStyle(node);
       if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity || 1) <= 0.02) return false;
-      if (current === document.body || current === document.documentElement) break;
-      current = current.parentElement;
+      if (node === document.body || node === document.documentElement) break;
     }
-
     return true;
   }
 
-  function isPopupWindow(element) {
-    if (!(element instanceof Element) || !isActuallyVisible(element)) return false;
-    if (element.matches?.("dialog, [role='dialog'], [aria-modal='true']")) return true;
+  function strictPopup(element) {
+    if (!(element instanceof Element) || !visible(element)) return false;
+    if (element.matches("dialog, [role='dialog'], [aria-modal='true']")) return true;
 
-    const rect = element.getBoundingClientRect?.();
-    if (!rect || rect.width < 180 || rect.height < 100) return false;
-    if (rect.width > Math.max(900, window.innerWidth * 0.95) || rect.height > Math.max(800, window.innerHeight * 0.95)) return false;
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 220 || rect.height < 120 || rect.width > window.innerWidth * 0.9 || rect.height > window.innerHeight * 0.9) return false;
+    const style = getComputedStyle(element);
+    if (style.position !== "fixed" && style.position !== "absolute") return false;
 
-    const style = window.getComputedStyle(element);
-    const positioned = style.position === "fixed" || style.position === "absolute" || style.position === "sticky";
+    const centerX = rect.left + rect.width / 2;
+    const centerY = rect.top + rect.height / 2;
+    const nearCenter = Math.abs(centerX - window.innerWidth / 2) <= window.innerWidth * 0.25 && Math.abs(centerY - window.innerHeight / 2) <= window.innerHeight * 0.25;
+    if (!nearCenter) return false;
+
     const zIndex = Number.parseInt(style.zIndex, 10);
-    const layered = Number.isFinite(zIndex) && zIndex > 0;
-    return positioned || layered;
+    return Number.isFinite(zIndex) && zIndex > 0;
   }
 
-  function popupForTitleNode(textNode) {
+  function popupForTextNode(textNode) {
     const titleElement = textNode?.nodeType === Node.TEXT_NODE ? textNode.parentElement : textNode;
-    if (!(titleElement instanceof Element) || !isActuallyVisible(titleElement) || isIgnoredElement(titleElement)) return null;
-
-    let current = titleElement;
-    for (let depth = 0; current && current instanceof Element && depth < 8; depth += 1, current = current.parentElement) {
-      if (isPopupWindow(current) && containsAntiBotTitle(current.textContent || "")) return current;
+    if (!(titleElement instanceof Element) || !visible(titleElement)) return null;
+    for (let current = titleElement, depth = 0; current && current instanceof Element && depth < 8; current = current.parentElement, depth += 1) {
+      if (strictPopup(current) && containsTitle(current.textContent || "")) return current;
       if (current === document.body || current === document.documentElement) break;
     }
     return null;
   }
 
-  function matchingVisiblePopup(root) {
+  function findPopup(root) {
     if (!root) return null;
-
-    if (root.nodeType === Node.TEXT_NODE) {
-      if (!containsAntiBotTitle(root.textContent || "")) return null;
-      return popupForTitleNode(root);
-    }
-
+    if (root.nodeType === Node.TEXT_NODE) return containsTitle(root.textContent || "") ? popupForTextNode(root) : null;
     if (!(root instanceof Element) && root !== document) return null;
-    if (root instanceof Element && isIgnoredElement(root)) return null;
-
+    if (root instanceof Element && root.closest?.(ignoredSelector)) return null;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node = walker.nextNode();
-    while (node) {
-      if (containsAntiBotTitle(node.textContent || "")) {
-        const popup = popupForTitleNode(node);
-        if (popup) return popup;
-      }
-      node = walker.nextNode();
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (!containsTitle(node.textContent || "")) continue;
+      const popup = popupForTextNode(node);
+      if (popup) return popup;
     }
     return null;
   }
 
-  function subtreeContainsTitleText(root) {
-    if (!root) return false;
-    if (root.nodeType === Node.TEXT_NODE) return containsAntiBotTitle(root.textContent || "");
-    if (!(root instanceof Element) && root !== document) return false;
-    if (root instanceof Element && isIgnoredElement(root)) return false;
-
-    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-    let node = walker.nextNode();
-    while (node) {
-      if (containsAntiBotTitle(node.textContent || "")) return true;
-      node = walker.nextNode();
-    }
-    return false;
-  }
-
-  function currentVisibleCaptcha() {
-    return !!matchingVisiblePopup(document.body || document.documentElement);
-  }
-
   function clearAlarmTimers() {
-    if (state.beepTimerId != null) {
-      window.clearInterval(state.beepTimerId);
-      state.beepTimerId = null;
-    }
-    if (state.stopTimerId != null) {
-      window.clearTimeout(state.stopTimerId);
-      state.stopTimerId = null;
-    }
+    if (state.beepTimerId != null) clearInterval(state.beepTimerId);
+    if (state.stopTimerId != null) clearTimeout(state.stopTimerId);
+    state.beepTimerId = null;
+    state.stopTimerId = null;
   }
 
-  function normalCaptchaBeep() {
-    if (typeof bot.redTextAlert?.beep === "function") return bot.redTextAlert.beep();
-    return false;
-  }
-
-  function playTenSecondAlarm() {
+  function beep() { return typeof bot.redTextAlert?.beep === "function" ? bot.redTextAlert.beep() : false; }
+  function playAlarm() {
     clearAlarmTimers();
-    normalCaptchaBeep();
-    state.beepTimerId = window.setInterval(normalCaptchaBeep, beepIntervalMs);
-    state.stopTimerId = window.setTimeout(() => {
-      clearAlarmTimers();
-      bot.log?.("captcha alarm finished", { durationMs: alarmDurationMs });
-    }, alarmDurationMs);
+    beep();
+    state.beepTimerId = setInterval(beep, beepIntervalMs);
+    state.stopTimerId = setTimeout(() => { clearAlarmTimers(); bot.log?.("captcha alarm finished", { durationMs: alarmDurationMs }); }, alarmDurationMs);
   }
 
-  function handleVisibleChange(visible) {
-    if (!alarmEnabled()) {
-      state.active = false;
-      state.visible = false;
-      clearAlarmTimers();
-      return false;
-    }
-
-    state.visible = !!visible;
-    const now = Date.now();
-
-    if (state.visible && !state.active && now - state.lastTriggerAt >= cooldownMs) {
+  function setVisible(isVisible) {
+    if (!alarmEnabled()) { state.active = false; state.visible = false; clearAlarmTimers(); return false; }
+    state.visible = !!isVisible;
+    if (state.visible && !state.active) {
       state.active = true;
-      state.lastTriggerAt = now;
-      playTenSecondAlarm();
-      bot.log?.("captcha alarm triggered", {
-        type: "anti-bot-verification-popup",
-        sound: "normal-captcha-beep",
-        durationMs: alarmDurationMs,
-      });
+      state.lastTriggerAt = Date.now();
+      playAlarm();
+      bot.log?.("captcha alarm triggered", { type: "anti-bot-verification-popup", durationMs: alarmDurationMs });
       return true;
     }
-
     if (!state.visible) state.active = false;
     return false;
   }
 
-  function scheduleClearCheck() {
-    if (state.clearCheckTimerId != null) return;
-    state.clearCheckTimerId = window.setTimeout(() => {
-      state.clearCheckTimerId = null;
-      handleVisibleChange(currentVisibleCaptcha());
-    }, 0);
-  }
-
-  function inspectMutation(mutation) {
-    if (!alarmEnabled()) return false;
-
-    if (mutation.type === "characterData") {
-      if (matchingVisiblePopup(mutation.target)) return handleVisibleChange(true);
-      return false;
-    }
-
-    for (const node of mutation.addedNodes || []) {
-      if (matchingVisiblePopup(node)) return handleVisibleChange(true);
-    }
-
-    for (const node of mutation.removedNodes || []) {
-      if (subtreeContainsTitleText(node)) {
-        scheduleClearCheck();
-        break;
-      }
-    }
-
-    return false;
-  }
-
-  function check() {
-    if (!alarmEnabled()) return handleVisibleChange(false);
-    return handleVisibleChange(currentVisibleCaptcha());
-  }
+  function check() { return setVisible(!!findPopup(document.body || document.documentElement)); }
 
   function start() {
     if (state.observer) return false;
-
     state.observer = new MutationObserver((mutations) => {
+      if (!alarmEnabled()) return;
       for (const mutation of mutations) {
-        if (inspectMutation(mutation)) return;
+        if (mutation.type === "characterData" && findPopup(mutation.target)) { setVisible(true); return; }
+        for (const node of mutation.addedNodes || []) {
+          if (findPopup(node)) { setVisible(true); return; }
+        }
       }
+      if (state.active) queueMicrotask(check);
     });
-
-    state.observer.observe(document.documentElement || document.body, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-    });
-
-    window.setTimeout(check, 0);
+    state.observer.observe(document.documentElement || document.body, { childList: true, subtree: true, characterData: true });
+    setTimeout(check, 0);
     return true;
   }
 
   function stop() {
-    state.observer?.disconnect();
-    state.observer = null;
-    if (state.clearCheckTimerId != null) {
-      window.clearTimeout(state.clearCheckTimerId);
-      state.clearCheckTimerId = null;
-    }
-    clearAlarmTimers();
-    state.active = false;
-    state.visible = false;
+    state.observer?.disconnect(); state.observer = null; clearAlarmTimers(); state.active = false; state.visible = false;
   }
 
   bot.captchaAlarm = {
-    start,
-    stop,
-    check,
-    status: () => ({
-      active: state.active,
-      enabled: alarmEnabled(),
-      visible: state.visible,
-      lastTriggerAt: state.lastTriggerAt,
-      alarmDurationMs,
-      beepIntervalMs,
-      polling: false,
-    }),
+    start, stop, check,
+    status: () => ({ active: state.active, enabled: alarmEnabled(), visible: state.visible, lastTriggerAt: state.lastTriggerAt, alarmDurationMs, beepIntervalMs, polling: false }),
   };
-
   start();
   bot.addCleanup?.(stop);
   return bot.captchaAlarm;
