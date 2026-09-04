@@ -48,6 +48,7 @@
     "src/modules/auto-target-v2-panel.js",
     "src/modules/panel-scroll.js",
     "src/modules/github-waypoint-library.js",
+    "src/modules/captcha-alarm.js",
     "src/main.js",
     "src/modules/remove-legacy-great-fireball.js",
     "src/modules/anti-paralyze-toggle-fix.js",
