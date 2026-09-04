@@ -234,6 +234,7 @@
     currentBundle.installFireballModule?.(bot);
     currentBundle.installFireballV2Module?.(bot);
     currentBundle.installLureModeModule?.(bot);
+    currentBundle.installCaptchaAlarmModule?.(bot);
     installPauseBreakToggle(bot);
     installLureCaveProgressPreserver(bot);
     currentBundle.installGithubWaypointLibraryModule?.(bot);
@@ -263,8 +264,8 @@
       magicShield: bot.magicShield.status(),
       attack: bot.attack.status(),
       attackExclude: bot.attackExclude?.status?.() || null,
-      attackPriority: bot.attackPriority?.status?.() || null,
       attackAoe: bot.attackAoe?.status?.() || null,
+      attackPriority: bot.attackPriority?.status?.() || null,
       greatFireballV2: bot.greatFireballV2?.status?.() || null,
       fireball: bot.fireball?.status?.() || null,
       fireballV2: bot.fireballV2?.status?.() || null,
@@ -273,53 +274,20 @@
       cave: bot.cave.status(),
       caveForwardLoop: bot.caveForwardLoop?.status?.() || null,
       caveArrowKeys: bot.caveArrowKeys?.status?.() || null,
-      githubWaypointLibrary: bot.githubWaypointLibrary ? { path: bot.githubWaypointLibrary.path } : null,
-      equipRing: bot.ring?.status?.() || bot.equipRing?.status?.() || null,
+      equipRing: bot.equipRing.status(),
       mining: bot.mining?.status?.() || null,
       eat: bot.eat.status(),
       talk: bot.talk.status(),
       runeMakerDrop: bot.runeMakerDrop?.status?.() || null,
       maxLight: bot.maxLight?.status?.() || null,
+      captchaAlarm: bot.captchaAlarm?.status?.() || null,
       pauseBreak: bot.pauseBreak?.status?.() || null,
-      lureCaveProgressPreserver: bot.lureCaveProgressPreserver?.status?.() || null,
     });
 
     window.minibiaBot = bot;
-    window.pzBot = bot.pz;
-    console.log("[minibia-bot] ready", {
-      version: bot.version.number,
-      branch: bot.version.branch,
-      commit: bot.version.commit,
-      buildDate: bot.version.date,
-      modules: ["pz", "xray", "panic", "gmDefaultChatKillSwitch", "rune", "runeV2", "runeV3", "heal", "antiParalyze", "damageTtsAlert", "invisible", "magicShield", "attack", "attackExclude", "attackPriority", "attackAoe", "greatFireballV2", "fireball", "fireballV2", "lureMode", "redTextAlert", "cave", "caveForwardLoop", "caveArrowKeys", "caveWaypointActions", "githubWaypointLibrary", "equipRing", "mining", "eat", "talk", "runeMakerDrop", "maxLight", "pauseBreak", "ui"],
-    });
-    console.log("minibiaBot.reload()");
-    console.log("minibiaBot.attackExclude.addName(\"monster name\")");
-    console.log("minibiaBot.attackExclude.removeName(\"monster name\")");
-    console.log("minibiaBot.attackPriority.addName(\"dragon lord\")");
-    console.log("minibiaBot.attackPriority.moveName(\"dragon lord\", \"up\")");
-    console.log("minibiaBot.attackPriority.removeName(\"dragon lord\")");
-    console.log("minibiaBot.attackAoe.start({ spellHotbarSlot: 5, minMonsters: 3, squareRange: 3 })");
-    console.log("minibiaBot.attackAoe.stop()");
-    console.log("minibiaBot.greatFireballV2.start({ hotbarSlot: 8, minMonsters: 4 })");
-    console.log("minibiaBot.greatFireballV2.stop()");
-    console.log("minibiaBot.fireball.start({ hotbarSlot: 8, minMonsters: 4 })");
-    console.log("minibiaBot.fireball.stop()");
-    console.log("minibiaBot.fireballV2.start({ hotbarSlot: 8, minMonsters: 4 })");
-    console.log("minibiaBot.fireballV2.stop()");
-    console.log("minibiaBot.lureMode.updateConfig({ enabled: true, minMonsters: 3, maxDistance: 4 })");
-    console.log("minibiaBot.redTextAlert.start()");
-    console.log("minibiaBot.redTextAlert.stop()");
-    console.log("minibiaBot.cave.start()");
-    console.log("minibiaBot.cave.stop()");
-    console.log("minibiaBot.damageTtsAlert.start()");
-    console.log("minibiaBot.damageTtsAlert.stop()");
-    console.log("minibiaBot.mining.start()");
-    console.log("minibiaBot.mining.stop()");
-    console.log("minibiaBot.runeV3.start({ hotkey: \"F1\", shift: false })");
-    console.log("minibiaBot.runeV3.stop()");
+    return bot;
   }
 
-  window.__minibiaBotBoot = boot;
+  window.minibiaBotReload = (nextBundle = window.__minibiaBotReloadBundle || window.__minibiaBotBundle || bundle) => boot(nextBundle);
   boot();
 })();
