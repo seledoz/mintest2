@@ -7,16 +7,15 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     active: false,
     visible: false,
     observer: null,
-    pollTimerId: null,
     beepTimerId: null,
     stopTimerId: null,
+    clearCheckTimerId: null,
     lastTriggerAt: 0,
   };
 
   const cooldownMs = 5000;
   const alarmDurationMs = 10000;
   const beepIntervalMs = 1000;
-  const fallbackPollMs = 2000;
 
   function normalizeText(value) {
     return String(value || "")
@@ -35,21 +34,59 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     return normalized.includes("anti-bot verification") || normalized.includes("anti bot verification");
   }
 
-  function nodeContainsAntiBotTitle(node) {
-    if (!node) return false;
-    if (node.nodeType === Node.TEXT_NODE) return containsAntiBotTitle(node.textContent || "");
-    if (!(node instanceof Element)) return false;
+  function isActuallyVisible(element) {
+    if (!(element instanceof Element) || !element.isConnected) return false;
 
-    if (containsAntiBotTitle(node.textContent || "")) return true;
+    const rect = element.getBoundingClientRect?.();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
 
-    for (const child of Array.from(node.querySelectorAll?.("*") || [])) {
-      if (containsAntiBotTitle(child.textContent || "")) return true;
+    let current = element;
+    while (current && current instanceof Element) {
+      const style = window.getComputedStyle(current);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity || 1) <= 0.02) return false;
+      if (current === document.body || current === document.documentElement) break;
+      current = current.parentElement;
+    }
+
+    return true;
+  }
+
+  function matchingVisibleTextNode(root) {
+    if (!root) return null;
+
+    if (root.nodeType === Node.TEXT_NODE) {
+      if (!containsAntiBotTitle(root.textContent || "")) return null;
+      const parent = root.parentElement;
+      return isActuallyVisible(parent) ? root : null;
+    }
+
+    if (!(root instanceof Element) && root !== document) return null;
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      if (containsAntiBotTitle(node.textContent || "") && isActuallyVisible(node.parentElement)) return node;
+      node = walker.nextNode();
+    }
+    return null;
+  }
+
+  function subtreeContainsTitleText(root) {
+    if (!root) return false;
+    if (root.nodeType === Node.TEXT_NODE) return containsAntiBotTitle(root.textContent || "");
+    if (!(root instanceof Element) && root !== document) return false;
+
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    while (node) {
+      if (containsAntiBotTitle(node.textContent || "")) return true;
+      node = walker.nextNode();
     }
     return false;
   }
 
-  function fullPageFallbackCheck() {
-    return containsAntiBotTitle(document.body?.innerText || document.body?.textContent || "");
+  function currentVisibleCaptcha() {
+    return !!matchingVisibleTextNode(document.body || document.documentElement);
   }
 
   function clearAlarmTimers() {
@@ -105,20 +142,29 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     return false;
   }
 
+  function scheduleClearCheck() {
+    if (state.clearCheckTimerId != null) return;
+    state.clearCheckTimerId = window.setTimeout(() => {
+      state.clearCheckTimerId = null;
+      handleVisibleChange(currentVisibleCaptcha());
+    }, 0);
+  }
+
   function inspectMutation(mutation) {
     if (!alarmEnabled()) return false;
 
     if (mutation.type === "characterData") {
-      return nodeContainsAntiBotTitle(mutation.target) ? handleVisibleChange(true) : false;
+      if (matchingVisibleTextNode(mutation.target)) return handleVisibleChange(true);
+      return false;
     }
 
     for (const node of mutation.addedNodes || []) {
-      if (nodeContainsAntiBotTitle(node)) return handleVisibleChange(true);
+      if (matchingVisibleTextNode(node)) return handleVisibleChange(true);
     }
 
     for (const node of mutation.removedNodes || []) {
-      if (nodeContainsAntiBotTitle(node)) {
-        window.setTimeout(() => handleVisibleChange(fullPageFallbackCheck()), 0);
+      if (subtreeContainsTitleText(node)) {
+        scheduleClearCheck();
         break;
       }
     }
@@ -126,16 +172,13 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     return false;
   }
 
-  function fallbackCheck() {
-    if (!alarmEnabled()) {
-      handleVisibleChange(false);
-      return false;
-    }
-    return handleVisibleChange(fullPageFallbackCheck());
+  function check() {
+    if (!alarmEnabled()) return handleVisibleChange(false);
+    return handleVisibleChange(currentVisibleCaptcha());
   }
 
   function start() {
-    if (state.observer || state.pollTimerId) return false;
+    if (state.observer) return false;
 
     state.observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
@@ -149,17 +192,16 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
       characterData: true,
     });
 
-    state.pollTimerId = window.setInterval(fallbackCheck, fallbackPollMs);
-    window.setTimeout(fallbackCheck, 0);
+    window.setTimeout(check, 0);
     return true;
   }
 
   function stop() {
     state.observer?.disconnect();
     state.observer = null;
-    if (state.pollTimerId != null) {
-      window.clearInterval(state.pollTimerId);
-      state.pollTimerId = null;
+    if (state.clearCheckTimerId != null) {
+      window.clearTimeout(state.clearCheckTimerId);
+      state.clearCheckTimerId = null;
     }
     clearAlarmTimers();
     state.active = false;
@@ -169,7 +211,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   bot.captchaAlarm = {
     start,
     stop,
-    check: fallbackCheck,
+    check,
     status: () => ({
       active: state.active,
       enabled: alarmEnabled(),
@@ -177,7 +219,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
       lastTriggerAt: state.lastTriggerAt,
       alarmDurationMs,
       beepIntervalMs,
-      fallbackPollMs,
+      polling: false,
     }),
   };
 
