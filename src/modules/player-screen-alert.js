@@ -399,3 +399,78 @@ window.__minibiaBotBundle.installPlayerScreenAlertModule = function installPlaye
 if (window.minibiaBot) {
   window.__minibiaBotBundle.installPlayerScreenAlertModule(window.minibiaBot);
 }
+
+// Captcha alarm: this file is already loaded after src/main.js by pz-bot.js, so
+// install a lightweight always-on watcher here without changing the source loader.
+(() => {
+  const bot = window.minibiaBot;
+  if (!bot || bot.captchaAlarm) return;
+
+  const state = { active: false, observer: null, timerId: null, lastTriggerAt: 0 };
+  const strongMarkers = [
+    "anti-bot verification",
+    "watch the symbols light up",
+    "repeat the order",
+  ];
+  const supportingMarkers = ["show again", "time left", "delay 30s"];
+  const cooldownMs = 5000;
+
+  function normalizeText(value) {
+    return String(value || "").toLowerCase().replace(/\s+/g, " ").trim();
+  }
+
+  function captchaVisible() {
+    const text = normalizeText(document.body?.innerText || document.body?.textContent || "");
+    if (!text) return false;
+    const strongMatches = strongMarkers.filter((marker) => text.includes(marker)).length;
+    const supportingMatches = supportingMarkers.filter((marker) => text.includes(marker)).length;
+    return strongMatches >= 2 || (strongMatches >= 1 && supportingMatches >= 2);
+  }
+
+  function check() {
+    const visible = captchaVisible();
+    const now = Date.now();
+    if (visible && !state.active && now - state.lastTriggerAt >= cooldownMs) {
+      state.active = true;
+      state.lastTriggerAt = now;
+      bot.playAlarm?.();
+      bot.log?.("captcha alarm triggered", { type: "anti-bot-verification" });
+      return true;
+    }
+    if (!visible) state.active = false;
+    return false;
+  }
+
+  function start() {
+    if (state.observer || state.timerId != null) return false;
+    state.observer = new MutationObserver(check);
+    state.observer.observe(document.documentElement || document.body, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "hidden", "aria-hidden"],
+    });
+    state.timerId = window.setInterval(check, 1000);
+    check();
+    return true;
+  }
+
+  function stop() {
+    state.observer?.disconnect();
+    state.observer = null;
+    if (state.timerId != null) window.clearInterval(state.timerId);
+    state.timerId = null;
+    state.active = false;
+  }
+
+  bot.captchaAlarm = {
+    start,
+    stop,
+    check,
+    status: () => ({ active: state.active, lastTriggerAt: state.lastTriggerAt }),
+  };
+
+  start();
+  bot.addCleanup?.(stop);
+})();
