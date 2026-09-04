@@ -5,6 +5,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
 
   const state = { active: false, visible: false, observer: null, beepTimerId: null, stopTimerId: null, lastTriggerAt: 0 };
   const alarmDurationMs = 5000;
+  const cooldownMs = 52000;
   const beepIntervalMs = 1000;
   const ignoredSelector = "#minibia-bot-panel, #k9x-panel, #minibia-bot-style, script, style";
 
@@ -92,9 +93,11 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
     state.visible = !!isVisible;
     if (state.visible && !state.active) {
       state.active = true;
-      state.lastTriggerAt = Date.now();
+      const now = Date.now();
+      if (now - state.lastTriggerAt < cooldownMs) return false;
+      state.lastTriggerAt = now;
       playAlarm();
-      bot.log?.("captcha alarm triggered", { type: "anti-bot-popup", durationMs: alarmDurationMs });
+      bot.log?.("captcha alarm triggered", { type: "anti-bot-popup", durationMs: alarmDurationMs, cooldownMs });
       return true;
     }
     if (!state.visible) state.active = false;
@@ -126,7 +129,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
 
   bot.captchaAlarm = {
     start, stop, check,
-    status: () => ({ active: state.active, enabled: alarmEnabled(), visible: state.visible, lastTriggerAt: state.lastTriggerAt, alarmDurationMs, beepIntervalMs, polling: false }),
+    status: () => ({ active: state.active, enabled: alarmEnabled(), visible: state.visible, lastTriggerAt: state.lastTriggerAt, alarmDurationMs, cooldownMs, beepIntervalMs, polling: false }),
   };
   start();
   bot.addCleanup?.(stop);
