@@ -27,8 +27,6 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
   }
 
   function alarmEnabled() {
-    const status = bot.redTextAlert?.status?.();
-    if (status?.config && typeof status.config.enabled === "boolean") return !!status.config.enabled;
     return !!bot.redTextAlert?.config?.enabled;
   }
 
