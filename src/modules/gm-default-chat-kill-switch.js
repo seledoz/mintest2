@@ -11,320 +11,62 @@ window.__minibiaBotBundle.installGmDefaultChatKillSwitch = function installGmDef
   const GM_ALARM_TEXT = "god on screen";
   const MONSTER_SPEECH_CHAT_GRACE_MS = 175;
   const MONSTER_SPEECH_DEDUPE_MS = 5000;
+  const MONSTER_SPEECH_MIN_LIFETIME_MS = 250;
+  const MONSTER_SPEECH_MAX_LIFETIME_MS = 5000;
 
-  const config = Object.assign({
-    killSwitchEnabled: false,
-    pauseEnabled: false,
-    alarmEnabled: false,
-    responderEnabled: false,
-    monsterResponderEnabled: false,
-    responderMessage: "",
-    responderDelayMs: RESPONDER_DELAY_MS,
-    responderResetMs: RESPONDER_RESET_MS
-  }, bot.storage.get(configStorageKey, {}));
+  const config = Object.assign({ killSwitchEnabled:false, pauseEnabled:false, alarmEnabled:false, responderEnabled:false, monsterResponderEnabled:false, responderMessage:"", responderDelayMs:RESPONDER_DELAY_MS, responderResetMs:RESPONDER_RESET_MS }, bot.storage.get(configStorageKey, {}));
+  const state = { watcherRunning:false, timerId:null, panelTimerId:null, pendingReplyTimerId:null, pauseTimerId:null, gmAlarmTimerId:null, gmAlarmUntilAt:0, gmAlarmLastSpokenAt:0, responderPending:false, responderLockedUntil:0, pauseActive:false, pauseResumeSnapshot:null, visibleGmKey:null, seenEntryKeys:new Set(), monsterSpeechObserver:null, monsterSpeechSeen:new Map(), monsterSpeechPendingTimers:new Set(), monsterSpeechBirth:new WeakMap() };
 
-  const state = {
-    watcherRunning: false,
-    timerId: null,
-    panelTimerId: null,
-    pendingReplyTimerId: null,
-    pauseTimerId: null,
-    gmAlarmTimerId: null,
-    gmAlarmUntilAt: 0,
-    gmAlarmLastSpokenAt: 0,
-    responderPending: false,
-    responderLockedUntil: 0,
-    pauseActive: false,
-    pauseResumeSnapshot: null,
-    visibleGmKey: null,
-    seenEntryKeys: new Set(),
-    monsterSpeechObserver: null,
-    monsterSpeechSeen: new Map(),
-    monsterSpeechPendingTimers: new Set()
-  };
-
-  function persistConfig() {
-    config.killSwitchEnabled = !!config.killSwitchEnabled;
-    config.pauseEnabled = !!config.pauseEnabled;
-    config.alarmEnabled = !!config.alarmEnabled;
-    config.responderEnabled = !!config.responderEnabled;
-    config.monsterResponderEnabled = !!config.monsterResponderEnabled;
-    config.responderMessage = String(config.responderMessage || "").trim();
-    config.responderDelayMs = RESPONDER_DELAY_MS;
-    config.responderResetMs = RESPONDER_RESET_MS;
-    bot.storage.set(configStorageKey, { ...config });
-  }
-
-  function normalizeName(name) { return String(name || "").trim().toLowerCase(); }
-  function normalizeMessage(message) { return String(message || "").replace(/\s+/g, " ").trim(); }
-  function normalizeNameList(value) {
-    const source = Array.isArray(value) ? value : String(value || "").split(/[\n,]/);
-    const seen = new Set(), result = [];
-    source.forEach(name => {
-      const displayName = String(name || "").trim(), normalized = normalizeName(displayName);
-      if (!normalized || seen.has(normalized)) return;
-      seen.add(normalized); result.push(displayName);
-    });
-    return result;
-  }
-  function readExactNames() { try { return normalizeNameList(window.localStorage.getItem(exactNamesStorageKey) || ""); } catch (_) { return []; } }
-  function writeExactNames(names) { const normalized = normalizeNameList(names); try { window.localStorage.setItem(exactNamesStorageKey, normalized.join("\n")); } catch (_) {} refreshPanelControls(); return normalized; }
-  function getConfiguredGameMasterNames() { return normalizeNameList([...readExactNames(), ...(bot.panic?.getGameMasterNames?.() || [])]); }
-  function valueAsName(value) { if (typeof value === "string") return value.trim(); if (!value || typeof value !== "object") return ""; return String(value.name ?? value.playerName ?? value.characterName ?? value.label ?? value.text ?? "").trim(); }
-  function getChannels() { const manager = window.gameClient?.interface?.channelManager; return Array.from(manager?.channels || manager?.channelList || []); }
-  function getChannelEntries(channel) { return Array.from(channel?.__contents ?? channel?.contents ?? channel?.messages ?? channel?.entries ?? channel?.history ?? []); }
-  function getEntryMessage(entry) { return String(entry?.message ?? entry?.text ?? entry?.content ?? entry?.value ?? entry?.body ?? ""); }
-  function stripChatPrefix(message) { return String(message || "").replace(/^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*/, "").trim(); }
-  function getEntrySpeaker(entry, message) {
-    const direct = entry?.speakerName ?? entry?.speaker ?? entry?.name ?? entry?.author ?? entry?.senderName ?? entry?.sender ?? entry?.playerName ?? entry?.characterName ?? entry?.creature?.name ?? entry?.player?.name;
-    const directName = valueAsName(direct); if (directName) return directName;
-    const text = stripChatPrefix(message);
-    const saysMatch = text.match(/^(.+?)\s+says:\s*/i); if (saysMatch?.[1]) return saysMatch[1].trim();
-    const colonMatch = text.match(/^([^:]{1,40}):\s+.+$/); return colonMatch?.[1]?.trim() || null;
-  }
-  function getEntryBaseKey(channel, entry, speaker, message) {
-    const channelName = normalizeName(channel?.name || channel?.title || channel?.label || channel?.type || "chat");
-    const id = entry?.id ?? entry?._id ?? entry?.key ?? "";
-    const time = entry?.__time ?? entry?.time ?? entry?.timestamp ?? entry?.createdAt ?? "";
-    return [channelName, id, time, normalizeName(speaker), normalizeMessage(message)].join("|");
-  }
-  function getCurrentEntries() {
-    const occurrences = new Map(), items = [];
-    for (const channel of getChannels()) for (const entry of getChannelEntries(channel)) {
-      const message = getEntryMessage(entry), speaker = getEntrySpeaker(entry, message), baseKey = getEntryBaseKey(channel, entry, speaker, message), occurrence = (occurrences.get(baseKey) || 0) + 1;
-      occurrences.set(baseKey, occurrence);
-      items.push({ channel, entry, message, speaker, channelName: String(channel?.name || channel?.title || channel?.label || channel?.type || "chat"), key: `${baseKey}|occurrence:${occurrence}` });
-    }
-    return items;
-  }
-  function rememberExistingEntries() { state.seenEntryKeys.clear(); for (const item of getCurrentEntries()) state.seenEntryKeys.add(item.key); }
-  function shouldWatch() { return !!config.killSwitchEnabled || !!config.pauseEnabled || !!config.alarmEnabled || !!config.responderEnabled || !!config.monsterResponderEnabled; }
-
-  function refreshPanelControls() {
-    const killToggle = document.getElementById("minibia-bot-gm-kill-switch-enabled"), pauseToggle = document.getElementById("minibia-bot-gm-pause-enabled"), alarmToggle = document.getElementById("minibia-bot-gm-alarm-enabled"), responderToggle = document.getElementById("minibia-bot-gm-responder-enabled"), monsterResponderToggle = document.getElementById("minibia-bot-gm-monster-responder-enabled"), responderMessage = document.getElementById("minibia-bot-gm-responder-message"), exactNamesInput = document.getElementById("minibia-bot-gm-exact-names");
-    if (killToggle) killToggle.checked = !!config.killSwitchEnabled;
-    if (pauseToggle) pauseToggle.checked = !!config.pauseEnabled;
-    if (alarmToggle) alarmToggle.checked = !!config.alarmEnabled;
-    if (responderToggle) responderToggle.checked = !!config.responderEnabled;
-    if (monsterResponderToggle) monsterResponderToggle.checked = !!config.monsterResponderEnabled;
-    if (responderMessage && responderMessage !== document.activeElement) responderMessage.value = config.responderMessage;
-    if (exactNamesInput && exactNamesInput !== document.activeElement) exactNamesInput.value = readExactNames().join("\n");
-  }
-
-  function sendReply(reply) {
-    const senders = [() => bot.sendChat?.(reply), () => window.gameClient?.sendChat?.(reply), () => window.gameClient?.interface?.channelManager?.sendMessage?.(reply), () => window.gameClient?.interface?.channelManager?.say?.(reply)];
-    for (const send of senders) try { const result = send(); if (result !== undefined && result !== false) return true; } catch (error) { bot.log?.("GM responder send method failed", { error: String(error) }); }
-    return false;
-  }
-  function scheduleResponder(speaker, message) {
-    const reply = String(config.responderMessage || "").trim(), now = Date.now();
-    if (!config.responderEnabled || !reply || state.responderPending || now < state.responderLockedUntil) return false;
-    state.responderPending = true;
-    state.pendingReplyTimerId = window.setTimeout(() => {
-      state.pendingReplyTimerId = null; state.responderPending = false;
-      const sent = sendReply(reply); state.responderLockedUntil = Date.now() + RESPONDER_RESET_MS;
-      bot.log?.(sent ? "GM responder sent one reply" : "GM responder failed to send reply", { speaker, message, reply, resetMs: RESPONDER_RESET_MS });
-    }, RESPONDER_DELAY_MS);
-    bot.log?.("GM responder scheduled one reply", { speaker, reply, delayMs: RESPONDER_DELAY_MS, resetMs: RESPONDER_RESET_MS });
-    return true;
-  }
-
-  function stopGmAlarmSpeech() { if (state.gmAlarmTimerId != null) window.clearTimeout(state.gmAlarmTimerId); state.gmAlarmTimerId = null; state.gmAlarmUntilAt = 0; state.gmAlarmLastSpokenAt = 0; }
-  function speakGmAlarm() {
-    if (!config.alarmEnabled || Date.now() >= state.gmAlarmUntilAt) { stopGmAlarmSpeech(); return false; }
-    if (typeof window.speechSynthesis === "undefined" || typeof SpeechSynthesisUtterance === "undefined") { bot.log?.("GM alarm unavailable: speech synthesis missing"); stopGmAlarmSpeech(); return false; }
-    const now = Date.now();
-    if (now - state.gmAlarmLastSpokenAt >= GM_ALARM_REPEAT_MS) try { window.speechSynthesis.speak(new SpeechSynthesisUtterance(GM_ALARM_TEXT)); state.gmAlarmLastSpokenAt = now; } catch (error) { bot.log?.("GM alarm speech failed", { error: String(error) }); }
-    const remaining = Math.max(0, state.gmAlarmUntilAt - Date.now());
-    if (remaining > 0) state.gmAlarmTimerId = window.setTimeout(speakGmAlarm, Math.min(GM_ALARM_REPEAT_MS, remaining)); else stopGmAlarmSpeech();
-    return true;
-  }
-  function triggerGmAlarm(source, speaker, details = {}) {
-    if (!config.alarmEnabled || (source !== "visible-player" && source !== "monster-speech")) return false;
-    stopGmAlarmSpeech(); state.gmAlarmUntilAt = Date.now() + GM_ALARM_DURATION_MS; state.gmAlarmLastSpokenAt = 0;
-    bot.log?.("GM on-screen alarm triggered", { source, speaker, text: GM_ALARM_TEXT, durationMs: GM_ALARM_DURATION_MS, ...details }); speakGmAlarm(); return true;
-  }
-
-  function forceStopWalkingOnce() {
-    const player = window.gameClient?.player, world = window.gameClient?.world, pathfinder = world?.pathfinder;
-    const candidates = [[player,"stopWalking"],[player,"stopAutoWalk"],[player,"cancelWalk"],[player,"cancelWalking"],[player,"clearPath"],[pathfinder,"stop"],[pathfinder,"cancel"],[pathfinder,"abort"],[pathfinder,"reset"],[pathfinder,"clearPath"],[world,"stopWalking"],[world,"cancelWalk"]];
-    for (const [target, method] of candidates) { if (typeof target?.[method] !== "function") continue; try { target[method](); bot.log?.("GM safety forced walking stop", { method }); return true; } catch (error) { bot.log?.("GM safety walking stop command failed", { method, error: String(error) }); } }
-    const current = bot.getPlayerPosition?.();
-    if (current && typeof pathfinder?.findPath === "function") try { const currentTile = typeof Position === "function" ? new Position(Number(current.x), Number(current.y), Number(current.z)) : current; pathfinder.findPath(current, currentTile); bot.log?.("GM safety forced walking stop", { method: "pathfinder.findPath(current,current)" }); return true; } catch (error) { bot.log?.("GM safety walking stop command failed", { method: "pathfinder.findPath(current,current)", error: String(error) }); }
-    bot.log?.("GM safety could not find walking stop command"); return false;
-  }
-  function triggerKillSwitch(source, speaker, message = "", details = {}) {
-    if (!config.killSwitchEnabled) return false;
-    bot.cave?.stop?.(); bot.attack?.stop?.(); const walkingStopped = forceStopWalkingOnce();
-    bot.log?.("game master kill switch triggered", { source, speaker, message, walkingStopped, ...details });
-    bot.ui?.refreshAutoAttackStatus?.(); bot.ui?.refreshCaveStatus?.(); config.killSwitchEnabled = false; persistConfig(); syncWatcher(); refreshPanelControls(); return true;
-  }
-  function resumeGmPause() {
-    if (!state.pauseActive) return false;
-    const snapshot = state.pauseResumeSnapshot || { cave:false, attack:false };
-    state.pauseTimerId = null; state.pauseActive = false; state.pauseResumeSnapshot = null;
-    if (snapshot.cave) bot.cave?.start?.(); if (snapshot.attack) bot.attack?.start?.();
-    bot.ui?.refreshAutoAttackStatus?.(); bot.ui?.refreshCaveStatus?.(); bot.log?.("GM pause resumed modules after 15 seconds", snapshot); return true;
-  }
-  function triggerGmPause(source, speaker, message = "", details = {}) {
-    if (!config.pauseEnabled || state.pauseActive) return false;
-    const snapshot = { cave: !!bot.cave?.status?.().running, attack: !!bot.attack?.status?.().running };
-    state.pauseActive = true; state.pauseResumeSnapshot = snapshot;
-    if (snapshot.cave) bot.cave?.stop?.({ persistEnabled:false }); if (snapshot.attack) bot.attack?.stop?.({ persistEnabled:false });
-    const walkingStopped = forceStopWalkingOnce(); bot.ui?.refreshAutoAttackStatus?.(); bot.ui?.refreshCaveStatus?.();
-    state.pauseTimerId = window.setTimeout(resumeGmPause, GM_PAUSE_MS);
-    bot.log?.("GM pause triggered", { source, speaker, message, walkingStopped, pauseMs:GM_PAUSE_MS, resumeSnapshot:snapshot, ...details }); return true;
-  }
-  function handleGameMasterDetection(source, speaker, message = "", details = {}) {
-    if (source === "visible-player" || source === "monster-speech") triggerGmAlarm(source, speaker, details);
-    const responderScheduled = (source === "chat" || source === "monster-speech") ? scheduleResponder(speaker, message) : false;
-    if (config.killSwitchEnabled) return triggerKillSwitch(source, speaker, message, { responderScheduled, ...details });
-    if (config.pauseEnabled) { const paused = triggerGmPause(source, speaker, message, details); if (paused) return true; }
-    if ((source === "visible-player" || source === "monster-speech") && config.alarmEnabled) return true;
-    if ((source === "chat" || source === "monster-speech") && config.responderEnabled) { bot.log?.("game master detected by responder", { speaker, message, responderScheduled, ...details }); return true; }
-    return false;
-  }
-
-  function isConfiguredGameMaster(entry, speaker, gmNames) { if (speaker && gmNames.has(normalizeName(speaker))) return true; return !!(entry?.isGameMaster || entry?.isGamemaster || entry?.gameMaster || entry?.gamemaster || entry?.speaker?.isGameMaster || entry?.sender?.isGameMaster || entry?.author?.isGameMaster); }
-  function getVisibleConfiguredGameMaster(gmNames) { if (!gmNames.size) return null; const players = bot.xray?.getVisiblePlayers?.() || []; return players.find(player => gmNames.has(normalizeName(player?.name))) || null; }
-
-  function messageExistsInChat(message) {
-    const needle = normalizeMessage(message).toLowerCase(); if (!needle) return false;
-    return getCurrentEntries().some(item => {
-      const haystack = normalizeMessage(item.message).toLowerCase();
-      return haystack === needle || haystack.endsWith(`: ${needle}`) || haystack.includes(` says: ${needle}`);
-    });
-  }
-  function parseRgb(color) {
-    const match = String(color || "").match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);
-    return match ? { r:Number(match[1]), g:Number(match[2]), b:Number(match[3]) } : null;
-  }
-  function isYellowSpeechColor(element) {
-    let color = "";
-    try { color = window.getComputedStyle(element).color || ""; } catch (_) {}
-    const rgb = parseRgb(color); if (!rgb) return false;
-    return rgb.r >= 180 && rgb.g >= 150 && rgb.b <= 120 && (rgb.r + rgb.g) >= (rgb.b * 3.2);
-  }
-  function isExcludedMonsterSpeechElement(element) {
-    if (!(element instanceof Element)) return true;
-    if (element.closest("#k9x-panel, input, textarea, button, select, option")) return true;
-    const marker = `${element.id || ""} ${element.className || ""}`.toLowerCase();
-    if (/chat|channel|console|message-log|history|sidebar|panel/.test(marker)) return true;
-    let parent = element.parentElement, depth = 0;
-    while (parent && depth++ < 6) {
-      const parentMarker = `${parent.id || ""} ${parent.className || ""}`.toLowerCase();
-      if (/chat|channel|console|message-log|history/.test(parentMarker)) return true;
-      parent = parent.parentElement;
-    }
-    return false;
-  }
-  function overlapsGameCanvas(element) {
-    let rect; try { rect = element.getBoundingClientRect(); } catch (_) { return false; }
-    if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-    const canvases = Array.from(document.querySelectorAll("canvas"));
-    if (!canvases.length) return true;
-    return canvases.some(canvas => {
-      let c; try { c = canvas.getBoundingClientRect(); } catch (_) { return false; }
-      if (!c || c.width < 200 || c.height < 150) return false;
-      return rect.right >= c.left && rect.left <= c.right && rect.bottom >= c.top && rect.top <= c.bottom;
-    });
-  }
-  function considerMonsterSpeechElement(element) {
-    if (!config.monsterResponderEnabled || isExcludedMonsterSpeechElement(element) || !isYellowSpeechColor(element) || !overlapsGameCanvas(element)) return;
-    const text = normalizeMessage(element.textContent || "");
-    if (!text || text.length < 2 || text.length > 220) return;
-    const key = text.toLowerCase(), now = Date.now(), last = state.monsterSpeechSeen.get(key) || 0;
-    if (now - last < MONSTER_SPEECH_DEDUPE_MS) return;
-    state.monsterSpeechSeen.set(key, now);
-    const timer = window.setTimeout(() => {
-      state.monsterSpeechPendingTimers.delete(timer);
-      if (!config.monsterResponderEnabled || messageExistsInChat(text)) return;
-      bot.log?.("GM monster responder detected floating yellow speech", { message:text, color:window.getComputedStyle?.(element)?.color || "unknown" });
-      handleGameMasterDetection("monster-speech", "Disguised monster", text, { floatingYellowSpeech:true, absentFromChat:true });
-    }, MONSTER_SPEECH_CHAT_GRACE_MS);
-    state.monsterSpeechPendingTimers.add(timer);
-  }
-  function scanMonsterSpeechMutationNode(node) {
-    const element = node?.nodeType === Node.TEXT_NODE ? node.parentElement : (node instanceof Element ? node : null);
-    if (!element) return;
-    considerMonsterSpeechElement(element);
-    if (element.querySelectorAll) for (const child of element.querySelectorAll("*")) considerMonsterSpeechElement(child);
-  }
-  function startMonsterSpeechObserver() {
-    if (!config.monsterResponderEnabled || state.monsterSpeechObserver || !document.body || typeof MutationObserver === "undefined") return false;
-    state.monsterSpeechObserver = new MutationObserver(mutations => {
-      if (!config.monsterResponderEnabled) return;
-      for (const mutation of mutations) {
-        for (const node of mutation.addedNodes || []) scanMonsterSpeechMutationNode(node);
-        if (mutation.type === "characterData") scanMonsterSpeechMutationNode(mutation.target);
-      }
-    });
-    state.monsterSpeechObserver.observe(document.body, { subtree:true, childList:true, characterData:true });
-    bot.log?.("GM monster responder floating-speech observer started");
-    return true;
-  }
-  function stopMonsterSpeechObserver() {
-    state.monsterSpeechObserver?.disconnect?.(); state.monsterSpeechObserver = null;
-    for (const timer of state.monsterSpeechPendingTimers) window.clearTimeout(timer);
-    state.monsterSpeechPendingTimers.clear(); state.monsterSpeechSeen.clear(); return true;
-  }
-  function syncMonsterSpeechObserver() { if (config.monsterResponderEnabled) startMonsterSpeechObserver(); else stopMonsterSpeechObserver(); }
-
-  function tick() {
-    if (!state.watcherRunning || !shouldWatch()) return;
-    const gmNames = new Set(getConfiguredGameMasterNames().map(normalizeName));
-    if (config.killSwitchEnabled || config.pauseEnabled || config.alarmEnabled) {
-      const visibleGm = getVisibleConfiguredGameMaster(gmNames), visibleKey = visibleGm ? normalizeName(visibleGm.name) : null;
-      if (!visibleGm) state.visibleGmKey = null;
-      else if (visibleKey && visibleKey !== state.visibleGmKey) {
-        state.visibleGmKey = visibleKey; handleGameMasterDetection("visible-player", visibleGm.name || "GM", "", { position:visibleGm?.getPosition?.() || visibleGm?.__position || null });
-        if (!state.watcherRunning || !shouldWatch()) return;
-      }
-    }
-    for (const item of getCurrentEntries()) {
-      if (state.seenEntryKeys.has(item.key)) continue; state.seenEntryKeys.add(item.key);
-      if (!item.speaker || !isConfiguredGameMaster(item.entry, item.speaker, gmNames)) continue;
-      handleGameMasterDetection("chat", item.speaker, item.message, { channel:item.channelName });
-      if (!state.watcherRunning || !shouldWatch()) return;
-    }
-    state.timerId = window.setTimeout(tick, 1000);
-  }
-  function startWatcher() { if (!shouldWatch() || state.watcherRunning) { syncMonsterSpeechObserver(); return false; } state.watcherRunning = true; rememberExistingEntries(); syncMonsterSpeechObserver(); tick(); return true; }
-  function stopWatcher() {
-    state.watcherRunning = false; if (state.timerId != null) window.clearTimeout(state.timerId); state.timerId = null;
-    if (state.pendingReplyTimerId != null) window.clearTimeout(state.pendingReplyTimerId); state.pendingReplyTimerId = null; state.responderPending = false; state.responderLockedUntil = 0; state.visibleGmKey = null; state.seenEntryKeys.clear();
-    if (!config.monsterResponderEnabled) stopMonsterSpeechObserver(); return true;
-  }
-  function syncWatcher() { if (shouldWatch()) startWatcher(); else stopWatcher(); syncMonsterSpeechObserver(); }
-
-  function ensurePanelControls() {
-    const panel = document.getElementById("k9x-panel"); if (!panel) return false;
-    let section = document.getElementById("minibia-bot-gm-kill-switch-section");
-    if (!section) {
-      const anchor = panel.querySelector("#minibia-bot-xray-section, #minibia-bot-player-screen-alarm-section, #minibia-bot-mining-section");
-      section = document.createElement("div"); section.id = "minibia-bot-gm-kill-switch-section"; section.className = "mb-section mb-column-section";
-      section.innerHTML = `<div class="mb-label">GM Kill Switch</div><div class="mb-stack"><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-kill-switch-enabled" /><span>Enable GM Kill Switch</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-pause-enabled" /><span>GM Pause</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-alarm-enabled" /><span>GM Alarm</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-responder-enabled" /><span>GM Auto Response</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-monster-responder-enabled" /><span>GM Monster Responder</span></label><label>GM Response<input id="minibia-bot-gm-responder-message" type="text" placeholder="Message to send" /></label><div class="mb-small-note">GM Monster Responder treats floating yellow speech over the game that does not appear in chat as a GM event, then follows the enabled Kill Switch, Pause, Alarm, and Auto Response toggles.</div></div>`;
-      if (anchor?.parentNode) anchor.parentNode.insertBefore(section, anchor.nextSibling); else (panel.querySelector(".mb-side-column") || panel.querySelector(".mb-main-column") || panel).appendChild(section);
-    }
-    if (!document.getElementById("minibia-bot-gm-monster-responder-enabled")) {
-      const stack = section.querySelector(".mb-stack"); const responseLabel = document.getElementById("minibia-bot-gm-responder-message")?.closest("label");
-      const label = document.createElement("label"); label.className = "mb-toggle"; label.innerHTML = `<input type="checkbox" id="minibia-bot-gm-monster-responder-enabled" /><span>GM Monster Responder</span>`;
-      if (responseLabel?.parentNode === stack) stack.insertBefore(label, responseLabel); else stack?.appendChild(label);
-    }
-    const killToggle = document.getElementById("minibia-bot-gm-kill-switch-enabled"), pauseToggle = document.getElementById("minibia-bot-gm-pause-enabled"), alarmToggle = document.getElementById("minibia-bot-gm-alarm-enabled"), responderToggle = document.getElementById("minibia-bot-gm-responder-enabled"), monsterResponderToggle = document.getElementById("minibia-bot-gm-monster-responder-enabled"), responderMessage = document.getElementById("minibia-bot-gm-responder-message"), exactNamesInput = document.getElementById("minibia-bot-gm-exact-names");
-    if (killToggle && !killToggle.dataset.gmKillBound) { killToggle.dataset.gmKillBound = "1"; killToggle.addEventListener("change", () => { config.killSwitchEnabled = !!killToggle.checked; persistConfig(); syncWatcher(); refreshPanelControls(); }); }
-    if (pauseToggle && !pauseToggle.dataset.gmPauseBound) { pauseToggle.dataset.gmPauseBound = "1"; pauseToggle.addEventListener("change", () => { config.pauseEnabled = !!pauseToggle.checked; persistConfig(); syncWatcher(); refreshPanelControls(); }); }
-    if (alarmToggle && !alarmToggle.dataset.gmAlarmBound) { alarmToggle.dataset.gmAlarmBound = "1"; alarmToggle.addEventListener("change", () => { config.alarmEnabled = !!alarmToggle.checked; if (!config.alarmEnabled) stopGmAlarmSpeech(); persistConfig(); syncWatcher(); refreshPanelControls(); }); }
-    if (responderToggle && !responderToggle.dataset.gmResponderBound) { responderToggle.dataset.gmResponderBound = "1"; responderToggle.addEventListener("change", () => { config.responderEnabled = !!responderToggle.checked; persistConfig(); syncWatcher(); refreshPanelControls(); }); }
-    if (monsterResponderToggle && !monsterResponderToggle.dataset.gmMonsterResponderBound) { monsterResponderToggle.dataset.gmMonsterResponderBound = "1"; monsterResponderToggle.addEventListener("change", () => { config.monsterResponderEnabled = !!monsterResponderToggle.checked; persistConfig(); syncWatcher(); refreshPanelControls(); }); }
-    if (responderMessage && !responderMessage.dataset.gmResponderMessageBound) { responderMessage.dataset.gmResponderMessageBound = "1"; const save = () => { config.responderMessage = String(responderMessage.value || "").trim(); persistConfig(); }; responderMessage.addEventListener("change", save); responderMessage.addEventListener("blur", save); }
-    if (exactNamesInput && !exactNamesInput.dataset.gmNamesBound) { exactNamesInput.dataset.gmNamesBound = "1"; const save = () => writeExactNames(exactNamesInput.value); exactNamesInput.addEventListener("change", save); exactNamesInput.addEventListener("blur", save); }
-    refreshPanelControls(); return true;
-  }
-  function startPanelWatcher() { if (state.panelTimerId != null) return; ensurePanelControls(); state.panelTimerId = window.setInterval(ensurePanelControls, 1000); }
-  function stopPanelWatcher() { if (state.panelTimerId != null) window.clearInterval(state.panelTimerId); state.panelTimerId = null; }
-  function destroy() { stopWatcher(); stopPanelWatcher(); stopMonsterSpeechObserver(); stopGmAlarmSpeech(); if (state.pauseTimerId != null) window.clearTimeout(state.pauseTimerId); state.pauseTimerId = null; state.pauseActive = false; state.pauseResumeSnapshot = null; }
-
-  bot.gmKillSwitch = { get config(){ return { ...config }; }, get exactNames(){ return readExactNames(); }, setExactNames:writeExactNames, startWatcher, stopWatcher, syncWatcher, triggerKillSwitch, triggerGmPause, triggerGmAlarm, handleGameMasterDetection, forceStopWalkingOnce, destroy };
-  bot.addCleanup?.(destroy); persistConfig(); startPanelWatcher(); syncWatcher(); return bot.gmKillSwitch;
+  function persistConfig(){ config.killSwitchEnabled=!!config.killSwitchEnabled; config.pauseEnabled=!!config.pauseEnabled; config.alarmEnabled=!!config.alarmEnabled; config.responderEnabled=!!config.responderEnabled; config.monsterResponderEnabled=!!config.monsterResponderEnabled; config.responderMessage=String(config.responderMessage||"").trim(); config.responderDelayMs=RESPONDER_DELAY_MS; config.responderResetMs=RESPONDER_RESET_MS; bot.storage.set(configStorageKey,{...config}); }
+  function normalizeName(name){ return String(name||"").trim().toLowerCase(); }
+  function normalizeMessage(message){ return String(message||"").replace(/\s+/g," ").trim(); }
+  function normalizeNameList(value){ const source=Array.isArray(value)?value:String(value||"").split(/[\n,]/); const seen=new Set(),result=[]; source.forEach(name=>{const displayName=String(name||"").trim(),normalized=normalizeName(displayName); if(!normalized||seen.has(normalized))return; seen.add(normalized); result.push(displayName);}); return result; }
+  function readExactNames(){ try{return normalizeNameList(window.localStorage.getItem(exactNamesStorageKey)||"");}catch(_){return [];} }
+  function writeExactNames(names){ const normalized=normalizeNameList(names); try{window.localStorage.setItem(exactNamesStorageKey,normalized.join("\n"));}catch(_){} refreshPanelControls(); return normalized; }
+  function getConfiguredGameMasterNames(){ return normalizeNameList([...readExactNames(),...(bot.panic?.getGameMasterNames?.()||[])]); }
+  function valueAsName(value){ if(typeof value==="string")return value.trim(); if(!value||typeof value!=="object")return ""; return String(value.name??value.playerName??value.characterName??value.label??value.text??"").trim(); }
+  function getChannels(){ const manager=window.gameClient?.interface?.channelManager; return Array.from(manager?.channels||manager?.channelList||[]); }
+  function getChannelEntries(channel){ return Array.from(channel?.__contents??channel?.contents??channel?.messages??channel?.entries??channel?.history??[]); }
+  function getEntryMessage(entry){ return String(entry?.message??entry?.text??entry?.content??entry?.value??entry?.body??""); }
+  function stripChatPrefix(message){ return String(message||"").replace(/^\s*\[?\d{1,2}:\d{2}(?::\d{2})?\]?\s*/,"").trim(); }
+  function getEntrySpeaker(entry,message){ const direct=entry?.speakerName??entry?.speaker??entry?.name??entry?.author??entry?.senderName??entry?.sender??entry?.playerName??entry?.characterName??entry?.creature?.name??entry?.player?.name; const directName=valueAsName(direct); if(directName)return directName; const text=stripChatPrefix(message); const saysMatch=text.match(/^(.+?)\s+says:\s*/i); if(saysMatch?.[1])return saysMatch[1].trim(); const colonMatch=text.match(/^([^:]{1,40}):\s+.+$/); return colonMatch?.[1]?.trim()||null; }
+  function getEntryBaseKey(channel,entry,speaker,message){ const channelName=normalizeName(channel?.name||channel?.title||channel?.label||channel?.type||"chat"); const id=entry?.id??entry?._id??entry?.key??""; const time=entry?.__time??entry?.time??entry?.timestamp??entry?.createdAt??""; return [channelName,id,time,normalizeName(speaker),normalizeMessage(message)].join("|"); }
+  function getCurrentEntries(){ const occurrences=new Map(),items=[]; for(const channel of getChannels())for(const entry of getChannelEntries(channel)){const message=getEntryMessage(entry),speaker=getEntrySpeaker(entry,message),baseKey=getEntryBaseKey(channel,entry,speaker,message),occurrence=(occurrences.get(baseKey)||0)+1; occurrences.set(baseKey,occurrence); items.push({channel,entry,message,speaker,channelName:String(channel?.name||channel?.title||channel?.label||channel?.type||"chat"),key:`${baseKey}|occurrence:${occurrence}`});} return items; }
+  function rememberExistingEntries(){ state.seenEntryKeys.clear(); for(const item of getCurrentEntries())state.seenEntryKeys.add(item.key); }
+  function shouldWatch(){ return !!config.killSwitchEnabled||!!config.pauseEnabled||!!config.alarmEnabled||!!config.responderEnabled||!!config.monsterResponderEnabled; }
+  function refreshPanelControls(){ const killToggle=document.getElementById("minibia-bot-gm-kill-switch-enabled"),pauseToggle=document.getElementById("minibia-bot-gm-pause-enabled"),alarmToggle=document.getElementById("minibia-bot-gm-alarm-enabled"),responderToggle=document.getElementById("minibia-bot-gm-responder-enabled"),monsterResponderToggle=document.getElementById("minibia-bot-gm-monster-responder-enabled"),responderMessage=document.getElementById("minibia-bot-gm-responder-message"),exactNamesInput=document.getElementById("minibia-bot-gm-exact-names"); if(killToggle)killToggle.checked=!!config.killSwitchEnabled; if(pauseToggle)pauseToggle.checked=!!config.pauseEnabled; if(alarmToggle)alarmToggle.checked=!!config.alarmEnabled; if(responderToggle)responderToggle.checked=!!config.responderEnabled; if(monsterResponderToggle)monsterResponderToggle.checked=!!config.monsterResponderEnabled; if(responderMessage&&responderMessage!==document.activeElement)responderMessage.value=config.responderMessage; if(exactNamesInput&&exactNamesInput!==document.activeElement)exactNamesInput.value=readExactNames().join("\n"); }
+  function sendReply(reply){ const senders=[()=>bot.sendChat?.(reply),()=>window.gameClient?.sendChat?.(reply),()=>window.gameClient?.interface?.channelManager?.sendMessage?.(reply),()=>window.gameClient?.interface?.channelManager?.say?.(reply)]; for(const send of senders)try{const result=send(); if(result!==undefined&&result!==false)return true;}catch(error){bot.log?.("GM responder send method failed",{error:String(error)});} return false; }
+  function scheduleResponder(speaker,message){ const reply=String(config.responderMessage||"").trim(),now=Date.now(); if(!config.responderEnabled||!reply||state.responderPending||now<state.responderLockedUntil)return false; state.responderPending=true; state.pendingReplyTimerId=window.setTimeout(()=>{state.pendingReplyTimerId=null;state.responderPending=false;const sent=sendReply(reply);state.responderLockedUntil=Date.now()+RESPONDER_RESET_MS;bot.log?.(sent?"GM responder sent one reply":"GM responder failed to send reply",{speaker,message,reply,resetMs:RESPONDER_RESET_MS});},RESPONDER_DELAY_MS); bot.log?.("GM responder scheduled one reply",{speaker,reply,delayMs:RESPONDER_DELAY_MS,resetMs:RESPONDER_RESET_MS}); return true; }
+  function stopGmAlarmSpeech(){ if(state.gmAlarmTimerId!=null)window.clearTimeout(state.gmAlarmTimerId);state.gmAlarmTimerId=null;state.gmAlarmUntilAt=0;state.gmAlarmLastSpokenAt=0; }
+  function speakGmAlarm(){ if(!config.alarmEnabled||Date.now()>=state.gmAlarmUntilAt){stopGmAlarmSpeech();return false;} if(typeof window.speechSynthesis==="undefined"||typeof SpeechSynthesisUtterance==="undefined"){bot.log?.("GM alarm unavailable: speech synthesis missing");stopGmAlarmSpeech();return false;} const now=Date.now();if(now-state.gmAlarmLastSpokenAt>=GM_ALARM_REPEAT_MS){try{window.speechSynthesis.speak(new SpeechSynthesisUtterance(GM_ALARM_TEXT));state.gmAlarmLastSpokenAt=now;}catch(error){bot.log?.("GM alarm speech failed",{error:String(error)});}} const remaining=Math.max(0,state.gmAlarmUntilAt-Date.now());if(remaining>0)state.gmAlarmTimerId=window.setTimeout(speakGmAlarm,Math.min(GM_ALARM_REPEAT_MS,remaining));else stopGmAlarmSpeech();return true; }
+  function triggerGmAlarm(source,speaker,details={}){ if(!config.alarmEnabled||(source!=="visible-player"&&source!=="monster-speech"))return false;stopGmAlarmSpeech();state.gmAlarmUntilAt=Date.now()+GM_ALARM_DURATION_MS;state.gmAlarmLastSpokenAt=0;bot.log?.("GM on-screen alarm triggered",{source,speaker,text:GM_ALARM_TEXT,durationMs:GM_ALARM_DURATION_MS,...details});speakGmAlarm();return true; }
+  function forceStopWalkingOnce(){ const player=window.gameClient?.player,world=window.gameClient?.world,pathfinder=world?.pathfinder; const candidates=[[player,"stopWalking"],[player,"stopAutoWalk"],[player,"cancelWalk"],[player,"cancelWalking"],[player,"clearPath"],[pathfinder,"stop"],[pathfinder,"cancel"],[pathfinder,"abort"],[pathfinder,"reset"],[pathfinder,"clearPath"],[world,"stopWalking"],[world,"cancelWalk"]]; for(const [target,method] of candidates){if(typeof target?.[method]!=="function")continue;try{target[method]();bot.log?.("GM safety forced walking stop",{method});return true;}catch(error){bot.log?.("GM safety walking stop command failed",{method,error:String(error)});}} const current=bot.getPlayerPosition?.(); if(current&&typeof pathfinder?.findPath==="function")try{const currentTile=typeof Position==="function"?new Position(Number(current.x),Number(current.y),Number(current.z)):current;pathfinder.findPath(current,currentTile);bot.log?.("GM safety forced walking stop",{method:"pathfinder.findPath(current,current)"});return true;}catch(error){bot.log?.("GM safety walking stop command failed",{method:"pathfinder.findPath(current,current)",error:String(error)});} bot.log?.("GM safety could not find walking stop command"); return false; }
+  function triggerKillSwitch(source,speaker,message="",details={}){ if(!config.killSwitchEnabled)return false;bot.cave?.stop?.();bot.attack?.stop?.();const walkingStopped=forceStopWalkingOnce();bot.log?.("game master kill switch triggered",{source,speaker,message,walkingStopped,...details});bot.ui?.refreshAutoAttackStatus?.();bot.ui?.refreshCaveStatus?.();config.killSwitchEnabled=false;persistConfig();syncWatcher();refreshPanelControls();return true; }
+  function resumeGmPause(){ if(!state.pauseActive)return false;const snapshot=state.pauseResumeSnapshot||{cave:false,attack:false};state.pauseTimerId=null;state.pauseActive=false;state.pauseResumeSnapshot=null;if(snapshot.cave)bot.cave?.start?.();if(snapshot.attack)bot.attack?.start?.();bot.ui?.refreshAutoAttackStatus?.();bot.ui?.refreshCaveStatus?.();bot.log?.("GM pause resumed modules after 15 seconds",snapshot);return true; }
+  function triggerGmPause(source,speaker,message="",details={}){ if(!config.pauseEnabled||state.pauseActive)return false;const snapshot={cave:!!bot.cave?.status?.().running,attack:!!bot.attack?.status?.().running};state.pauseActive=true;state.pauseResumeSnapshot=snapshot;if(snapshot.cave)bot.cave?.stop?.({persistEnabled:false});if(snapshot.attack)bot.attack?.stop?.({persistEnabled:false});const walkingStopped=forceStopWalkingOnce();bot.ui?.refreshAutoAttackStatus?.();bot.ui?.refreshCaveStatus?.();state.pauseTimerId=window.setTimeout(resumeGmPause,GM_PAUSE_MS);bot.log?.("GM pause triggered",{source,speaker,message,walkingStopped,pauseMs:GM_PAUSE_MS,resumeSnapshot:snapshot,...details});return true; }
+  function handleGameMasterDetection(source,speaker,message="",details={}){ if(source==="visible-player"||source==="monster-speech")triggerGmAlarm(source,speaker,details);const responderScheduled=(source==="chat"||source==="monster-speech")?scheduleResponder(speaker,message):false;if(config.killSwitchEnabled)return triggerKillSwitch(source,speaker,message,{responderScheduled,...details});if(config.pauseEnabled){const paused=triggerGmPause(source,speaker,message,details);if(paused)return true;}if((source==="visible-player"||source==="monster-speech")&&config.alarmEnabled)return true;if((source==="chat"||source==="monster-speech")&&config.responderEnabled){bot.log?.("game master detected by responder",{speaker,message,responderScheduled,...details});return true;}return false; }
+  function isConfiguredGameMaster(entry,speaker,gmNames){ if(speaker&&gmNames.has(normalizeName(speaker)))return true;return !!(entry?.isGameMaster||entry?.isGamemaster||entry?.gameMaster||entry?.gamemaster||entry?.speaker?.isGameMaster||entry?.sender?.isGameMaster||entry?.author?.isGameMaster); }
+  function getVisibleConfiguredGameMaster(gmNames){ if(!gmNames.size)return null;const players=bot.xray?.getVisiblePlayers?.()||[];return players.find(player=>gmNames.has(normalizeName(player?.name)))||null; }
+  function messageExistsInChat(message){ const needle=normalizeMessage(message).toLowerCase();if(!needle)return false;return getCurrentEntries().some(item=>{const haystack=normalizeMessage(item.message).toLowerCase();return haystack===needle||haystack.endsWith(`: ${needle}`)||haystack.includes(` says: ${needle}`);}); }
+  function parseRgb(color){ const match=String(color||"").match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i);return match?{r:Number(match[1]),g:Number(match[2]),b:Number(match[3])}:null; }
+  function isYellowSpeechColor(element){ let color="";try{color=window.getComputedStyle(element).color||"";}catch(_){} const rgb=parseRgb(color);if(!rgb)return false;return rgb.r>=180&&rgb.g>=150&&rgb.b<=120&&(rgb.r+rgb.g)>=(rgb.b*3.2); }
+  function isExcludedMonsterSpeechElement(element){ if(!(element instanceof Element))return true;if(element.closest("#k9x-panel, input, textarea, button, select, option"))return true;const marker=`${element.id||""} ${element.className||""}`.toLowerCase();if(/chat|channel|console|message-log|history|sidebar|panel/.test(marker))return true;let parent=element.parentElement,depth=0;while(parent&&depth++<6){const parentMarker=`${parent.id||""} ${parent.className||""}`.toLowerCase();if(/chat|channel|console|message-log|history/.test(parentMarker))return true;parent=parent.parentElement;}return false; }
+  function overlapsGameCanvas(element){ let rect;try{rect=element.getBoundingClientRect();}catch(_){return false;}if(!rect||rect.width<=0||rect.height<=0)return false;const canvases=Array.from(document.querySelectorAll("canvas"));if(!canvases.length)return true;return canvases.some(canvas=>{let c;try{c=canvas.getBoundingClientRect();}catch(_){return false;}if(!c||c.width<200||c.height<150)return false;return rect.right>=c.left&&rect.left<=c.right&&rect.bottom>=c.top&&rect.top<=c.bottom;}); }
+  function getCurrentMonsterNames(){ const names=new Set();for(const creature of [...(bot.xray?.getVisibleMonsters?.()||[]),...(bot.xray?.getOverlayCreatures?.()||[])]){const n=normalizeName(creature?.name);if(n)names.add(n);}return names; }
+  function hasSpeechShape(text){ const t=normalizeMessage(text);if(!t)return false;const words=t.split(/\s+/).filter(Boolean);return words.length>=2||/[!?.,:;]/.test(t); }
+  function isMonsterNameLabel(text){ return getCurrentMonsterNames().has(normalizeName(text)); }
+  function considerMonsterSpeechElement(element){ if(!config.monsterResponderEnabled||isExcludedMonsterSpeechElement(element)||!isYellowSpeechColor(element)||!overlapsGameCanvas(element))return;const text=normalizeMessage(element.textContent||"");if(!text||text.length<2||text.length>220)return;if(isMonsterNameLabel(text))return;if(!hasSpeechShape(text))return;const now=Date.now();if(!state.monsterSpeechBirth.has(element))state.monsterSpeechBirth.set(element,now);const key=text.toLowerCase(),last=state.monsterSpeechSeen.get(key)||0;if(now-last<MONSTER_SPEECH_DEDUPE_MS)return;state.monsterSpeechSeen.set(key,now);const timer=window.setTimeout(()=>{state.monsterSpeechPendingTimers.delete(timer);if(!config.monsterResponderEnabled||messageExistsInChat(text))return;let stillConnected=false;try{stillConnected=!!element.isConnected;}catch(_){}const bornAt=state.monsterSpeechBirth.get(element)||now;const age=Date.now()-bornAt;if(age<MONSTER_SPEECH_MIN_LIFETIME_MS||age>MONSTER_SPEECH_MAX_LIFETIME_MS)return;if(!stillConnected&&age<MONSTER_SPEECH_MIN_LIFETIME_MS)return;bot.log?.("GM monster responder detected transient floating yellow speech",{message:text,ageMs:age,color:window.getComputedStyle?.(element)?.color||"unknown"});handleGameMasterDetection("monster-speech","Disguised monster",text,{floatingYellowSpeech:true,absentFromChat:true,transientSpeech:true,ageMs:age});},MONSTER_SPEECH_CHAT_GRACE_MS+MONSTER_SPEECH_MIN_LIFETIME_MS);state.monsterSpeechPendingTimers.add(timer); }
+  function scanMonsterSpeechMutationNode(node){ const element=node?.nodeType===Node.TEXT_NODE?node.parentElement:(node instanceof Element?node:null);if(!element)return;considerMonsterSpeechElement(element);if(element.querySelectorAll)for(const child of element.querySelectorAll("*"))considerMonsterSpeechElement(child); }
+  function startMonsterSpeechObserver(){ if(!config.monsterResponderEnabled||state.monsterSpeechObserver||!document.body||typeof MutationObserver==="undefined")return false;state.monsterSpeechObserver=new MutationObserver(mutations=>{if(!config.monsterResponderEnabled)return;for(const mutation of mutations){for(const node of mutation.addedNodes||[])scanMonsterSpeechMutationNode(node);if(mutation.type==="characterData")scanMonsterSpeechMutationNode(mutation.target);}});state.monsterSpeechObserver.observe(document.body,{subtree:true,childList:true,characterData:true});bot.log?.("GM monster responder floating-speech observer started");return true; }
+  function stopMonsterSpeechObserver(){ state.monsterSpeechObserver?.disconnect?.();state.monsterSpeechObserver=null;for(const timer of state.monsterSpeechPendingTimers)window.clearTimeout(timer);state.monsterSpeechPendingTimers.clear();state.monsterSpeechSeen.clear();state.monsterSpeechBirth=new WeakMap();return true; }
+  function syncMonsterSpeechObserver(){ if(config.monsterResponderEnabled)startMonsterSpeechObserver();else stopMonsterSpeechObserver(); }
+  function tick(){ if(!state.watcherRunning||!shouldWatch())return;const gmNames=new Set(getConfiguredGameMasterNames().map(normalizeName));if(config.killSwitchEnabled||config.pauseEnabled||config.alarmEnabled){const visibleGm=getVisibleConfiguredGameMaster(gmNames),visibleKey=visibleGm?normalizeName(visibleGm.name):null;if(!visibleGm)state.visibleGmKey=null;else if(visibleKey&&visibleKey!==state.visibleGmKey){state.visibleGmKey=visibleKey;handleGameMasterDetection("visible-player",visibleGm.name||"GM","",{position:visibleGm?.getPosition?.()||visibleGm?.__position||null});if(!state.watcherRunning||!shouldWatch())return;}}for(const item of getCurrentEntries()){if(state.seenEntryKeys.has(item.key))continue;state.seenEntryKeys.add(item.key);if(!item.speaker||!isConfiguredGameMaster(item.entry,item.speaker,gmNames))continue;handleGameMasterDetection("chat",item.speaker,item.message,{channel:item.channelName});if(!state.watcherRunning||!shouldWatch())return;}state.timerId=window.setTimeout(tick,1000); }
+  function startWatcher(){ if(!shouldWatch()||state.watcherRunning){syncMonsterSpeechObserver();return false;}state.watcherRunning=true;rememberExistingEntries();syncMonsterSpeechObserver();tick();return true; }
+  function stopWatcher(){ state.watcherRunning=false;if(state.timerId!=null)window.clearTimeout(state.timerId);state.timerId=null;if(state.pendingReplyTimerId!=null)window.clearTimeout(state.pendingReplyTimerId);state.pendingReplyTimerId=null;state.responderPending=false;state.responderLockedUntil=0;state.visibleGmKey=null;state.seenEntryKeys.clear();if(!config.monsterResponderEnabled)stopMonsterSpeechObserver();return true; }
+  function syncWatcher(){ if(shouldWatch())startWatcher();else stopWatcher();syncMonsterSpeechObserver(); }
+  function ensurePanelControls(){ const panel=document.getElementById("k9x-panel");if(!panel)return false;let section=document.getElementById("minibia-bot-gm-kill-switch-section");if(!section){const anchor=panel.querySelector("#minibia-bot-xray-section, #minibia-bot-player-screen-alarm-section, #minibia-bot-mining-section");section=document.createElement("div");section.id="minibia-bot-gm-kill-switch-section";section.className="mb-section mb-column-section";section.innerHTML=`<div class="mb-label">GM Kill Switch</div><div class="mb-stack"><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-kill-switch-enabled" /><span>Enable GM Kill Switch</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-pause-enabled" /><span>GM Pause</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-alarm-enabled" /><span>GM Alarm</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-responder-enabled" /><span>GM Auto Response</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-gm-monster-responder-enabled" /><span>GM Monster Responder</span></label><label>GM Response<input id="minibia-bot-gm-responder-message" type="text" placeholder="Message to send" /></label><div class="mb-small-note">GM Monster Responder watches for transient yellow speech over the game that is not a monster name and does not appear in chat, then follows the enabled Kill Switch, Pause, Alarm, and Auto Response toggles.</div></div>`;if(anchor?.parentNode)anchor.parentNode.insertBefore(section,anchor.nextSibling);else(panel.querySelector(".mb-side-column")||panel.querySelector(".mb-main-column")||panel).appendChild(section);}if(!document.getElementById("minibia-bot-gm-monster-responder-enabled")){const stack=section.querySelector(".mb-stack");const responseLabel=document.getElementById("minibia-bot-gm-responder-message")?.closest("label");const label=document.createElement("label");label.className="mb-toggle";label.innerHTML=`<input type="checkbox" id="minibia-bot-gm-monster-responder-enabled" /><span>GM Monster Responder</span>`;if(responseLabel?.parentNode===stack)stack.insertBefore(label,responseLabel);else stack?.appendChild(label);}const killToggle=document.getElementById("minibia-bot-gm-kill-switch-enabled"),pauseToggle=document.getElementById("minibia-bot-gm-pause-enabled"),alarmToggle=document.getElementById("minibia-bot-gm-alarm-enabled"),responderToggle=document.getElementById("minibia-bot-gm-responder-enabled"),monsterResponderToggle=document.getElementById("minibia-bot-gm-monster-responder-enabled"),responderMessage=document.getElementById("minibia-bot-gm-responder-message"),exactNamesInput=document.getElementById("minibia-bot-gm-exact-names");if(killToggle&&!killToggle.dataset.gmKillBound){killToggle.dataset.gmKillBound="1";killToggle.addEventListener("change",()=>{config.killSwitchEnabled=!!killToggle.checked;persistConfig();syncWatcher();refreshPanelControls();});}if(pauseToggle&&!pauseToggle.dataset.gmPauseBound){pauseToggle.dataset.gmPauseBound="1";pauseToggle.addEventListener("change",()=>{config.pauseEnabled=!!pauseToggle.checked;persistConfig();syncWatcher();refreshPanelControls();});}if(alarmToggle&&!alarmToggle.dataset.gmAlarmBound){alarmToggle.dataset.gmAlarmBound="1";alarmToggle.addEventListener("change",()=>{config.alarmEnabled=!!alarmToggle.checked;if(!config.alarmEnabled)stopGmAlarmSpeech();persistConfig();syncWatcher();refreshPanelControls();});}if(responderToggle&&!responderToggle.dataset.gmResponderBound){responderToggle.dataset.gmResponderBound="1";responderToggle.addEventListener("change",()=>{config.responderEnabled=!!responderToggle.checked;persistConfig();syncWatcher();refreshPanelControls();});}if(monsterResponderToggle&&!monsterResponderToggle.dataset.gmMonsterResponderBound){monsterResponderToggle.dataset.gmMonsterResponderBound="1";monsterResponderToggle.addEventListener("change",()=>{config.monsterResponderEnabled=!!monsterResponderToggle.checked;persistConfig();syncWatcher();refreshPanelControls();});}if(responderMessage&&!responderMessage.dataset.gmResponderMessageBound){responderMessage.dataset.gmResponderMessageBound="1";const save=()=>{config.responderMessage=String(responderMessage.value||"").trim();persistConfig();};responderMessage.addEventListener("change",save);responderMessage.addEventListener("blur",save);}if(exactNamesInput&&!exactNamesInput.dataset.gmNamesBound){exactNamesInput.dataset.gmNamesBound="1";const save=()=>writeExactNames(exactNamesInput.value);exactNamesInput.addEventListener("change",save);exactNamesInput.addEventListener("blur",save);}refreshPanelControls();return true; }
+  function startPanelWatcher(){ if(state.panelTimerId!=null)return;ensurePanelControls();state.panelTimerId=window.setInterval(ensurePanelControls,1000); }
+  function stopPanelWatcher(){ if(state.panelTimerId!=null)window.clearInterval(state.panelTimerId);state.panelTimerId=null; }
+  function destroy(){ stopWatcher();stopPanelWatcher();stopMonsterSpeechObserver();stopGmAlarmSpeech();if(state.pauseTimerId!=null)window.clearTimeout(state.pauseTimerId);state.pauseTimerId=null;state.pauseActive=false;state.pauseResumeSnapshot=null; }
+  bot.gmKillSwitch={get config(){return{...config};},get exactNames(){return readExactNames();},setExactNames:writeExactNames,startWatcher,stopWatcher,syncWatcher,triggerKillSwitch,triggerGmPause,triggerGmAlarm,handleGameMasterDetection,forceStopWalkingOnce,destroy};bot.addCleanup?.(destroy);persistConfig();startPanelWatcher();syncWatcher();return bot.gmKillSwitch;
 };
