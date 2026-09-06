@@ -16,6 +16,9 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     lastError: null,
     lastWalkMethod: null,
     lastFieldName: null,
+    pendingFieldStep: null,
+    fieldStepRetries: 0,
+    dpadButtons: null,
   };
 
   const config = {
@@ -250,6 +253,150 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     }
   }
 
+  const dpadSymbolByKey = {
+    ArrowUp: "▲",
+    ArrowRight: "▶",
+    ArrowDown: "▼",
+    ArrowLeft: "◀",
+  };
+
+  function normalizeControlText(value) {
+    return String(value || "")
+      .replace(/\uFE0E|\uFE0F/g, "")
+      .replace(/\s+/g, "")
+      .trim()
+      .toLowerCase();
+  }
+
+  function getButtonDirection(button) {
+    const text = normalizeControlText(button?.textContent);
+    const label = normalizeControlText(
+      button?.getAttribute?.("aria-label")
+      || button?.getAttribute?.("title")
+      || button?.dataset?.direction
+      || button?.dataset?.key
+      || ""
+    );
+    const values = new Set([text, label]);
+    if (values.has("▲") || values.has("up") || values.has("north") || values.has("arrowup")) return "ArrowUp";
+    if (values.has("▶") || values.has("right") || values.has("east") || values.has("arrowright")) return "ArrowRight";
+    if (values.has("▼") || values.has("down") || values.has("south") || values.has("arrowdown")) return "ArrowDown";
+    if (values.has("◀") || values.has("left") || values.has("west") || values.has("arrowleft")) return "ArrowLeft";
+    return null;
+  }
+
+  function findDpadButtons() {
+    if (state.dpadButtons
+      && Object.values(state.dpadButtons).every((button) => button?.isConnected)) {
+      return state.dpadButtons;
+    }
+
+    const candidates = Array.from(document.querySelectorAll("button"))
+      .map((button) => ({ button, key: getButtonDirection(button) }))
+      .filter((entry) => entry.key);
+
+    for (const entry of candidates) {
+      let container = entry.button.parentElement;
+      for (let depth = 0; container && depth < 7; depth += 1, container = container.parentElement) {
+        const buttons = {};
+        for (const button of container.querySelectorAll("button")) {
+          const key = getButtonDirection(button);
+          if (key && !buttons[key]) buttons[key] = button;
+        }
+        if (Object.keys(buttons).length === 4) {
+          state.dpadButtons = buttons;
+          return buttons;
+        }
+      }
+    }
+
+    const fallback = {};
+    for (const entry of candidates) if (!fallback[entry.key]) fallback[entry.key] = entry.button;
+    state.dpadButtons = Object.keys(fallback).length === 4 ? fallback : null;
+    return state.dpadButtons;
+  }
+
+  function clickFieldDirection(key, fromPosition, nextTile, fieldName) {
+    const button = findDpadButtons()?.[key] || null;
+    if (!button) {
+      state.lastError = `Minibia D-pad control not found for ${key}`;
+      state.lastWalkMethod = null;
+      return false;
+    }
+
+    try {
+      button.click();
+      state.lastFieldName = fieldName;
+      state.lastWalkMethod = `Minibia direct D-pad field step (${key})`;
+      state.lastError = null;
+      state.pendingFieldStep = {
+        from: { ...fromPosition },
+        to: { ...nextTile },
+        key,
+        fieldName,
+        sentAt: Date.now(),
+      };
+      bot.log("cave direct field step requested", {
+        key,
+        from: fromPosition,
+        nextTile,
+        field: fieldName,
+      });
+      return true;
+    } catch (error) {
+      state.lastError = `D-pad field movement failed: ${error?.message || error}`;
+      state.lastWalkMethod = null;
+      return false;
+    }
+  }
+
+  function handlePendingFieldStep(fromPosition) {
+    const pending = state.pendingFieldStep;
+    if (!pending) return null;
+
+    if (!sameTile(fromPosition, pending.from)) {
+      state.pendingFieldStep = null;
+      state.fieldStepRetries = 0;
+      state.fieldStepCount += 1;
+      state.stepCount += 1;
+      state.lastStepAt = Date.now();
+      bot.log("cave direct field step confirmed", {
+        key: pending.key,
+        from: pending.from,
+        expected: pending.to,
+        actual: fromPosition,
+        field: pending.fieldName,
+        fieldStepCount: state.fieldStepCount,
+      });
+      return true;
+    }
+
+    if (Date.now() - pending.sentAt < 450) return true;
+    if (state.fieldStepRetries >= 3) {
+      state.lastError = `Direct field step did not move after ${state.fieldStepRetries + 1} attempts`;
+      state.pendingFieldStep = null;
+      state.fieldStepRetries = 0;
+      return false;
+    }
+
+    state.fieldStepRetries += 1;
+    const button = findDpadButtons()?.[pending.key] || null;
+    if (!button) {
+      state.lastError = `Minibia D-pad control not found for retry ${pending.key}`;
+      state.pendingFieldStep = null;
+      state.fieldStepRetries = 0;
+      return false;
+    }
+    button.click();
+    pending.sentAt = Date.now();
+    bot.log("cave direct field step retry", {
+      key: pending.key,
+      attempt: state.fieldStepRetries + 1,
+      field: pending.fieldName,
+    });
+    return true;
+  }
+
   function walkOneCardinalTile(originalFrom, fromPosition, nextTile, key) {
     if (typeof state.originalFindPath !== "function") {
       state.lastError = "Original Minibia pathfinder is unavailable";
@@ -298,6 +445,9 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     const toPosition = normalizePosition(to);
     if (!fromPosition || !toPosition || fromPosition.z !== toPosition.z) return false;
 
+    const pendingResult = handlePendingFieldStep(fromPosition);
+    if (pendingResult !== null) return pendingResult;
+
     const now = Date.now();
     if (now - state.lastStepAt < config.stepCooldownMs) return true;
 
@@ -315,6 +465,14 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     if (!key) {
       state.lastError = "Smart A* produced a non-cardinal step";
       return false;
+    }
+
+    const targetTile = getTileAt(nextTile);
+    const fieldName = getDamagingFieldName(targetTile);
+    if (fieldName) {
+      state.lastKey = key;
+      state.fieldStepRetries = 0;
+      return clickFieldDirection(key, fromPosition, nextTile, fieldName);
     }
 
     if (!walkOneCardinalTile(from, fromPosition, nextTile, key)) return false;
@@ -399,6 +557,9 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       lastError: state.lastError,
       lastWalkMethod: state.lastWalkMethod,
       lastFieldName: state.lastFieldName,
+      pendingFieldStep: state.pendingFieldStep ? { ...state.pendingFieldStep } : null,
+      fieldStepRetries: state.fieldStepRetries,
+      dpadReady: !!findDpadButtons(),
     };
   }
 
@@ -407,6 +568,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
     state.uiTimerId = null;
     matrixCache.clear();
+    state.pendingFieldStep = null;
+    state.dpadButtons = null;
   }
 
   bot.caveArrowKeys = {
