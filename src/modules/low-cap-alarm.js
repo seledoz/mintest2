@@ -181,11 +181,8 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     if (!rightColumn) return false;
 
     const lowCapSection = document.getElementById(sectionId);
-    const miningSection = document.getElementById("minibia-bot-mining-section");
-
     if (lowCapSection) rightColumn.appendChild(lowCapSection);
-    if (miningSection) rightColumn.appendChild(miningSection);
-    return !!(lowCapSection || miningSection);
+    return !!lowCapSection;
   }
 
   function ensureUi() {

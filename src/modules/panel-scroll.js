@@ -85,14 +85,12 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     return true;
   }
 
-  function keepMiningBelowGm() {
-    const gmSection = document.getElementById("minibia-bot-gm-kill-switch-section");
-    const monsterResponderSection = document.getElementById("minibia-bot-gm-unknown-monster-controls");
+  function keepMiningBelowPlayerScreenAlarm() {
+    const playerScreenSection = document.getElementById("minibia-bot-player-screen-alert-section");
     const miningSection = document.getElementById("minibia-bot-mining-section");
-    if (!gmSection?.parentElement || !miningSection) return false;
-    const placementAnchor = monsterResponderSection?.parentElement === gmSection.parentElement ? monsterResponderSection : gmSection;
-    if (placementAnchor.nextElementSibling !== miningSection) {
-      placementAnchor.insertAdjacentElement("afterend", miningSection);
+    if (!playerScreenSection?.parentElement || !miningSection) return false;
+    if (playerScreenSection.nextElementSibling !== miningSection) {
+      playerScreenSection.insertAdjacentElement("afterend", miningSection);
     }
     return true;
   }
@@ -187,7 +185,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       installCaveNewButton();
       installCaveRemoveLastButton();
       retainCavePresetSelection();
-      keepMiningBelowGm();
+      keepMiningBelowPlayerScreenAlarm();
       const rect = panel.getBoundingClientRect();
       const maxScrollLeft = Math.max(0, panel.scrollWidth - panel.clientWidth);
       const hasHorizontalOverflow = maxScrollLeft > 2;
@@ -232,7 +230,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       installCaveNewButton();
       installCaveRemoveLastButton();
       retainCavePresetSelection();
-      keepMiningBelowGm();
+      keepMiningBelowPlayerScreenAlarm();
       if (installControls()) observer.disconnect();
     });
     observer.observe(document.documentElement, { childList: true, subtree: true });

@@ -100,6 +100,7 @@
   function enforceBottomSectionOrder() {
     const github = document.getElementById("minibia-bot-github-waypoints-section");
     const gm = document.getElementById("minibia-bot-gm-kill-switch-section");
+    const playerScreen = document.getElementById("minibia-bot-player-screen-alert-section");
     const mining = document.getElementById("minibia-bot-mining-section");
     if (!github) return;
 
@@ -113,8 +114,8 @@
     }
 
     if (mining) {
-      const anchor = gm && gm.parentElement === column ? gm : github;
-      if (mining.parentElement !== column || anchor.nextElementSibling !== mining) {
+      const anchor = playerScreen?.parentElement ? playerScreen : null;
+      if (anchor && (mining.parentElement !== anchor.parentElement || anchor.nextElementSibling !== mining)) {
         anchor.insertAdjacentElement("afterend", mining);
       }
     }
