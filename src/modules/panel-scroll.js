@@ -87,10 +87,12 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
   function keepMiningBelowGm() {
     const gmSection = document.getElementById("minibia-bot-gm-kill-switch-section");
+    const monsterResponderSection = document.getElementById("minibia-bot-gm-unknown-monster-controls");
     const miningSection = document.getElementById("minibia-bot-mining-section");
     if (!gmSection?.parentElement || !miningSection) return false;
-    if (gmSection.nextElementSibling !== miningSection) {
-      gmSection.insertAdjacentElement("afterend", miningSection);
+    const placementAnchor = monsterResponderSection?.parentElement === gmSection.parentElement ? monsterResponderSection : gmSection;
+    if (placementAnchor.nextElementSibling !== miningSection) {
+      placementAnchor.insertAdjacentElement("afterend", miningSection);
     }
     return true;
   }

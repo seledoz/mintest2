@@ -296,7 +296,9 @@ window.__minibiaBotBundle.installMiningModule = function installMiningModule(bot
       </div>`;
 
     const gmSection = document.getElementById("minibia-bot-gm-kill-switch-section");
-    if (gmSection?.parentElement) gmSection.insertAdjacentElement("afterend", section);
+    const monsterResponderSection = document.getElementById("minibia-bot-gm-unknown-monster-controls");
+    const placementAnchor = monsterResponderSection?.parentElement === gmSection?.parentElement ? monsterResponderSection : gmSection;
+    if (placementAnchor?.parentElement) placementAnchor.insertAdjacentElement("afterend", section);
     else firstColumn.appendChild(section);
 
     const enabled = document.getElementById(enabledId);
