@@ -55,6 +55,9 @@
       attackExcludeCreatureNames: Array.isArray(bot?.attackExclude?.config?.excludedCreatureNames)
         ? [...bot.attackExclude.config.excludedCreatureNames]
         : [],
+      gmUnknownMonsterAllowlist: Array.isArray(bot?.gmKillSwitch?.unknownMonsterAllowlist)
+        ? [...bot.gmKillSwitch.unknownMonsterAllowlist]
+        : [],
     };
   }
 
@@ -82,6 +85,12 @@
     if (Array.isArray(lists.attackExcludeCreatureNames)) {
       if (typeof bot?.attackExclude?.setNames === "function") {
         bot.attackExclude.setNames(lists.attackExcludeCreatureNames);
+        restored += 1;
+      } else missing += 1;
+    }
+    if (Array.isArray(lists.gmUnknownMonsterAllowlist)) {
+      if (typeof bot?.gmKillSwitch?.setUnknownMonsterAllowlist === "function") {
+        bot.gmKillSwitch.setUnknownMonsterAllowlist(lists.gmUnknownMonsterAllowlist);
         restored += 1;
       } else missing += 1;
     }
@@ -264,8 +273,8 @@
       throw new Error("This profile uses the old format. Configure the bot and press Save on this profile once.");
     }
 
-    const controlResult = applyPanelControls(profile.controls);
     const listResult = restoreModuleLists(profile.lists);
+    const controlResult = applyPanelControls(profile.controls);
     const moduleConfigResult = restoreModuleConfigs(profile.moduleConfigs);
     scheduleCombatRuntimeReconcile(profile.controls);
 
