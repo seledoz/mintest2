@@ -25,6 +25,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     stepCooldownMs: 180,
     matrixCacheMs: 750,
     allowDamagingFields: true,
+    fieldMovementCost: 12,
   };
 
   const matrixCache = new Map();
@@ -45,15 +46,11 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     return !!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z;
   }
 
-  function isSmartAFieldCrossingEnabled() {
-    return !!bot.cave?.status?.().config?.smartAFieldCrossing;
-  }
-
   function isArrowModeActive(to) {
     const caveStatus = bot.cave?.status?.() || null;
     if (!caveStatus?.running) return false;
     const mode = caveStatus?.config?.pathfinderMode;
-    if (mode !== "arrow" && !(mode === "astar" && caveStatus?.config?.smartAFieldCrossing)) return false;
+    if (mode !== "arrow") return false;
     if (!caveStatus.currentWaypoint) return false;
     return sameTile(to, caveStatus.currentWaypoint);
   }
@@ -84,7 +81,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   }
 
   function getDamagingFieldName(tile) {
-    if (!tile || (!config.allowDamagingFields && !isSmartAFieldCrossingEnabled())) return null;
+    if (!config.allowDamagingFields || !tile) return null;
     for (const thing of getTileThings(tile)) {
       const name = getThingName(thing);
       if (damagingFieldPattern.test(name)) return name;
@@ -128,7 +125,10 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       for (const tile of chunk.tiles) {
         const pos = normalizePosition(tile?.__position);
         if (!pos || pos.z !== z) continue;
-        matrix.set(`${pos.x},${pos.y}`, isSmartArrowPassable(tile));
+        matrix.set(`${pos.x},${pos.y}`, {
+          passable: isSmartArrowPassable(tile),
+          field: isDamagingFieldTile(tile),
+        });
       }
     }
 
@@ -146,7 +146,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
 
     return directions
       .map((direction) => ({ x: node.x + direction.x, y: node.y + direction.y, z: node.z }))
-      .filter((position) => matrix.get(`${position.x},${position.y}`) === true);
+      .filter((position) => matrix.get(`${position.x},${position.y}`)?.passable);
   }
 
   function heuristic(a, b) {
@@ -192,7 +192,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
         const neighborKey = key(neighbor);
         if (closed.has(neighborKey)) continue;
 
-        const g = current.g + 1;
+        const cell = matrix.get(`${neighbor.x},${neighbor.y}`);
+        const g = current.g + (cell?.field ? config.fieldMovementCost : 1);
         const f = g + heuristic(neighbor, to);
         const existing = open.find((entry) => entry.x === neighbor.x && entry.y === neighbor.y);
         if (existing) {
@@ -543,42 +544,11 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     if (mode === "astar" || mode === "arrow") select.value = mode;
   }
 
-  function ensureFieldCrossingToggle() {
-    const select = document.getElementById("minibia-bot-cave-pathfinder-mode");
-    if (!select) return;
-    const caveField = select.closest(".mb-field");
-    if (!caveField?.parentElement) return;
-
-    let toggle = document.getElementById("minibia-bot-cave-field-crossing");
-    if (!toggle) {
-      const label = document.createElement("label");
-      label.className = "mb-toggle";
-      label.id = "minibia-bot-cave-field-crossing-row";
-      toggle = document.createElement("input");
-      toggle.type = "checkbox";
-      toggle.id = "minibia-bot-cave-field-crossing";
-      const text = document.createElement("span");
-      text.textContent = "Field Crossing (Smart A*)";
-      label.appendChild(toggle);
-      label.appendChild(text);
-      caveField.insertAdjacentElement("afterend", label);
-
-      toggle.addEventListener("change", () => {
-        bot.cave?.updateConfig?.({ smartAFieldCrossing: !!toggle.checked });
-        matrixCache.clear();
-      });
-    }
-
-    const enabled = isSmartAFieldCrossingEnabled();
-    if (toggle.checked !== enabled) toggle.checked = enabled;
-    toggle.disabled = bot.cave?.status?.().config?.pathfinderMode !== "astar";
-  }
 
   function status() {
     return {
       installed: state.installed,
       config: { ...config },
-      smartAFieldCrossing: isSmartAFieldCrossingEnabled(),
       lastStepAt: state.lastStepAt,
       lastKey: state.lastKey,
       stepCount: state.stepCount,
@@ -607,7 +577,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     installPathInterceptor,
     uninstallPathInterceptor,
     ensureDropdownOption,
-    ensureFieldCrossingToggle,
     status,
     destroy,
     config,
@@ -617,10 +586,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
 
   installPathInterceptor();
   ensureDropdownOption();
-  ensureFieldCrossingToggle();
   state.uiTimerId = window.setInterval(() => {
     ensureDropdownOption();
-    ensureFieldCrossingToggle();
   }, 1000);
   bot.addCleanup(destroy);
   return bot.caveArrowKeys;
