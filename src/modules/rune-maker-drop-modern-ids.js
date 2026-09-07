@@ -2,6 +2,7 @@
   const MODERN_BLANK_RUNE_ID = 3147;
   const MODERN_RUNE_ID_MIN = 3148;
   const MODERN_RUNE_ID_MAX = 3200;
+  const BURST_ARROW_ID = 3449;
 
   function getItem(container, slot) {
     try {
@@ -82,6 +83,8 @@
           try { item.name = "blank rune"; } catch (_) {}
         } else if (id >= MODERN_RUNE_ID_MIN && id <= MODERN_RUNE_ID_MAX) {
           try { item.name = item.name || "rune"; } catch (_) {}
+        } else if (id === BURST_ARROW_ID) {
+          try { item.name = "rune"; } catch (_) {}
         }
       }
     }
@@ -105,5 +108,6 @@
   console.log("[minibia-bot] Rune Maker Drop container compatibility enabled", {
     blankRune: MODERN_BLANK_RUNE_ID,
     runeRange: [MODERN_RUNE_ID_MIN, MODERN_RUNE_ID_MAX],
+    burstArrow: BURST_ARROW_ID,
   });
 })();
