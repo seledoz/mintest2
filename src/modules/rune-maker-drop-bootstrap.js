@@ -10,6 +10,7 @@
     resumeCave: false,
     runeStarted: false,
     wasRuneEnabled: false,
+    pausedCombatModules: [],
   };
 
   function stopCoordinationTimer() {
@@ -55,6 +56,45 @@
     return true;
   }
 
+  function clearGamePath() {
+    try {
+      window.gameClient?.world?.pathfinder?.setPathfindCache?.(null);
+    } catch (error) {
+      window.minibiaBot?.log?.("rune maker drop could not clear active path", error?.message || error);
+    }
+  }
+
+  function pauseCombatModules() {
+    const bot = window.minibiaBot;
+    if (!bot) return;
+
+    coordination.pausedCombatModules = [];
+    const modules = [bot.attack, bot.attackAoe, bot.attackGfb];
+    modules.forEach((module) => {
+      if (!module?.stop || !module?.status) return;
+      try {
+        const status = module.status();
+        if (!status?.running) return;
+        coordination.pausedCombatModules.push(module);
+        module.stop({ persistEnabled: false });
+      } catch (error) {
+        bot.log?.("rune maker drop could not pause combat module", { error: error?.message || error });
+      }
+    });
+
+    clearGamePath();
+  }
+
+  function resumeCombatModules() {
+    const modules = coordination.pausedCombatModules.slice();
+    coordination.pausedCombatModules = [];
+    modules.forEach((module) => {
+      try { module.start?.(); } catch (error) {
+        window.minibiaBot?.log?.("rune maker drop could not resume combat module", { error: error?.message || error });
+      }
+    });
+  }
+
   function restoreRuneEnabled() {
     setRuneEnabled(coordination.wasRuneEnabled);
   }
@@ -73,13 +113,15 @@
 
     if (shouldResume && cave) {
       try {
+        cave.setCurrentIndex?.(0);
         cave.start();
-        bot.log?.("rune maker drop resumed cavebot", { waypoint: cave.getCurrentWaypoint?.() || null });
+        bot.log?.("rune maker drop resumed cavebot from waypoint 1", { waypoint: cave.getCurrentWaypoint?.() || null });
       } catch (error) {
         bot.log?.("rune maker drop failed to resume cavebot", { error: error?.message || error });
       }
     }
 
+    resumeCombatModules();
     bot.log?.(message);
   }
 
@@ -95,8 +137,12 @@
     restoreRuneEnabled();
 
     if (shouldResume && cave) {
-      try { cave.start(); } catch (_) {}
+      try {
+        cave.setCurrentIndex?.(0);
+        cave.start();
+      } catch (_) {}
     }
+    resumeCombatModules();
     bot.log?.(message);
   }
 
@@ -121,19 +167,24 @@
     coordination.wasRuneEnabled = true;
     coordination.resumeCave = true;
     coordination.runeStarted = false;
+    coordination.pausedCombatModules = [];
     coordination.phase = "to-waypoint-1";
 
-    // Block Rune Maker Drop's normal low-cap trigger while we move the character
-    // to waypoint 1. This is deliberately in-memory so the user's Rune Maker
-    // Drop setting remains enabled and is restored after the cycle.
+    // Block Rune Maker Drop's normal low-cap trigger while the character is
+    // being handed off to waypoint 1. Keep the user's setting enabled in the UI.
     setRuneEnabled(false);
 
     try {
-      // Stop Cavebot before issuing the trip to waypoint 1 so there is exactly
-      // one movement owner during this handoff.
+      // First stop Cavebot and every active combat controller, then clear any
+      // already queued game path. This prevents movement/fighting from racing
+      // the Rune Maker Drop handoff.
       cave.stop({ persistEnabled: false });
+      pauseCombatModules();
+      clearGamePath();
       cave.setCurrentIndex?.(0);
-      cave.goToWaypoint?.(firstWaypoint);
+      if (!cave.goToWaypoint?.(firstWaypoint)) {
+        throw new Error("Cavebot could not path to waypoint 1");
+      }
       bot.log?.("rune maker drop waiting at cavebot waypoint 1", { waypoint: firstWaypoint });
       return true;
     } catch (error) {
@@ -175,8 +226,8 @@
       const atFirstWaypoint = cave.isAtWaypoint?.(position, firstWaypoint) || samePosition(position, firstWaypoint);
       if (!atFirstWaypoint) return;
 
-      // We are already stopped here, so there is no movement competition.
-      // Re-enable Rune Maker Drop and let its normal tick start the drop cycle.
+      // We are already stopped here and combat modules remain paused. Re-enable
+      // Rune Maker Drop so its normal tick starts the drop cycle.
       setRuneEnabled(true);
       coordination.phase = "waiting-for-rune-cycle";
       bot.log?.("rune maker drop reached cavebot waypoint 1; starting drop cycle");
@@ -200,16 +251,10 @@
   function installOnBot(bot) {
     if (!bot) return bot;
 
-    // The panel is rebuilt during reloads, but the existing runeMakerDrop
-    // object can survive long enough for this bootstrap to skip installation.
-    // Stop that stale instance and reinstall it so its UI injection loop runs
-    // again and restores the Rune Maker Drop section.
     if (bot.runeMakerDrop) {
       try {
         bot.runeMakerDrop.stop?.({ persistEnabled: false });
-      } catch (_) {
-        // Continue with a fresh installation even if the stale instance fails.
-      }
+      } catch (_) {}
       try {
         delete bot.runeMakerDrop;
       } catch (_) {
@@ -234,6 +279,7 @@
     startCoordination();
     bot.addCleanup?.(() => {
       stopCoordinationTimer();
+      resumeCombatModules();
       bot.runeMakerDrop?.stop?.({ persistEnabled: false });
     });
     return bot;
