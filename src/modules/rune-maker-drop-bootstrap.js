@@ -166,19 +166,6 @@
       return;
     }
 
-    // If the user disables Rune Maker Drop while we are waiting for waypoint 1,
-    // cancel the handoff and restore Cavebot instead of leaving it stopped.
-    if (coordination.phase === "to-waypoint-1" && !rune.config.enabled && runeStatus.phase === "idle") {
-      // config.enabled is intentionally false during this phase; only abort if
-      // the user's checkbox was also turned off after the handoff was made.
-      const checkbox = document.getElementById("minibia-bot-rune-maker-drop-enabled");
-      if (checkbox && !checkbox.checked) {
-        coordination.wasRuneEnabled = false;
-        abortCoordination("rune maker drop disabled during cavebot handoff");
-        return;
-      }
-    }
-
     const route = cave.getRoute?.() || [];
     const firstWaypoint = route[0];
     const position = getPlayerPosition();
@@ -233,7 +220,7 @@
     // Prevent the module's synchronous startup tick from taking the low-cap
     // trip before Cavebot coordination gets a chance to hand off movement.
     const storedConfig = bot.storage?.get?.(runeConfigStorageKey, {}) || {};
-    const storedEnabled = storedConfig.enabled !== false;
+    const storedEnabled = storedConfig.enabled === true;
     if (storedEnabled) {
       bot.storage?.set?.(runeConfigStorageKey, { ...storedConfig, enabled: false });
     }
