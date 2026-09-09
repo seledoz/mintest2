@@ -144,7 +144,7 @@ window.__minibiaBotBundle.installGithubWaypointLibraryModule = function installG
 
   async function listScriptFiles() {
     const url = `${apiBaseUrl}/${encodePath(waypointDirectory)}?ref=${encodeURIComponent(branch)}`;
-    const entries = await fetchJson(url, { headers: getHeaders("") });
+    const entries = await fetchJson(url, { headers: getHeaders() });
     return (Array.isArray(entries) ? entries : [])
       .filter((entry) => entry?.type === "file" && /\.json$/i.test(entry.name) && entry.name !== "library.json")
       .sort((a, b) => a.name.localeCompare(b.name));
