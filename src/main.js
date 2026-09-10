@@ -172,12 +172,12 @@
   }
 
   function installLureCaveProgressPreserver(bot) {
-    if (!bot?.cave?.start || !bot?.cave?.stop || !bot?.cave?.status || !bot?.cave?.setCurrentIndex) return null;
+    if (!bot?.cave?.start || !bot.cave?.stop || !bot.cave?.status || !bot.cave?.setCurrentIndex) return null;
     const originalStart = bot.cave.start.bind(bot.cave);
     const originalStop = bot.cave.stop.bind(bot.cave);
     const state = { pending: null, restoreCount: 0, lastRestoreAt: 0 };
     function getLureMode() { const lureStatus = bot.lureMode?.status?.() || null; return Number(lureStatus?.config?.mode) === 2 ? 2 : 1; }
-    function lureOwnsCave() { const lureStatus = bot.lureMode?.status?.() || null; if (!lureStatus?.running) return false; const mode = getLureMode(); return mode === 2 ? !!lureStatus?.mode2?.active : !!lureStatus?.clearingPack; }
+    function lureOwnsCave() { const lureStatus = bot.lureMode?.status?.() || null; if (!lureStatus?.running) return false; const mode = getLureMode(); return mode === 2 ? !!lureStatus?.mode2?.active : (!!lureStatus?.clearingPack || !!lureStatus?.resumeCaveAfterClear); }
     function snapshotProgress() { const caveStatus = bot.cave.status(); const routeLength = Array.isArray(caveStatus?.route) ? caveStatus.route.length : 0; if (!caveStatus?.running || routeLength <= 0) return null; return { currentIndex: Math.max(0, Math.min(routeLength - 1, Math.trunc(Number(caveStatus.currentIndex) || 0))), direction: Number(caveStatus.direction) < 0 ? -1 : 1, routeLength, waypoint: caveStatus.currentWaypoint ? { ...caveStatus.currentWaypoint } : null, capturedAt: Date.now() }; }
     function stopCurrentMovement() { const targets = [window.gameClient?.world?.pathfinder, window.gameClient?.player, window.gameClient?.world].filter(Boolean); ["stop", "cancel", "clear", "clearPath", "stopWalking", "cancelWalking", "stopAutoWalk", "reset"].forEach((name) => { targets.forEach((target) => { if (typeof target?.[name] !== "function") return; try { target[name](); } catch (_) {} }); }); }
     bot.cave.stop = function lureAwareCaveStop(options = {}) { if (lureOwnsCave()) { const snapshot = snapshotProgress(); if (snapshot) { state.pending = snapshot; bot.log?.("lure preserved cave waypoint before takeover", { index: snapshot.currentIndex + 1, direction: snapshot.direction, routeLength: snapshot.routeLength, waypoint: snapshot.waypoint }); } if (getLureMode() === 1 && bot.cave.status()?.running) { stopCurrentMovement(); return true; } } return originalStop(options); };
