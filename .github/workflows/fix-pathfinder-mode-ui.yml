@@ -1,0 +1,58 @@
+name: Fix Pathfinder Mode UI
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch pz-bot loader
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('pz-bot.js')
+          s = p.read_text()
+          marker = '  function keepPanelTitleBlank(){'
+          fn = '''  function normalizeCavePathfinderModeUi() {
+    const select = document.getElementById("minibia-bot-cave-pathfinder-mode");
+    if (!select) return;
+    const desired = [
+      ["game", "Game"],
+      ["direct", "Direct"],
+      ["smartA", "Smart A"],
+      ["smartAField", "Smart A + Field Crossing"],
+      ["arrow", "Arrow / D-pad"],
+    ];
+    const current = select.value;
+    select.replaceChildren();
+    for (const [value, label] of desired) {
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = label;
+      select.appendChild(option);
+    }
+    select.value = desired.some(([value]) => value === current) ? current : "game";
+  }
+
+'''
+          if 'function normalizeCavePathfinderModeUi()' not in s:
+              s = s.replace(marker, fn + marker, 1)
+          old = '    keepPanelTitleBlank();console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);'
+          new = '    keepPanelTitleBlank();normalizeCavePathfinderModeUi();window.setTimeout(normalizeCavePathfinderModeUi,250);window.setTimeout(normalizeCavePathfinderModeUi,1000);console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);'
+          if old not in s:
+              raise SystemExit('loader insertion point not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+      - name: Commit source change and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pz-bot.js
+          git commit -m "Fix duplicate pathfinder modes and add Arrow D-pad option"
+          git rm .github/workflows/fix-pathfinder-mode-ui.yml
+          git commit -m "Remove temporary pathfinder UI workflow"
+          git push
