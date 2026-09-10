@@ -65,6 +65,34 @@
     return true;
   }
 
+  function normalizePathfinderModeUi() {
+    const selects = Array.from(document.querySelectorAll('select[id="minibia-bot-cave-pathfinder-mode"]'));
+    if (!selects.length) return false;
+    const desired = [["game", "Game"], ["direct", "Direct"], ["smartA", "Smart A"], ["smartAField", "Smart A + Field Crossing"], ["arrow", "Arrow / D-pad"]];
+    const desiredSignature = desired.map(([value, label]) => `${value}\u0000${label}`).join("\u0001");
+    const primary = selects.find((select) => select.closest("#minibia-bot-panel")) || selects[0];
+    selects.forEach((select) => {
+      const current = select.value;
+      const signature = Array.from(select.options).map((option) => `${option.value}\u0000${option.textContent}`).join("\u0001");
+      if (signature !== desiredSignature) {
+        select.replaceChildren();
+        desired.forEach(([value, label]) => {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = label;
+          select.appendChild(option);
+        });
+      }
+      select.value = desired.some(([value]) => value === current) ? current : "game";
+    });
+    selects.filter((select) => select !== primary).forEach((select) => {
+      const wrapper = select.closest("label.mb-field") || select.parentElement;
+      if (wrapper && wrapper !== primary.closest("label.mb-field")) wrapper.remove();
+      else select.remove();
+    });
+    return true;
+  }
+
   function removeWaypointActions() {
     const select = document.getElementById("minibia-bot-cave-waypoint-action");
     if (!select) return false;
@@ -87,6 +115,7 @@
   }
 
   function enforceCaveControls() {
+    normalizePathfinderModeUi();
     removeWaypointActions();
     injectWaypointWaitButton();
   }
