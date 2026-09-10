@@ -112,6 +112,15 @@
   function removePanelDebugSection(){const t=document.getElementById("minibia-bot-debug-enabled"),s=t?.closest?.(".mb-section");if(s){s.remove();return;}const labels=Array.from(document.querySelectorAll("#minibia-bot-panel .mb-label"));const l=labels.find(x=>String(x.textContent||"").trim().toLowerCase()==="debug");l?.closest?.(".mb-section")?.remove();}
   function removePanicRunnerSection(){const b=document.getElementById("minibia-bot-set-home"),s=b?.closest?.(".mb-section");if(s){s.remove();return;}document.getElementById("minibia-bot-home")?.closest?.(".mb-section")?.remove();document.getElementById("minibia-bot-panic-unknown")?.closest?.(".mb-section")?.remove();document.getElementById("minibia-bot-panic-health")?.closest?.(".mb-section")?.remove();document.getElementById("minibia-bot-panic-return")?.closest?.(".mb-section")?.remove();}
   function keepPanelTitleBlank(){blankPanelTitle();ensureLeftCollapseButton();removePanelDebugSection();removePanicRunnerSection();let attempts=0;const timerId=window.setInterval(()=>{blankPanelTitle();ensureLeftCollapseButton();removePanelDebugSection();removePanicRunnerSection();purgeLegacyCaveWaitDelay();attempts+=1;if(attempts>=20)window.clearInterval(timerId);},250);}
+  function normalizeCavePathfinderModeUi(){
+    const select=document.getElementById("minibia-bot-cave-pathfinder-mode");
+    if(!select)return;
+    const desired=[["game","Game"],["direct","Direct"],["smartA","Smart A"],["smartAField","Smart A + Field Crossing"],["arrow","Arrow / D-pad"]];
+    const current=select.value;
+    select.replaceChildren();
+    for(const [value,label] of desired){const option=document.createElement("option");option.value=value;option.textContent=label;select.appendChild(option);}
+    select.value=desired.some(([value])=>value===current)?current:"game";
+  }
   function addSafeUiPerformanceOptimizations(code,path){
     if(path==="src/core.js")code=code.replace("  startReconnectWatcher();","  // Reconnect watcher temporarily disabled for FPS testing.");
     if(path==="src/modules/auto-attack.js")code=code.replace("      maxTargetDistanceX: 7,","      maxTargetDistanceX: 5,").replace("    return dx <= maxTargetDistanceX && dy <= maxTargetDistanceY;","    return dx <= Math.min(5, maxTargetDistanceX) && dy <= Math.min(5, maxTargetDistanceY) && Math.max(dx, dy) <= 5;");
@@ -121,6 +130,6 @@
     return code;
   }
   async function loadSourceFile(path){const response=await fetch(`${rawBaseUrl}/${path}?t=${Date.now()}`,{cache:"no-store"});if(!response.ok)throw new Error(`Failed to load ${path}: HTTP ${response.status}`);let code=await response.text();code=addSafeUiPerformanceOptimizations(code,path);if(path==="src/version.js")code=code.replaceAll("%%BRANCH%%",ref).replaceAll("%%COMMIT%%","source-loader").replaceAll("%%DATE%%",new Date().toISOString());const sourceUrl=`${rawBaseUrl}/${path}`;try{(0,eval)(`${code}\n//# sourceURL=${sourceUrl}`);}catch(error){console.error(`[minibia-bot] Failed to evaluate ${path}`,error);throw error;}}
-  async function load(){purgeLegacyCaveWaitDelay();if(window.minibiaBot?.destroy){try{window.minibiaBot.destroy();}catch(error){console.warn("[minibia-bot] Existing bot cleanup failed",error);}}purgeLegacyCaveWaitDelay();installUiCompatibilityShim();delete window.__minibiaBotBundle;window.__minibiaBotBundle={};for(const path of sourceFiles)await loadSourceFile(path);purgeLegacyCaveWaitDelay();keepPanelTitleBlank();console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);}
+  async function load(){purgeLegacyCaveWaitDelay();if(window.minibiaBot?.destroy){try{window.minibiaBot.destroy();}catch(error){console.warn("[minibia-bot] Existing bot cleanup failed",error);}}purgeLegacyCaveWaitDelay();installUiCompatibilityShim();delete window.__minibiaBotBundle;window.__minibiaBotBundle={};for(const path of sourceFiles)await loadSourceFile(path);purgeLegacyCaveWaitDelay();keepPanelTitleBlank();normalizeCavePathfinderModeUi();window.setTimeout(normalizeCavePathfinderModeUi,250);window.setTimeout(normalizeCavePathfinderModeUi,1000);console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);}
   load().catch(error=>console.error("[minibia-bot] Source loader failed",error));
 })();
