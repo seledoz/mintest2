@@ -1,0 +1,74 @@
+name: Fix duplicate Pathfinder Mode options
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Normalize Pathfinder Mode dropdown
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('pz-bot.js')
+          text = path.read_text(encoding='utf-8')
+          marker = '  async function loadSourceFile(path){'
+          if 'function normalizePathfinderModeControls()' not in text:
+              fn = '''  function normalizePathfinderModeControls() {
+    const canonical = [
+      ["game", "Game"],
+      ["direct", "Direct"],
+      ["smartA", "Smart A"],
+      ["smartAField", "Smart A + Field Crossing"],
+      ["arrow", "Arrow / D-pad"],
+    ];
+    const selects = Array.from(document.querySelectorAll("select")).filter((select) => {
+      if (select.id === "minibia-bot-cave-pathfinder-mode") return true;
+      const labels = Array.from(select.options).map((option) => String(option.textContent || "").trim());
+      return labels.includes("Smart A") && labels.includes("Smart A + Field Crossing");
+    });
+    selects.forEach((select) => {
+      const currentValue = String(select.value || "game");
+      const validValue = canonical.some(([value]) => value === currentValue) ? currentValue : "game";
+      select.replaceChildren(...canonical.map(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        return option;
+      }));
+      select.value = validValue;
+    });
+  }
+
+'''
+              if marker not in text:
+                  raise SystemExit('loadSourceFile marker not found')
+              text = text.replace(marker, fn + marker, 1)
+
+          old = 'keepPanelTitleBlank();console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);'
+          new = 'keepPanelTitleBlank();normalizePathfinderModeControls();let pathfinderNormalizeAttempts=0;const pathfinderNormalizeTimerId=window.setInterval(()=>{normalizePathfinderModeControls();pathfinderNormalizeAttempts+=1;if(pathfinderNormalizeAttempts>=20)window.clearInterval(pathfinderNormalizeTimerId);},250);console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);'
+          if old not in text:
+              raise SystemExit('load completion marker not found')
+          text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+
+      - name: Commit and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pz-bot.js
+          git rm .github/workflows/fix-pathfinder-dropdown.yml
+          git commit -m "Fix Pathfinder Mode duplicate options"
+          git push origin HEAD:main
