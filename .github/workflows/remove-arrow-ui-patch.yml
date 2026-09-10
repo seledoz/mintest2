@@ -1,0 +1,35 @@
+name: Remove obsolete Arrow D-pad UI patch
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Remove obsolete pz-bot UI replacement
+        shell: python
+        run: |
+          from pathlib import Path
+          path = Path("pz-bot.js")
+          text = path.read_text(encoding="utf-8")
+          old = ".replace('<option value=\"direct\">Direct</option>','<option value=\"direct\">Direct</option><option value=\"arrow\">Arrow / D-pad</option>');"
+          if old not in text:
+              raise SystemExit("Obsolete Arrow UI replacement not found")
+          path.write_text(text.replace(old, "", 1), encoding="utf-8")
+      - name: Commit and remove temporary workflow
+        run: |
+          rm -f .github/workflows/remove-arrow-ui-patch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pz-bot.js .github/workflows/remove-arrow-ui-patch.yml
+          git commit -m "Remove obsolete Arrow D-pad UI patch"
+          git push origin HEAD:main
