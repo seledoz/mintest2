@@ -1,0 +1,53 @@
+name: Add real Arrow D-pad Pathfinder option
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Add Arrow D-pad to actual Pathfinder Mode select
+        shell: python
+        run: |
+          from pathlib import Path
+
+          needle = 'Smart A + Field Crossing'
+          option = '<option value="arrow">Arrow / D-pad</option>'
+          matches = []
+          for path in Path('src').rglob('*.js'):
+              text = path.read_text(encoding='utf-8')
+              if needle in text:
+                  matches.append(path)
+                  if option not in text:
+                      text = text.replace(needle, needle + option, 1)
+                      path.write_text(text, encoding='utf-8')
+          if not matches:
+              raise SystemExit('Could not find the actual Pathfinder Mode options')
+          print('Matched:', ', '.join(map(str, matches)))
+
+      - name: Commit source change and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src .github/workflows/add-real-arrow-pathfinder-option.yml
+          if git diff --cached --quiet; then
+            echo "No source change needed"
+            rm -f .github/workflows/add-real-arrow-pathfinder-option.yml
+            git add .github/workflows/add-real-arrow-pathfinder-option.yml
+            git commit -m "Remove temporary Arrow Pathfinder workflow" || true
+          else
+            git rm .github/workflows/add-real-arrow-pathfinder-option.yml
+            git commit -m "Add Arrow D-pad to Pathfinder Mode"
+          fi
+          git push origin HEAD:main
