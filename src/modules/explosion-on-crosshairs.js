@@ -95,24 +95,50 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
     };
     bot.__explosionCrosshairsPriorityPatched = true;
   }
+
+  // Explosion must use the actual on-screen mouse path. Do not modify Fireball;
+  // this is a self-contained copy of the screen-click sequence it relies on.
+  function getGameCanvas() {
+    return Array.from(document.querySelectorAll("canvas"))
+      .map(canvas => ({ canvas, rect: canvas.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.width >= 200 && rect.height >= 150)
+      .sort((a, b) => (b.rect.width * b.rect.height) - (a.rect.width * a.rect.height))[0] || null;
+  }
+  function dispatchScreenClick(canvas, clientX, clientY) {
+    const common = { bubbles: true, cancelable: true, composed: true, clientX, clientY, screenX: clientX, screenY: clientY, button: 0, buttons: 1, detail: 1, view: window };
+    try {
+      if (typeof PointerEvent === "function") {
+        canvas.dispatchEvent(new PointerEvent("pointermove", { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+        canvas.dispatchEvent(new PointerEvent("pointerdown", { ...common, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+        canvas.dispatchEvent(new PointerEvent("pointerup", { ...common, buttons: 0, pointerId: 1, pointerType: "mouse", isPrimary: true }));
+      }
+      canvas.dispatchEvent(new MouseEvent("mousemove", common));
+      canvas.dispatchEvent(new MouseEvent("mousedown", common));
+      canvas.dispatchEvent(new MouseEvent("mouseup", { ...common, buttons: 0 }));
+      canvas.dispatchEvent(new MouseEvent("click", { ...common, buttons: 0 }));
+      return true;
+    } catch (_) { return false; }
+  }
   function clickTarget(best) {
-    const fireballClick = bot.fireball?.fireCrosshairAt;
-    if (typeof fireballClick === "function") return fireballClick(best, config.hotbarSlot);
-    const tile = tileAt(best.position);
-    const target = best.target || best.monsters?.[0] || null;
-    const mouse = window.gameClient?.mouse;
-    const ref = tile ? { which: tile, index: 0xFF } : target ? { which: target, index: 0xFF } : null;
-    try { if (ref && typeof mouse?.__handleItemUseWith === "function") { mouse.__handleItemUseWith(null, ref); return true; } } catch (_) {}
-    try { if (ref && typeof mouse?.__handleThingUse === "function") { mouse.__handleThingUse(ref); return true; } } catch (_) {}
-    try { if (tile && typeof mouse?.__handleTileClick === "function") { mouse.__handleTileClick(tile); return true; } } catch (_) {}
-    try { if (target && typeof mouse?.__handleCreatureClick === "function") { mouse.__handleCreatureClick(target); return true; } } catch (_) {}
-    return false;
+    const player = pos(bot.getPlayerPosition?.());
+    const target = pos(best?.position);
+    const canvasInfo = getGameCanvas();
+    if (!player || !target || !canvasInfo || target.z !== player.z) return false;
+    const { canvas, rect } = canvasInfo;
+    const tileWidth = rect.width / 17;
+    const tileHeight = rect.height / 13;
+    const clientX = rect.left + ((target.x - player.x + 8.5) * tileWidth);
+    const clientY = rect.top + ((target.y - player.y + 6.5) * tileHeight);
+    if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return false;
+    return dispatchScreenClick(canvas, clientX, clientY);
   }
   function fire(best) {
     const s = slot(config.hotbarSlot);
-    if (!s || !best?.position) return false;
-    if (!bot.fireball?.fireCrosshairAt && !bot.clickHotbar(s - 1)) return false;
-    if (!clickTarget(best)) {
+    if (!s || !best?.position || !bot.clickHotbar(s - 1)) return false;
+    // Give the client a short moment to enter crosshair mode, then perform the
+    // real screen click on the calculated explosion center.
+    const clicked = clickTarget(best);
+    if (!clicked) {
       bot.log("Explosion on Crosshairs could not click crosshair target", { position: best.position, target: best.target?.name || "Mob" });
       return false;
     }
