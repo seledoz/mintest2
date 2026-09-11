@@ -4,7 +4,7 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
   if (!bot || bot.explosionOnCrosshairs?.destroy) return bot?.explosionOnCrosshairs;
   const configStorageKey = "minibiaBot.explosionOnCrosshairs.config";
   const sectionId = "minibia-bot-explosion-crosshairs-section";
-  const state = { running: false, timerId: null, uiTimerId: null, uiStartupTimerId: null, clickTimerId: null, lastCastAt: 0, lastMonsterCount: 0, lastTargetName: "", lastTargetPosition: null, currentBest: null };
+  const state = { running: false, timerId: null, uiTimerId: null, uiStartupTimerId: null, lastCastAt: 0, lastMonsterCount: 0, lastTargetName: "", lastTargetPosition: null, currentBest: null };
   const config = Object.assign({ enabled: false, highestPriority: false, hotbarSlot: null, minMonsters: 1, cooldownMs: 2000, scanMs: 250, maxRange: 7, respectTargetFilters: true }, bot.storage.get(configStorageKey, {}) || {});
   const slot = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n >= 1 && n <= 12 ? n : null; };
   const pos = (v) => { const r = v?.getPosition?.() || v?.__position || v?.position || v; if (!r) return null; const x = Number(r.x), y = Number(r.y), z = Number(r.z); return Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z) ? { x: Math.trunc(x), y: Math.trunc(y), z: Math.trunc(z) } : null; };
@@ -109,16 +109,14 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
   function fire(best) {
     const s = slot(config.hotbarSlot);
     if (!s || !best?.position || !bot.clickHotbar(s - 1)) return false;
-    if (state.clickTimerId != null) window.clearTimeout(state.clickTimerId);
-    state.clickTimerId = window.setTimeout(() => {
-      state.clickTimerId = null;
-      if (!state.running || !config.enabled) return;
-      if (!clickTarget(best)) bot.log("Explosion on Crosshairs could not click crosshair target", { position: best.position, target: best.target?.name || "Mob" });
-    }, 100);
+    if (!clickTarget(best)) {
+      bot.log("Explosion on Crosshairs could not click crosshair target", { position: best.position, target: best.target?.name || "Mob" });
+      return false;
+    }
     return true;
   }
   function canCast(now = Date.now(), b = state.currentBest) {
-    return state.running && config.enabled && !!slot(config.hotbarSlot) && state.clickTimerId == null && now - state.lastCastAt >= config.cooldownMs && !!b && b.count >= config.minMonsters;
+    return state.running && config.enabled && !!slot(config.hotbarSlot) && now - state.lastCastAt >= config.cooldownMs && !!b && b.count >= config.minMonsters;
   }
   function trigger(now = Date.now()) {
     if (!state.running || !config.enabled) return false;
@@ -131,7 +129,7 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
       state.lastMonsterCount = b.count;
       state.lastTargetName = b.target?.name || "Mob";
       state.lastTargetPosition = b.position;
-      bot.log("used Explosion on Crosshairs", { slot: config.hotbarSlot, monsterCount: b.count, target: state.lastTargetName, position: b.position, minimum: config.minMonsters, shape: "1-3-1", maxDistance: config.maxRange, crosshairDelayMs: 100 });
+      bot.log("used Explosion on Crosshairs", { slot: config.hotbarSlot, monsterCount: b.count, target: state.lastTargetName, position: b.position, minimum: config.minMonsters, shape: "1-3-1", maxDistance: config.maxRange });
     }
     refreshUi();
     return fired;
@@ -169,8 +167,6 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
     state.currentBest = null;
     if (state.timerId != null) window.clearTimeout(state.timerId);
     state.timerId = null;
-    if (state.clickTimerId != null) window.clearTimeout(state.clickTimerId);
-    state.clickTimerId = null;
     stopUi();
     stopStartup();
     if (options.persistEnabled !== false) { config.enabled = false; persist(); }
@@ -195,7 +191,7 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
   }
   function status() {
     const b = state.running && config.enabled ? (state.currentBest || bestCandidate()) : null;
-    return { running: state.running, config: { ...config }, bestMonsterCount: b?.count || 0, bestTargetName: b?.target?.name || "", bestTargetPosition: b?.position || null, lastMonsterCount: state.lastMonsterCount, lastTargetName: state.lastTargetName, lastTargetPosition: state.lastTargetPosition, priorityReserved: reservePriority(), ready: canCast(Date.now(), b), crosshairDelayMs: 100, crosshairPending: state.clickTimerId != null };
+    return { running: state.running, config: { ...config }, bestMonsterCount: b?.count || 0, bestTargetName: b?.target?.name || "", bestTargetPosition: b?.position || null, lastMonsterCount: state.lastMonsterCount, lastTargetName: state.lastTargetName, lastTargetPosition: state.lastTargetPosition, priorityReserved: reservePriority(), ready: canCast(Date.now(), b) };
   }
   function ensureUi() {
     if (document.getElementById(sectionId)) { refreshUi(); return true; }
@@ -204,7 +200,7 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
     const section = document.createElement("div");
     section.id = sectionId;
     section.className = "mb-section";
-    section.innerHTML = `<div class="mb-label">Explosion on Crosshairs</div><label class="mb-toggle"><input type="checkbox" id="minibia-bot-explosion-crosshairs-enabled" /><span>Enable Explosion on Crosshairs</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-explosion-crosshairs-highest-priority" /><span>Explosion Highest Priority</span></label><div class="mb-field-grid"><label class="mb-field"><span class="mb-field-label">Explosion Hotkey</span><input type="number" id="minibia-bot-explosion-crosshairs-hotkey" min="1" max="12" /></label><label class="mb-field"><span class="mb-field-label">Minimum Creatures</span><input type="number" id="minibia-bot-explosion-crosshairs-monsters" min="1" /></label><label class="mb-field"><span class="mb-field-label">Cooldown MS</span><input type="number" id="minibia-bot-explosion-crosshairs-cooldown" min="0" /></label><label class="mb-field"><span class="mb-field-label">Max Distance (squares)</span><input type="number" id="minibia-bot-explosion-crosshairs-range" min="1" max="7" /></label></div><div class="mb-small-note">Uses the 1 / 3 / 1 plus-shaped Explosion pattern. Set the hotkey to Use with Crosshairs.</div><div class="mb-small-note">Max Distance is the distance from your character to the explosion center: 1 = adjacent, 2 = up to two squares away, etc.</div><div class="mb-small-note">After selecting the hotkey, the bot waits 100 ms before clicking the crosshair target.</div><div class="mb-small-note" id="minibia-bot-explosion-crosshairs-status">Explosion: off</div>`;
+    section.innerHTML = `<div class="mb-label">Explosion on Crosshairs</div><label class="mb-toggle"><input type="checkbox" id="minibia-bot-explosion-crosshairs-enabled" /><span>Enable Explosion on Crosshairs</span></label><label class="mb-toggle"><input type="checkbox" id="minibia-bot-explosion-crosshairs-highest-priority" /><span>Explosion Highest Priority</span></label><div class="mb-field-grid"><label class="mb-field"><span class="mb-field-label">Explosion Hotkey</span><input type="number" id="minibia-bot-explosion-crosshairs-hotkey" min="1" max="12" /></label><label class="mb-field"><span class="mb-field-label">Minimum Creatures</span><input type="number" id="minibia-bot-explosion-crosshairs-monsters" min="1" /></label><label class="mb-field"><span class="mb-field-label">Cooldown MS</span><input type="number" id="minibia-bot-explosion-crosshairs-cooldown" min="0" /></label><label class="mb-field"><span class="mb-field-label">Max Distance (squares)</span><input type="number" id="minibia-bot-explosion-crosshairs-range" min="1" max="7" /></label></div><div class="mb-small-note">Uses the 1 / 3 / 1 plus-shaped Explosion pattern. Set the hotkey to Use with Crosshairs.</div><div class="mb-small-note">Max Distance is the distance from your character to the explosion center: 1 = adjacent, 2 = up to two squares away, etc.</div><div class="mb-small-note" id="minibia-bot-explosion-crosshairs-status">Explosion: off</div>`;
     anchor.insertAdjacentElement("afterend", section);
     const q = id => section.querySelector(id), e = q("#minibia-bot-explosion-crosshairs-enabled"), p = q("#minibia-bot-explosion-crosshairs-highest-priority"), h = q("#minibia-bot-explosion-crosshairs-hotkey"), m = q("#minibia-bot-explosion-crosshairs-monsters"), c = q("#minibia-bot-explosion-crosshairs-cooldown"), r = q("#minibia-bot-explosion-crosshairs-range");
     e.checked = !!config.enabled; p.checked = !!config.highestPriority; h.value = config.hotbarSlot || ""; m.value = config.minMonsters; c.value = config.cooldownMs; r.value = config.maxRange;
@@ -222,7 +218,7 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
     if (!s) return;
     const q = id => s.querySelector(id), e = q("#minibia-bot-explosion-crosshairs-enabled"), p = q("#minibia-bot-explosion-crosshairs-highest-priority"), h = q("#minibia-bot-explosion-crosshairs-hotkey"), m = q("#minibia-bot-explosion-crosshairs-monsters"), c = q("#minibia-bot-explosion-crosshairs-cooldown"), r = q("#minibia-bot-explosion-crosshairs-range"), st = q("#minibia-bot-explosion-crosshairs-status");
     if (e) e.checked = !!config.enabled; if (p) p.checked = !!config.highestPriority; if (h && document.activeElement !== h) h.value = config.hotbarSlot || ""; if (m && document.activeElement !== m) m.value = config.minMonsters; if (c && document.activeElement !== c) c.value = config.cooldownMs; if (r && document.activeElement !== r) r.value = config.maxRange;
-    if (st) { const b = state.currentBest; st.textContent = config.enabled ? `Explosion: ${state.running ? "running" : "ready"} | best group ${b?.count || 0} | range ${config.maxRange} | delay 100ms` : "Explosion: off"; }
+    if (st) { const b = state.currentBest; st.textContent = config.enabled ? `Explosion: ${state.running ? "running" : "ready"} | best group ${b?.count || 0} | range ${config.maxRange}` : "Explosion: off"; }
   }
   patchPriority();
   bot.explosionOnCrosshairs = { start, stop, updateConfig, status, ensureUi, refreshUi, getExplosionTiles: tiles, destroy: () => stop() };
