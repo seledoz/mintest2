@@ -228,3 +228,17 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
 };
 
 if (window.minibiaBot && window.__minibiaBotBundle.installExplosionOnCrosshairsModule) window.__minibiaBotBundle.installExplosionOnCrosshairsModule(window.minibiaBot);
+
+if (!window.minibiaBot?.explosionOnCrosshairs) {
+  let attempts = 0;
+  const timerId = window.setInterval(() => {
+    attempts += 1;
+    const bot = window.minibiaBot;
+    const installer = window.__minibiaBotBundle?.installExplosionOnCrosshairsModule;
+    if (bot && installer && !bot.explosionOnCrosshairs) {
+      installer(bot);
+      if (bot.explosionOnCrosshairs) window.clearInterval(timerId);
+    }
+    if (attempts >= 40 || bot?.explosionOnCrosshairs) window.clearInterval(timerId);
+  }, 250);
+}
