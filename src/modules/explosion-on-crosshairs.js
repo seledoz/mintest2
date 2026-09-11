@@ -96,6 +96,8 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
     bot.__explosionCrosshairsPriorityPatched = true;
   }
   function clickTarget(best) {
+    const fireballClick = bot.fireball?.fireCrosshairAt;
+    if (typeof fireballClick === "function") return fireballClick(best, config.hotbarSlot);
     const tile = tileAt(best.position);
     const target = best.target || best.monsters?.[0] || null;
     const mouse = window.gameClient?.mouse;
@@ -108,7 +110,8 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
   }
   function fire(best) {
     const s = slot(config.hotbarSlot);
-    if (!s || !best?.position || !bot.clickHotbar(s - 1)) return false;
+    if (!s || !best?.position) return false;
+    if (!bot.fireball?.fireCrosshairAt && !bot.clickHotbar(s - 1)) return false;
     if (!clickTarget(best)) {
       bot.log("Explosion on Crosshairs could not click crosshair target", { position: best.position, target: best.target?.name || "Mob" });
       return false;
