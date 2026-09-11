@@ -3,7 +3,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 window.__minibiaBotBundle.installCaveArrowFieldDetectionFix = function installCaveArrowFieldDetectionFix(bot) {
   if (!bot || bot.caveArrowFieldDetectionFix?.destroy) return bot?.caveArrowFieldDetectionFix;
 
-  const state = { timerId: null, patched: 0, lastScanAt: 0 };
+  const state = { timerId: null, marked: 0, lastScanAt: 0 };
   const FIELD_IDS = new Map([
     [1487, "fire field"], [1488, "fire field"], [1492, "fire field"], [1493, "fire field"],
     [1494, "fire field"], [1500, "fire field"], [1501, "fire field"],
@@ -53,19 +53,6 @@ window.__minibiaBotBundle.installCaveArrowFieldDetectionFix = function installCa
     return result.filter(Boolean);
   }
 
-  function markTile(tile) {
-    let fieldName = null;
-    for (const thing of thingsOnTile(tile)) {
-      const detected = isFieldThing(thing);
-      if (!detected) continue;
-      fieldName = detected;
-      if (!thing.name) {
-        try { thing.name = detected; } catch (_) {}
-      }
-    }
-    return fieldName;
-  }
-
   function scan() {
     const caveStatus = bot.cave?.status?.() || null;
     if (!caveStatus?.running || caveStatus?.config?.pathfinderMode !== "arrow") return;
@@ -74,24 +61,21 @@ window.__minibiaBotBundle.installCaveArrowFieldDetectionFix = function installCa
     state.lastScanAt = now;
 
     const chunks = window.gameClient?.world?.chunks || [];
-    let patched = 0;
+    let marked = 0;
     for (const chunk of chunks) {
       if (!Array.isArray(chunk?.tiles)) continue;
       for (const tile of chunk.tiles) {
-        const fieldName = markTile(tile);
-        if (!fieldName) continue;
-        if (typeof tile.isWalkable !== "function" || tile.__minibiaArrowFieldPatched) continue;
-        const original = tile.isWalkable;
-        try {
-          tile.isWalkable = function arrowFieldWalkableOverride(...args) {
-            return true || original.apply(this, args);
-          };
-          tile.__minibiaArrowFieldPatched = true;
-          patched += 1;
-        } catch (_) {}
+        for (const thing of thingsOnTile(tile)) {
+          const fieldName = isFieldThing(thing);
+          if (!fieldName) continue;
+          if (!thing.name) {
+            try { thing.name = fieldName; } catch (_) {}
+          }
+          marked += 1;
+        }
       }
     }
-    state.patched = patched;
+    state.marked = marked;
   }
 
   function destroy() {
