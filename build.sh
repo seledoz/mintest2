@@ -35,6 +35,7 @@ cat \
   src/modules/cave.js \
   src/modules/cave-forward-loop.js \
   src/modules/cave-arrow-keys.js \
+  src/modules/cave-arrow-field-detection-fix.js \
   src/modules/cave-waypoint-actions.js \
   src/modules/cave-active-timers.js \
   src/modules/waypoint-profiles.js \
