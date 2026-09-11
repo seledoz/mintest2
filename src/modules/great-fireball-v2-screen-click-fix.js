@@ -5,6 +5,7 @@
   let pendingClickId = null;
   let lastGfbCastAt = 0;
   let lastFireballCastAt = 0;
+  let lastExplosionCastAt = 0;
 
   function getGameCanvas() {
     return Array.from(document.querySelectorAll("canvas"))
@@ -66,6 +67,7 @@
     installedBot = bot;
     lastGfbCastAt = 0;
     lastFireballCastAt = 0;
+    lastExplosionCastAt = 0;
     originalClickHotbar = bot.clickHotbar.bind(bot);
 
     bot.clickHotbar = (...args) => {
@@ -73,8 +75,10 @@
       if (!Number.isFinite(slotIndex)) return originalClickHotbar(...args);
       const gfbSlotIndex = Number(bot.greatFireballV2?.config?.hotbarSlot) - 1;
       const fireballSlotIndex = Number(bot.fireball?.config?.hotbarSlot) - 1;
+      const explosionSlotIndex = Number(bot.explosionOnCrosshairs?.config?.hotbarSlot) - 1;
       const isGfbSlot = !!bot.greatFireballV2?.status?.().running && slotIndex === gfbSlotIndex;
       const isFireballSlot = !!bot.fireball?.status?.().running && slotIndex === fireballSlotIndex;
+      const isExplosionSlot = !!bot.explosionOnCrosshairs?.status?.().running && slotIndex === explosionSlotIndex;
       const now = Date.now();
 
       if (isGfbSlot) {
@@ -84,6 +88,10 @@
       if (isFireballSlot) {
         const cooldownMs = Math.max(0, Number(bot.fireball?.config?.cooldownMs) || 0);
         if (lastFireballCastAt && now - lastFireballCastAt < cooldownMs) return false;
+      }
+      if (isExplosionSlot) {
+        const cooldownMs = Math.max(0, Number(bot.explosionOnCrosshairs?.config?.cooldownMs) || 0);
+        if (lastExplosionCastAt && now - lastExplosionCastAt < cooldownMs) return false;
       }
 
       const result = originalClickHotbar(...args);
@@ -97,6 +105,10 @@
         lastFireballCastAt = Date.now();
         moduleName = "fireball";
         logName = "fireball";
+      } else if (isExplosionSlot) {
+        lastExplosionCastAt = Date.now();
+        moduleName = "explosionOnCrosshairs";
+        logName = "Explosion on Crosshairs";
       }
       if (moduleName) {
         if (pendingClickId != null) window.clearTimeout(pendingClickId);
@@ -113,6 +125,7 @@
       pendingClickId = null;
       lastGfbCastAt = 0;
       lastFireballCastAt = 0;
+      lastExplosionCastAt = 0;
       if (bot.clickHotbar !== originalClickHotbar) bot.clickHotbar = originalClickHotbar;
       if (installedBot === bot) installedBot = null;
     });
