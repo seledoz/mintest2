@@ -89,3 +89,11 @@ window.__minibiaBotBundle.installCaveArrowFieldDetectionFix = function installCa
   bot.addCleanup(destroy);
   return bot.caveArrowFieldDetectionFix;
 };
+
+if (!window.__minibiaBotArrowFieldFixBootstrap) {
+  window.__minibiaBotArrowFieldFixBootstrap = window.setInterval(() => {
+    const bot = window.minibiaBot;
+    if (!bot || bot.caveArrowFieldDetectionFix) return;
+    window.__minibiaBotBundle.installCaveArrowFieldDetectionFix(bot);
+  }, 500);
+}
