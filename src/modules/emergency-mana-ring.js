@@ -7,7 +7,7 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
   const RING_SLOT = 8;
   const scanIntervalMs = 100;
   const unequipDelayMs = 3000;
-  const manaRingName = "mana ring";
+  const emergencyRingName = "energy ring";
 
   const state = {
     running: false,
@@ -72,25 +72,25 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
     return definition?.properties?.name || definition?.name || item?.name || "";
   }
 
-  function isManaRing(item) {
+  function isEmergencyRing(item) {
     const name = normalizeName(getItemName(item));
-    return name === manaRingName || name.includes(manaRingName);
+    return name === emergencyRingName;
   }
 
   function getEquippedItem() {
     return getEquipment()?.getSlotItem?.(RING_SLOT) || null;
   }
 
-  function isManaRingEquipped() {
-    return isManaRing(getEquippedItem());
+  function isEmergencyRingEquipped() {
+    return isEmergencyRing(getEquippedItem());
   }
 
-  function findManaRingSource() {
+  function findEmergencyRingSource() {
     for (const container of getOpenContainers()) {
       const slots = container?.slots || [];
       for (let slotIndex = 0; slotIndex < slots.length; slotIndex += 1) {
         const item = container.getSlotItem?.(slotIndex);
-        if (!isManaRing(item)) continue;
+        if (!isEmergencyRing(item)) continue;
         const count = (typeof item.getCount === "function" ? item.getCount() : item.count) || 1;
         return { container, slotIndex, item, count, name: getItemName(item) };
       }
@@ -119,7 +119,7 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
     state.equipRingWasRunning = running;
     if (running) ringModule.stop?.({ persistEnabled: false });
     state.equipRingSuppressed = true;
-    bot.log?.("emergency mana ring took priority over equip ring", { equipRingWasRunning: running });
+    bot.log?.("emergency energy ring took priority over equip ring", { equipRingWasRunning: running });
   }
 
   function releaseNormalEquipRing() {
@@ -128,12 +128,12 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
     state.equipRingSuppressed = false;
     state.equipRingWasRunning = false;
     if (shouldResume) getEquipRingModule()?.start?.();
-    bot.log?.("emergency mana ring released equip ring priority", { resumed: shouldResume });
+    bot.log?.("emergency energy ring released equip ring priority", { resumed: shouldResume });
   }
 
-  function sendManaRingEquip(now = Date.now()) {
+  function sendEmergencyRingEquip(now = Date.now()) {
     const equipment = getEquipment();
-    const source = findManaRingSource();
+    const source = findEmergencyRingSource();
     if (!equipment || !source || getEquippedItem()) return false;
 
     window.gameClient.send(new ItemMovePacket(
@@ -142,7 +142,7 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
       source.count || 1
     ));
     state.lastEquipAt = now;
-    bot.log?.("emergency mana ring equipped", {
+    bot.log?.("emergency energy ring equipped", {
       hp: state.lastHp,
       hpThreshold: config.hpThreshold,
       name: source.name,
@@ -154,16 +154,16 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
     return true;
   }
 
-  function equipManaRing(now = Date.now()) {
+  function equipEmergencyRing(now = Date.now()) {
     const equipment = getEquipment();
-    const source = findManaRingSource();
+    const source = findEmergencyRingSource();
     if (!equipment || !source) return false;
 
     const equippedRing = getEquippedItem();
-    if (equippedRing && !isManaRing(equippedRing)) {
+    if (equippedRing && !isEmergencyRing(equippedRing)) {
       const destination = findFirstEmptyContainerSlot();
       if (!destination) {
-        bot.log?.("emergency mana ring could not move current ring", {
+        bot.log?.("emergency energy ring could not move current ring", {
           currentRingName: getItemName(equippedRing),
           currentRingItemId: equippedRing?.id ?? null,
           reason: "no empty open-container slot",
@@ -177,7 +177,7 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
         { which: destination.container, index: destination.slotIndex },
         count
       ));
-      bot.log?.("emergency mana ring moved current ring out of ring slot", {
+      bot.log?.("emergency energy ring moved current ring out of ring slot", {
         currentRingName: getItemName(equippedRing),
         currentRingItemId: equippedRing?.id ?? null,
         toContainerId: destination.container?.__containerId ?? null,
@@ -192,21 +192,21 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
           state.lowHpLatched = false;
           return;
         }
-        if (!getEquippedItem()) sendManaRingEquip(Date.now());
+        if (!getEquippedItem()) sendEmergencyRingEquip(Date.now());
       }, 150);
       state.lowHpLatched = true;
       return true;
     }
 
-    const equipped = sendManaRingEquip(now);
+    const equipped = sendEmergencyRingEquip(now);
     if (equipped) state.lowHpLatched = true;
     return equipped;
   }
 
-  function unequipManaRing(now = Date.now()) {
+  function unequipEmergencyRing(now = Date.now()) {
     const equipment = getEquipment();
     const ring = getEquippedItem();
-    if (!equipment || !isManaRing(ring)) return false;
+    if (!equipment || !isEmergencyRing(ring)) return false;
     const destination = findFirstEmptyContainerSlot();
     if (!destination) return false;
 
@@ -217,7 +217,7 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
       count
     ));
     state.lastUnequipAt = now;
-    bot.log?.("emergency mana ring unequipped after 3 seconds", {
+    bot.log?.("emergency energy ring unequipped after 3 seconds", {
       toContainerId: destination.container?.__containerId ?? null,
       toSlot: destination.slotIndex,
       equippedForMs: Math.max(0, now - state.lastEquipAt),
@@ -231,13 +231,13 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
     if (!label) return;
     if (!config.enabled) state.lastStatus = "Status: off";
     else if (state.lastHp == null) state.lastStatus = "Status: waiting for HP data";
-    else if (state.lowHpLatched && isManaRingEquipped()) {
+    else if (state.lowHpLatched && isEmergencyRingEquipped()) {
       const remainingMs = Math.max(0, unequipDelayMs - (now - state.lastEquipAt));
-      state.lastStatus = `Status: Mana Ring equipped — removing in ${(remainingMs / 1000).toFixed(1)}s`;
+      state.lastStatus = `Status: Energy Ring equipped — removing in ${(remainingMs / 1000).toFixed(1)}s`;
     } else if (state.lastHp > config.hpThreshold) state.lastStatus = `Status: armed — HP ${state.lastHp}/${config.hpThreshold}`;
-    else if (state.lowHpLatched) state.lastStatus = "Status: low HP — preparing Mana Ring";
-    else if (!findManaRingSource()) state.lastStatus = "Status: low HP — Mana Ring not found";
-    else state.lastStatus = "Status: low HP — equipping Mana Ring";
+    else if (state.lowHpLatched) state.lastStatus = "Status: low HP — preparing Energy Ring";
+    else if (!findEmergencyRingSource()) state.lastStatus = "Status: low HP — Energy Ring not found";
+    else state.lastStatus = "Status: low HP — equipping Energy Ring";
     label.textContent = state.lastStatus;
   }
 
@@ -246,8 +246,8 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
     const hp = getPlayerHp();
     state.lastHp = hp;
 
-    if (state.lowHpLatched && isManaRingEquipped() && state.lastEquipAt > 0 && now - state.lastEquipAt >= unequipDelayMs) {
-      unequipManaRing(now);
+    if (state.lowHpLatched && isEmergencyRingEquipped() && state.lastEquipAt > 0 && now - state.lastEquipAt >= unequipDelayMs) {
+      unequipEmergencyRing(now);
     }
 
     if (hp == null || hp <= 0) {
@@ -268,7 +268,7 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
     }
 
     suppressNormalEquipRing();
-    const equipped = isManaRingEquipped() || equipManaRing(now);
+    const equipped = isEmergencyRingEquipped() || equipEmergencyRing(now);
     if (!equipped) releaseNormalEquipRing();
     updateStatus(now);
     return equipped;
@@ -277,7 +277,7 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
   function tick() {
     if (!state.running || !config.enabled) return;
     try { check(); }
-    catch (error) { bot.log?.("emergency mana ring tick failed", error?.message || error); }
+    catch (error) { bot.log?.("emergency energy ring tick failed", error?.message || error); }
     finally {
       if (state.running && config.enabled) state.timerId = window.setTimeout(tick, scanIntervalMs);
     }
@@ -299,7 +299,7 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
     state.running = true;
     state.lowHpLatched = false;
     state.lastEquipAt = 0;
-    bot.log?.("emergency mana ring started", { hpThreshold: config.hpThreshold, unequipDelayMs });
+    bot.log?.("emergency energy ring started", { hpThreshold: config.hpThreshold, unequipDelayMs });
     tick();
     return true;
   }
@@ -316,7 +316,7 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
     config.enabled = false;
     if (options.persistEnabled !== false) persistConfig();
     syncUi();
-    bot.log?.("emergency mana ring stopped");
+    bot.log?.("emergency energy ring stopped");
     return true;
   }
 
@@ -352,7 +352,7 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
           <input type="checkbox" id="minibia-bot-emergency-mana-ring-enabled" />
           <span>Enable Emergency Mana Ring</span>
         </label>
-        <div class="mb-small-note">Higher priority than Equip Ring. Moves the current ring to an open container first, equips Mana Ring, keeps it equipped for 3 seconds, then moves it back to an open container.</div>
+        <div class="mb-small-note">Higher priority than Equip Ring. Moves the current ring to an open container first, equips Energy Ring, keeps it equipped for 3 seconds, then moves it back to an open container.</div>
         <div class="mb-small-note" id="minibia-bot-emergency-mana-ring-status">Status: off</div>
       </div>`;
     targetColumn.appendChild(section);
@@ -380,15 +380,15 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
   }
 
   function status() {
-    const source = findManaRingSource();
+    const source = findEmergencyRingSource();
     return {
       running: state.running,
       config: { ...config },
       hp: state.lastHp,
       lowHpLatched: state.lowHpLatched,
-      manaRingEquipped: isManaRingEquipped(),
-      manaRingAvailable: !!source,
-      manaRingItemId: source?.item?.id ?? null,
+      energyRingEquipped: isEmergencyRingEquipped(),
+      energyRingAvailable: !!source,
+      energyRingItemId: source?.item?.id ?? null,
       equipRingSuppressed: state.equipRingSuppressed,
       lastEquipAt: state.lastEquipAt,
       lastUnequipAt: state.lastUnequipAt,
@@ -398,8 +398,8 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
   }
 
   bot.emergencyManaRing = {
-    start, stop, status, updateConfig, check, equipManaRing, unequipManaRing,
-    findManaRingSource, isManaRingEquipped, config,
+    start, stop, status, updateConfig, check, equipManaRing: equipEmergencyRing, unequipManaRing: unequipEmergencyRing,
+    findManaRingSource: findEmergencyRingSource, isManaRingEquipped: isEmergencyRingEquipped, config,
   };
 
   bot.addCleanup?.(() => {
@@ -414,5 +414,3 @@ window.__minibiaBotBundle.installEmergencyManaRingModule = function installEmerg
   if (config.enabled) start();
   return bot.emergencyManaRing;
 };
-
-if (window.minibiaBot) window.__minibiaBotBundle.installEmergencyManaRingModule(window.minibiaBot);
