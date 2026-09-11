@@ -140,8 +140,8 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
     } catch (_) { return null; }
   }
 
-  function fireCrosshairAt(best) {
-    const slot = normalizeHotbarSlot(config.hotbarSlot);
+  function fireCrosshairAt(best, hotbarSlotOverride = null) {
+    const slot = normalizeHotbarSlot(hotbarSlotOverride ?? config.hotbarSlot);
     if (!slot || !best?.position || !bot.clickHotbar?.(slot - 1)) return false;
     const tile = getTile(best.position);
     const target = best.target || best.monsters?.[0] || null;
@@ -278,7 +278,7 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
   }
 
   patchClickHotbar();
-  bot.fireball = { start, stop, trigger, status, updateConfig, shouldReservePriority, getBestCandidate, evaluateAtPosition, getFireballTiles, destroy, config };
+  bot.fireball = { start, stop, trigger, status, updateConfig, shouldReservePriority, getBestCandidate, evaluateAtPosition, getFireballTiles, fireCrosshairAt, destroy, config };
   bot.addCleanup(destroy);
   if (!ensureUi()) {
     let attempts = 0;
