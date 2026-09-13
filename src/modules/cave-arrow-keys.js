@@ -25,7 +25,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     stepCooldownMs: 180,
     matrixCacheMs: 750,
     allowDamagingFields: true,
-    fieldMovementCost: 12,
+    fieldMovementCost: 1,
   };
 
   const matrixCache = new Map();
@@ -429,166 +429,88 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     } catch (error) {
       state.lastWalkMethod = null;
       state.lastError = `One-tile movement failed: ${error?.message || error}`;
-      bot.log("cave Smart A* one-tile walk failed", {
-        key,
-        from: fromPosition,
-        nextTile,
-        field: getDamagingFieldName(targetTile),
-        error: state.lastError,
-      });
+      bot.log("cave Smart A* one-tile movement failed", { error });
       return false;
     }
   }
 
-  function stepToward(from, to) {
-    const fromPosition = normalizePosition(from);
-    const toPosition = normalizePosition(to);
-    if (!fromPosition || !toPosition || fromPosition.z !== toPosition.z) return false;
-
-    const pendingResult = handlePendingFieldStep(fromPosition);
-    if (pendingResult !== null) return pendingResult;
-
-    const now = Date.now();
-    if (now - state.lastStepAt < config.stepCooldownMs) return true;
-
-    let nextTile = null;
-    try {
-      nextTile = getNextSmartStep(fromPosition, toPosition);
-    } catch (error) {
-      state.lastError = error?.message || String(error);
-      return false;
-    }
-
-    if (!nextTile) return true;
-
-    const key = pickArrowKey(fromPosition, nextTile);
-    if (!key) {
-      state.lastError = "Smart A* produced a non-cardinal step";
-      return false;
-    }
-
-    const targetTile = getTileAt(nextTile);
-    const fieldName = getDamagingFieldName(targetTile);
-    if (fieldName) {
-      state.lastKey = key;
-      state.fieldStepRetries = 0;
-      return clickFieldDirection(key, fromPosition, nextTile, fieldName);
-    }
-
-    if (!walkOneCardinalTile(from, fromPosition, nextTile, key)) return false;
-
-    state.lastStepAt = now;
-    state.lastKey = key;
-    state.stepCount += 1;
-    bot.log("cave Smart A* one-tile walk step", {
-      key,
-      walkMethod: state.lastWalkMethod,
-      from: fromPosition,
-      nextTile,
-      waypoint: toPosition,
-      field: state.lastFieldName,
-      pathLength: state.lastPathLength,
-      stepCount: state.stepCount,
-      fieldStepCount: state.fieldStepCount,
-    });
-    return true;
-  }
-
-  function installPathInterceptor() {
+  function installPathfinderPatch() {
     const pathfinder = window.gameClient?.world?.pathfinder;
-    if (!pathfinder || typeof pathfinder.findPath !== "function" || state.installed) return false;
+    if (!pathfinder || typeof pathfinder.findPath !== "function") return false;
+    if (state.installed && pathfinder.findPath.__caveArrowKeysPatched) return true;
 
-    state.originalFindPath = pathfinder.findPath.bind(pathfinder);
-    pathfinder.findPath = function findPathWithSmartArrowMode(from, to, ...args) {
-      if (isArrowModeActive(to)) {
-        stepToward(from, to);
+    const originalFindPath = pathfinder.findPath.__caveArrowKeysOriginal || pathfinder.findPath;
+    state.originalFindPath = originalFindPath;
+
+    function patchedFindPath(fromValue, toValue, ...args) {
+      if (!isArrowModeActive(toValue)) {
+        return originalFindPath.call(this, fromValue, toValue, ...args);
+      }
+
+      const from = normalizePosition(fromValue);
+      const to = normalizePosition(toValue);
+      if (!from || !to || from.z !== to.z) {
+        return originalFindPath.call(this, fromValue, toValue, ...args);
+      }
+
+      const nextTile = getNextSmartStep(from, to);
+      if (!nextTile) {
+        state.lastError = "Smart A field-crossing path not found";
         return null;
       }
-      return state.originalFindPath(from, to, ...args);
-    };
 
+      const key = pickArrowKey(from, nextTile);
+      if (!key) {
+        state.lastError = "Smart A field-crossing next step is not cardinal";
+        return null;
+      }
+
+      const tile = getTileAt(nextTile);
+      const fieldName = getDamagingFieldName(tile);
+      state.lastKey = key;
+      state.lastStepAt = Date.now();
+
+      if (fieldName) {
+        return walkOneCardinalTile(fromValue, from, nextTile, key);
+      }
+
+      return originalFindPath.call(this, fromValue, new Position(nextTile.x, nextTile.y, nextTile.z), ...args);
+    }
+
+    patchedFindPath.__caveArrowKeysPatched = true;
+    patchedFindPath.__caveArrowKeysOriginal = originalFindPath;
+    pathfinder.findPath = patchedFindPath;
     state.installed = true;
     return true;
   }
 
-  function uninstallPathInterceptor() {
-    const pathfinder = window.gameClient?.world?.pathfinder;
-    if (state.installed && pathfinder && state.originalFindPath) {
-      pathfinder.findPath = state.originalFindPath;
-    }
-    state.installed = false;
-    state.originalFindPath = null;
+  function ensurePathfinderPatch() {
+    if (installPathfinderPatch()) return;
+    let attempts = 0;
+    const timerId = window.setInterval(() => {
+      attempts += 1;
+      if (installPathfinderPatch() || attempts >= 80) {
+        window.clearInterval(timerId);
+      }
+    }, 250);
+    bot.addCleanup?.(() => window.clearInterval(timerId));
   }
-
-  function ensureDropdownOption() {
-    const select = document.getElementById("minibia-bot-cave-pathfinder-mode");
-    if (!select) return;
-
-    let astarOption = Array.from(select.options).find((entry) => entry.value === "astar");
-    if (!astarOption) {
-      astarOption = document.createElement("option");
-      astarOption.value = "astar";
-      select.appendChild(astarOption);
-    }
-    astarOption.textContent = "Smart A*";
-
-    let arrowOption = Array.from(select.options).find((entry) => entry.value === "arrow");
-    if (!arrowOption) {
-      arrowOption = document.createElement("option");
-      arrowOption.value = "arrow";
-      select.appendChild(arrowOption);
-    }
-    arrowOption.textContent = "Smart A* + Field Crossing";
-
-    const mode = bot.cave?.status?.().config?.pathfinderMode;
-    if (mode === "astar" || mode === "arrow") select.value = mode;
-  }
-
 
   function status() {
     return {
-      installed: state.installed,
+      ...state,
       config: { ...config },
-      lastStepAt: state.lastStepAt,
-      lastKey: state.lastKey,
-      stepCount: state.stepCount,
-      fieldStepCount: state.fieldStepCount,
-      lastPathLength: state.lastPathLength,
-      lastNextTile: state.lastNextTile,
-      lastError: state.lastError,
-      lastWalkMethod: state.lastWalkMethod,
-      lastFieldName: state.lastFieldName,
-      pendingFieldStep: state.pendingFieldStep ? { ...state.pendingFieldStep } : null,
-      fieldStepRetries: state.fieldStepRetries,
-      dpadReady: !!findDpadButtons(),
     };
   }
 
   function destroy() {
-    uninstallPathInterceptor();
     if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
     state.uiTimerId = null;
     matrixCache.clear();
-    state.pendingFieldStep = null;
     state.dpadButtons = null;
   }
 
-  bot.caveArrowKeys = {
-    installPathInterceptor,
-    uninstallPathInterceptor,
-    ensureDropdownOption,
-    status,
-    destroy,
-    config,
-    isDamagingFieldTile,
-    getDamagingFieldName,
-  };
-
-  installPathInterceptor();
-  ensureDropdownOption();
-  state.uiTimerId = window.setInterval(() => {
-    ensureDropdownOption();
-  }, 1000);
-  bot.addCleanup(destroy);
+  bot.caveArrowKeys = { status, destroy, ensureDropdownOption: () => {} };
+  ensurePathfinderPatch();
   return bot.caveArrowKeys;
 };
