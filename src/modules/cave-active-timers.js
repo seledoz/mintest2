@@ -36,7 +36,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
         if (observerTimerId != null || !bot.cave?.status?.().running) return false;
         observerTimerId = originalSetInterval.call(window, () => {
           try { observerCallback(); } catch (error) { bot.log?.("cave observer failed", error?.message || error); }
-        }, 200);
+        }, 100);
         return true;
       };
       const stopObserver = () => {
