@@ -43,15 +43,9 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
 
   function normalizeHotbarSlot(slot) {
     const value = Number(slot);
-    if (!Number.isFinite(value)) {
-      return null;
-    }
-
+    if (!Number.isFinite(value)) return null;
     const normalized = Math.trunc(value);
-    if (normalized < 1 || normalized > 12) {
-      return null;
-    }
-
+    if (normalized < 1 || normalized > 12) return null;
     return normalized;
   }
 
@@ -60,22 +54,10 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function normalizePosition(value) {
-    if (!value) {
-      return null;
-    }
-
-    const x = Number(value.x);
-    const y = Number(value.y);
-    const z = Number(value.z);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
-      return null;
-    }
-
-    return {
-      x: Math.trunc(x),
-      y: Math.trunc(y),
-      z: Math.trunc(z),
-    };
+    if (!value) return null;
+    const x = Number(value.x), y = Number(value.y), z = Number(value.z);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+    return { x: Math.trunc(x), y: Math.trunc(y), z: Math.trunc(z) };
   }
 
   function getPositionKey(position) {
@@ -83,31 +65,19 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function isAdjacentTile(from, to) {
-    if (!from || !to || Number(from.z) !== Number(to.z)) {
-      return false;
-    }
-
+    if (!from || !to || Number(from.z) !== Number(to.z)) return false;
     const dx = Math.abs(Number(from.x) - Number(to.x));
     const dy = Math.abs(Number(from.y) - Number(to.y));
     return (dx !== 0 || dy !== 0) && dx <= 1 && dy <= 1;
   }
 
   function getTileDistance(from, to) {
-    if (!from || !to || Number(from.z) !== Number(to.z)) {
-      return Number.POSITIVE_INFINITY;
-    }
-
-    return Math.max(
-      Math.abs(Number(from.x) - Number(to.x)),
-      Math.abs(Number(from.y) - Number(to.y))
-    );
+    if (!from || !to || Number(from.z) !== Number(to.z)) return Number.POSITIVE_INFINITY;
+    return Math.max(Math.abs(Number(from.x) - Number(to.x)), Math.abs(Number(from.y) - Number(to.y)));
   }
 
   function isInTargetRange(from, to) {
-    if (!from || !to || Number(from.z) !== Number(to.z)) {
-      return false;
-    }
-
+    if (!from || !to || Number(from.z) !== Number(to.z)) return false;
     const maxTargetDistanceX = Math.max(1, Number(config.maxTargetDistanceX) || 7);
     const maxTargetDistanceY = Math.max(1, Number(config.maxTargetDistanceY) || 5);
     const dx = Math.abs(Number(from.x) - Number(to.x));
@@ -116,27 +86,17 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function isSameCreature(left, right) {
-    if (!left || !right) {
-      return false;
-    }
-
+    if (!left || !right) return false;
     return left === right || left.id === right.id;
   }
 
   function findNearbyMonster(creature) {
-    if (!creature) {
-      return null;
-    }
-
-    const nearbyMonsters = getNearbyMonsters();
-    return nearbyMonsters.find((monster) => isSameCreature(monster, creature)) || null;
+    if (!creature) return null;
+    return getNearbyMonsters().find((monster) => isSameCreature(monster, creature)) || null;
   }
 
   function findNearbyMonsterById(id) {
-    if (id == null) {
-      return null;
-    }
-
+    if (id == null) return null;
     return getNearbyMonsters().find((monster) => monster?.id === id) || null;
   }
 
@@ -150,9 +110,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
 
   function pruneSkippedTargets(now = Date.now()) {
     for (const [id, expiresAt] of state.skippedTargetIds.entries()) {
-      if (expiresAt <= now) {
-        state.skippedTargetIds.delete(id);
-      }
+      if (expiresAt <= now) state.skippedTargetIds.delete(id);
     }
   }
 
@@ -175,27 +133,16 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function clearCurrentTarget() {
-    if (!window.gameClient?.player || typeof window.gameClient.send !== "function") {
-      return false;
-    }
-
-    if (typeof TargetPacket !== "function") {
-      return false;
-    }
-
-    if (!getCurrentTarget()) {
-      return false;
-    }
-
+    if (!window.gameClient?.player || typeof window.gameClient.send !== "function") return false;
+    if (typeof TargetPacket !== "function") return false;
+    if (!getCurrentTarget()) return false;
     window.gameClient.player.setTarget(null);
     window.gameClient.send(new TargetPacket(0));
     return true;
   }
 
   function markCombatActive(now = Date.now()) {
-    if (!state.combatStartedAt) {
-      state.combatStartedAt = now;
-    }
+    if (!state.combatStartedAt) state.combatStartedAt = now;
   }
 
   function getCombatTargetCount() {
@@ -203,10 +150,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function isCombatActive() {
-    if (!config.enabled || !state.running) {
-      return false;
-    }
-
+    if (!config.enabled || !state.running) return false;
     return !!getEngagedTarget();
   }
 
@@ -215,7 +159,6 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       markCombatActive(now);
       return true;
     }
-
     state.combatStartedAt = 0;
     return false;
   }
@@ -226,34 +169,20 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       state.engagedTargetId = currentTarget.id;
       return currentTarget;
     }
-
-    if (state.engagedTargetId == null) {
-      return null;
-    }
-
+    if (state.engagedTargetId == null) return null;
     const followTarget = getCurrentFollowTarget();
     if (followTarget && followTarget.id === state.engagedTargetId) {
       return findNearbyMonster(followTarget) || followTarget;
     }
-
     const nearbyTarget = findNearbyMonsterById(state.engagedTargetId);
-    if (nearbyTarget) {
-      return nearbyTarget;
-    }
-
+    if (nearbyTarget) return nearbyTarget;
     clearEngagedTarget();
     return null;
   }
 
   function setCurrentTarget(target) {
-    if (!target || !window.gameClient?.player || typeof window.gameClient.send !== "function") {
-      return false;
-    }
-
-    if (typeof TargetPacket !== "function") {
-      return false;
-    }
-
+    if (!target || !window.gameClient?.player || typeof window.gameClient.send !== "function") return false;
+    if (typeof TargetPacket !== "function") return false;
     window.gameClient.player.setTarget(target);
     window.gameClient.send(new TargetPacket(target.id));
     state.engagedTargetId = target.id;
@@ -265,22 +194,13 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function skipTarget(target, reason, now = Date.now(), skipMs = 4000) {
-    if (!target?.id) {
-      return false;
-    }
-
+    if (!target?.id) return false;
     const until = now + Math.max(500, Number(skipMs) || 0);
     state.skippedTargetIds.set(target.id, until);
-
     const clearedTarget = isSameCreature(getCurrentTarget(), target) ? clearCurrentTarget() : false;
     const clearedFollow = false;
-
-    if (state.engagedTargetId === target.id) {
-      clearEngagedTarget();
-    } else if (state.lastFollowTargetId === target.id) {
-      resetFollowProgress();
-    }
-
+    if (state.engagedTargetId === target.id) clearEngagedTarget();
+    else if (state.lastFollowTargetId === target.id) resetFollowProgress();
     bot.log("skipping auto attack target", {
       id: target.id,
       name: target.name || "Mob",
@@ -299,13 +219,10 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
 
   function getMonsterCandidates(now = Date.now()) {
     pruneSkippedTargets(now);
-
     const playerPosition = normalizePosition(bot.getPlayerPosition());
     return getNearbyMonsters()
       .filter((monster) => {
-        if (isTargetSkipped(monster, now)) {
-          return false;
-        }
+        if (isTargetSkipped(monster, now)) return false;
         const monsterPosition = normalizePosition(monster?.getPosition?.() || monster?.__position);
         return isInTargetRange(playerPosition, monsterPosition);
       })
@@ -319,29 +236,20 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   function shouldGiveUpTarget(target) {
     const playerPosition = normalizePosition(bot.getPlayerPosition());
     const targetPosition = normalizePosition(target?.getPosition?.() || target?.__position);
-    if (!playerPosition || !targetPosition) {
-      return false;
-    }
-
+    if (!playerPosition || !targetPosition) return false;
     return !isInTargetRange(playerPosition, targetPosition);
   }
 
   function isPriorityTargetingActive() {
     const priority = bot.attackPriority;
-    if (!priority) {
-      return false;
-    }
-
+    if (!priority) return false;
     const priorityConfig = priority.config || priority.status?.().config || {};
     return priorityConfig.highestHpEnabled === true ||
       (priorityConfig.enabled !== false && Array.isArray(priorityConfig.creatureNames) && priorityConfig.creatureNames.length > 0);
   }
 
   function resetTargetIfTooFar() {
-    if (!isPriorityTargetingActive()) {
-      return false;
-    }
-
+    if (!isPriorityTargetingActive()) return false;
     const currentTarget = getCurrentTarget();
     if (currentTarget && shouldGiveUpTarget(currentTarget)) {
       skipTarget(currentTarget, "target outside rectangular range", Date.now(), 2500);
@@ -354,7 +262,6 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       });
       return true;
     }
-
     const engagedTarget = getEngagedTarget();
     if (engagedTarget && shouldGiveUpTarget(engagedTarget)) {
       skipTarget(engagedTarget, "engaged target outside rectangular range", Date.now(), 2500);
@@ -367,42 +274,28 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       });
       return true;
     }
-
     return false;
   }
 
   function getTileFromPosition(position) {
-    if (!position || typeof Position !== "function") {
-      return null;
-    }
-
-    return window.gameClient?.world?.getTileFromWorldPosition?.(
-      new Position(position.x, position.y, position.z)
-    ) || null;
+    if (!position || typeof Position !== "function") return null;
+    return window.gameClient?.world?.getTileFromWorldPosition?.(new Position(position.x, position.y, position.z)) || null;
   }
 
   function findReachableAdjacentPosition(targetPosition, playerPosition) {
-    if (!targetPosition || !playerPosition) {
-      return null;
-    }
-
+    if (!targetPosition || !playerPosition) return null;
     const offsets = [
       { x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 },
       { x: -1, y: -1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: 1, y: 1 },
     ];
-
     offsets.sort((a, b) => {
       const da = Math.abs(targetPosition.x + a.x - playerPosition.x) + Math.abs(targetPosition.y + a.y - playerPosition.y);
       const db = Math.abs(targetPosition.x + b.x - playerPosition.x) + Math.abs(targetPosition.y + b.y - playerPosition.y);
       return da - db;
     });
-
     const pathfinder = window.gameClient?.world?.pathfinder;
     const startTile = getTileFromPosition(playerPosition);
-    if (!pathfinder || !startTile || typeof pathfinder.search !== "function") {
-      return null;
-    }
-
+    if (!pathfinder || !startTile || typeof pathfinder.search !== "function") return null;
     for (const offset of offsets) {
       const candidatePosition = { x: targetPosition.x + offset.x, y: targetPosition.y + offset.y, z: targetPosition.z };
       const tile = getTileFromPosition(candidatePosition);
@@ -445,211 +338,106 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
 
   function canAttack(now = Date.now()) {
     if (now - state.lastTargetAt < Math.max(0, Number(config.targetCooldownMs) || 0)) return false;
-
-    // Once a target is already engaged, never build a new candidate list just
-    // because another creature is closer. Keep the existing target locked.
-    if (getCurrentTarget() || state.engagedTargetId != null) {
-      return false;
-    }
-
-    if (config.meleeMode) return getMonsterCandidates(now).length > 0;
+    if (getCurrentTarget() || state.engagedTargetId != null) return false;
     return getMonsterCandidates(now).length > 0;
   }
 
   function triggerAttack(now = Date.now()) {
     if (!canAttack(now)) return false;
-    const engagedTarget = getEngagedTarget();
-    const priorityActive = isPriorityTargetingActive();
-    const preferredTarget = engagedTarget && !isTargetSkipped(engagedTarget, now) && (!priorityActive || !shouldGiveUpTarget(engagedTarget))
-      ? engagedTarget
-      : (getMonsterCandidates(now)[0] || null);
-    if (!preferredTarget || !setCurrentTarget(preferredTarget)) return false;
-    state.lastTargetAt = now;
-    markCombatActive(now);
-    bot.log("selected auto attack target", { id: preferredTarget.id, name: preferredTarget.name || "Mob", reason: isSameCreature(preferredTarget, engagedTarget) ? "engaged target" : "nearest candidate" });
-    return true;
+
+    const priorityTarget = bot.attackPriority?.getPreferredTarget?.() || null;
+    const candidates = getMonsterCandidates(now);
+    const preferredTarget = priorityTarget && !isTargetSkipped(priorityTarget, now)
+      ? priorityTarget
+      : candidates[0];
+    if (!preferredTarget) return false;
+
+    const selected = setCurrentTarget(preferredTarget);
+    if (selected) {
+      state.lastTargetAt = now;
+      bot.log("auto attack selected target", {
+        id: preferredTarget.id,
+        name: preferredTarget.name || "Mob",
+        reason: priorityTarget && isSameCreature(priorityTarget, preferredTarget) ? "creature priority" : "nearest candidate",
+      });
+    }
+    return selected;
   }
 
   function canUseRune(now = Date.now()) {
-    const slot = normalizeHotbarSlot(config.runeHotbarSlot);
-    if (!slot || !getCurrentTarget()) return false;
-    if (bot.attackGfb?.shouldReservePriority?.()) return false;
+    if (!getCurrentTarget()) return false;
     if (now - state.lastRuneHotkeyAt < Math.max(0, Number(config.runeCooldownMs) || 0)) return false;
-    return true;
+    if (bot.gfb?.status?.().reservedByPriority) return false;
+    return normalizeHotbarSlot(config.runeHotbarSlot) != null;
   }
 
   function triggerRune(now = Date.now()) {
     if (!canUseRune(now)) return false;
     const slot = normalizeHotbarSlot(config.runeHotbarSlot);
-    const clicked = bot.clickHotbar(slot - 1);
-    if (clicked) {
-      state.lastRuneHotkeyAt = now;
-      markCombatActive(now);
-      bot.log("used auto attack rune hotkey", { slot, target: getCurrentTarget()?.name || "Mob" });
-    }
-    return clicked;
+    if (slot == null) return false;
+    const hotbar = window.gameClient?.hotbar;
+    const click = hotbar?.useHotbarSlot || hotbar?.useSlot || hotbar?.clickSlot;
+    if (typeof click !== "function") return false;
+    click.call(hotbar, slot);
+    state.lastRuneHotkeyAt = now;
+    return true;
   }
 
   function tryAttack() {
-    if (!config.enabled) return false;
+    if (!config.enabled || !state.running) return;
     const now = Date.now();
-    const playerPos = normalizePosition(bot.getPlayerPosition());
-    if (resetTargetIfTooFar()) {
-      bot.logDebug("auto attack no valid targets in rectangular range");
-      return true;
-    }
+    resetTargetIfTooFar();
     syncCombatState(now);
     if (config.meleeMode) {
       syncMeleeChase(now);
-      if (getCurrentTarget()) return triggerRune(now);
-      bot.logDebug("auto attack melee no target", { position: playerPos });
+      if (getCurrentTarget()) triggerRune(now);
+    } else if (getCurrentTarget()) {
+      triggerRune(now);
     }
-    if (getCurrentTarget()) return triggerRune(now);
-
-    // Do not scan for replacement candidates while an engaged target still
-    // exists. A closer creature must not steal the current target.
-    if (state.engagedTargetId != null) {
-      return false;
-    }
-
-    const nearbyCount = getMonsterCandidates(now).length;
-    const attacked = triggerAttack(now);
-    bot.logDebug("auto attack trigger", { attacked, nearbyMonsters: nearbyCount, hasCurrentTarget: !!getCurrentTarget(), position: playerPos });
-    return attacked;
+    triggerAttack(now);
   }
 
   function scheduleNextTick() {
     if (!state.running) return;
-    state.timerId = window.setTimeout(() => { tick(); }, config.tickMs);
-  }
-
-  function tick() {
-    if (!state.running) return;
-    try {
+    if (state.timerId != null) window.clearTimeout(state.timerId);
+    state.timerId = window.setTimeout(() => {
+      state.timerId = null;
       tryAttack();
-    } catch (error) {
-      const playerPos = normalizePosition(bot.getPlayerPosition());
-      const combatStatus = bot.attack?.status?.() || {};
-      bot.log("auto attack tick failed", { position: playerPos, error: error?.message || error, combatDurationMs: combatStatus.combatDurationMs, targetCount: combatStatus.targetCount, meleeMode: config.meleeMode });
-    } finally {
       scheduleNextTick();
-    }
+    }, Math.max(50, Number(config.tickMs) || 300));
   }
 
-  function start(overrides = {}) {
-    const nextOverrides = { ...overrides };
-    delete nextOverrides.targetHotbarSlot;
-    delete nextOverrides.hotbarSlot;
-    Object.assign(config, nextOverrides, { enabled: true });
-    delete config.targetHotbarSlot;
-    delete config.hotbarSlot;
-    persistConfig();
-    if (state.running) { bot.log("auto attack already running"); return false; }
+  function start() {
+    if (state.running) return true;
     state.running = true;
-    bot.log("auto attack started", { ...config });
-    tick();
+    config.enabled = true;
+    persistConfig();
+    scheduleNextTick();
     return true;
   }
 
-  function stop(options = {}) {
-    const shouldPersistEnabled = options.persistEnabled !== false;
+  function stop() {
     state.running = false;
-    if (state.timerId != null) { window.clearTimeout(state.timerId); state.timerId = null; }
-    if (shouldPersistEnabled) { config.enabled = false; persistConfig(); }
+    if (state.timerId != null) window.clearTimeout(state.timerId);
+    state.timerId = null;
     clearEngagedTarget();
-    state.lastChaseAt = 0;
-    state.skippedTargetIds.clear();
-    bot.log("auto attack stopped");
     return true;
   }
 
   function status() {
-    const combatActive = syncCombatState(Date.now());
     return {
       running: state.running,
       config: { ...config },
-      lastTargetAt: state.lastTargetAt,
-      lastRuneHotkeyAt: state.lastRuneHotkeyAt,
-      engagedTargetId: state.engagedTargetId,
-      combatActive,
-      combatStartedAt: state.combatStartedAt || 0,
-      combatDurationMs: state.combatStartedAt ? Math.max(0, Date.now() - state.combatStartedAt) : 0,
-      targetCount: getCombatTargetCount(),
-      lastChaseAt: state.lastChaseAt,
-      currentTarget: getCurrentTarget() ? { id: getCurrentTarget().id, name: getCurrentTarget().name, type: getCurrentTarget().type, position: getCurrentTarget().__position || null } : null,
-      nearbyMonsters: getMonsterCandidates().map((creature) => ({ id: creature.id, name: creature.name, type: creature.type, position: creature.__position || null })),
+      currentTarget: getCurrentTarget() ? { id: getCurrentTarget().id, name: getCurrentTarget().name } : null,
+      engagedTarget: getEngagedTarget() ? { id: getEngagedTarget().id, name: getEngagedTarget().name } : null,
     };
   }
 
-  function updateConfig(nextConfig = {}) {
-    const sanitizedConfig = { ...nextConfig };
-    delete sanitizedConfig.targetHotbarSlot;
-    delete sanitizedConfig.hotbarSlot;
-    if (Object.prototype.hasOwnProperty.call(sanitizedConfig, "runeHotbarSlot")) sanitizedConfig.runeHotbarSlot = normalizeHotbarSlot(sanitizedConfig.runeHotbarSlot);
-    if (Object.prototype.hasOwnProperty.call(sanitizedConfig, "maxTargetDistance")) {
-      const legacyDistance = Math.max(1, Math.trunc(Number(sanitizedConfig.maxTargetDistance) || 0));
-      sanitizedConfig.maxTargetDistanceX = legacyDistance;
-      sanitizedConfig.maxTargetDistanceY = legacyDistance;
-      delete sanitizedConfig.maxTargetDistance;
-    }
-    if (Object.prototype.hasOwnProperty.call(sanitizedConfig, "maxTargetDistanceX")) sanitizedConfig.maxTargetDistanceX = Math.max(1, Math.trunc(Number(sanitizedConfig.maxTargetDistanceX) || config.maxTargetDistanceX || 7));
-    if (Object.prototype.hasOwnProperty.call(sanitizedConfig, "maxTargetDistanceY")) sanitizedConfig.maxTargetDistanceY = Math.max(1, Math.trunc(Number(sanitizedConfig.maxTargetDistanceY) || config.maxTargetDistanceY || 5));
-    Object.assign(config, sanitizedConfig);
-    delete config.targetHotbarSlot;
-    delete config.hotbarSlot;
-    persistConfig();
-    bot.log("auto attack config updated", { ...config });
-    return { ...config };
-  }
-
-  function removeLegacyTargetHotkeyControl() {
-    const input = document.getElementById("minibia-bot-auto-attack-hotkey");
-    if (!input) return false;
-    const field = input.closest?.(".mb-field") || input.parentElement || input;
-    field.remove?.();
-    return true;
-  }
-
-  function watchForLegacyTargetHotkeyControl() {
-    if (removeLegacyTargetHotkeyControl()) return;
-    let attempts = 0;
-    state.targetHotkeyUiTimerId = window.setInterval(() => {
-      attempts += 1;
-      if (removeLegacyTargetHotkeyControl() || attempts >= 40) {
-        window.clearInterval(state.targetHotkeyUiTimerId);
-        state.targetHotkeyUiTimerId = null;
-      }
-    }, 250);
-  }
-
-  if (config.enabled) start();
-
-  bot.addCleanup(() => {
-    if (state.targetHotkeyUiTimerId != null) {
-      window.clearInterval(state.targetHotkeyUiTimerId);
-      state.targetHotkeyUiTimerId = null;
-    }
-    stop({ persistEnabled: false });
-  });
-
-  bot.attack = {
-    start,
-    stop,
-    status,
-    updateConfig,
-    tryAttack,
-    canAttack,
-    triggerAttack,
-    canUseRune,
-    triggerRune,
-    getNearbyMonsters,
-    getCurrentTarget,
-    getCurrentFollowTarget,
-    isCombatActive,
-    syncMeleeChase,
-    normalizeHotbarSlot,
-    config,
-  };
-
-  window.setTimeout(watchForLegacyTargetHotkeyControl, 0);
+  bot.attack = bot.attack || {};
+  bot.attack.config = config;
+  bot.attack.start = start;
+  bot.attack.stop = stop;
+  bot.attack.status = status;
+  bot.addCleanup(stop);
+  return bot.attack;
 };
