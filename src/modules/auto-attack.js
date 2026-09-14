@@ -445,7 +445,14 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
 
   function canAttack(now = Date.now()) {
     if (now - state.lastTargetAt < Math.max(0, Number(config.targetCooldownMs) || 0)) return false;
-    if (config.meleeMode) return getMonsterCandidates(now).length > 0 && !getCurrentTarget();
+
+    // Once a target is already engaged, never build a new candidate list just
+    // because another creature is closer. Keep the existing target locked.
+    if (getCurrentTarget() || state.engagedTargetId != null) {
+      return false;
+    }
+
+    if (config.meleeMode) return getMonsterCandidates(now).length > 0;
     return getMonsterCandidates(now).length > 0;
   }
 
@@ -498,6 +505,13 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       bot.logDebug("auto attack melee no target", { position: playerPos });
     }
     if (getCurrentTarget()) return triggerRune(now);
+
+    // Do not scan for replacement candidates while an engaged target still
+    // exists. A closer creature must not steal the current target.
+    if (state.engagedTargetId != null) {
+      return false;
+    }
+
     const nearbyCount = getMonsterCandidates(now).length;
     const attacked = triggerAttack(now);
     bot.logDebug("auto attack trigger", { attacked, nearbyMonsters: nearbyCount, hasCurrentTarget: !!getCurrentTarget(), position: playerPos });
