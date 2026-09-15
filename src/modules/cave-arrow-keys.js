@@ -16,16 +16,17 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     lastError: null,
     lastWalkMethod: null,
     lastFieldName: null,
-    pendingFieldStep: null,
-    fieldStepRetries: 0,
+    pendingStep: null,
+    stepRetries: 0,
     dpadButtons: null,
   };
 
+  // D-walk keeps the D-pad as its movement executor.  The route planner is
+  // A*-style, but it is cardinal because the D-pad only has four directions.
   const config = {
-    stepCooldownMs: 180,
     matrixCacheMs: 750,
-    allowDamagingFields: true,
-    fieldMovementCost: 1,
+    stepRetryMs: 450,
+    maxStepRetries: 3,
   };
 
   const matrixCache = new Map();
@@ -49,8 +50,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   function isArrowModeActive(to) {
     const caveStatus = bot.cave?.status?.() || null;
     if (!caveStatus?.running) return false;
-    const mode = caveStatus?.config?.pathfinderMode;
-    if (mode !== "arrow") return false;
+    if (caveStatus?.config?.pathfinderMode !== "arrow") return false;
     if (!caveStatus.currentWaypoint) return false;
     return sameTile(to, caveStatus.currentWaypoint);
   }
@@ -81,7 +81,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   }
 
   function getDamagingFieldName(tile) {
-    if (!config.allowDamagingFields || !tile) return null;
+    if (!tile) return null;
     for (const thing of getTileThings(tile)) {
       const name = getThingName(thing);
       if (damagingFieldPattern.test(name)) return name;
@@ -105,7 +105,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     }
   }
 
-  function isSmartArrowPassable(tile) {
+  // Fire/poison/energy fields are ALWAYS traversable for D-walk.
+  function isDWalkPassable(tile) {
     if (!tile) return false;
     try {
       if (typeof tile.isWalkable === "function" && tile.isWalkable()) return true;
@@ -126,7 +127,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
         const pos = normalizePosition(tile?.__position);
         if (!pos || pos.z !== z) continue;
         matrix.set(`${pos.x},${pos.y}`, {
-          passable: isSmartArrowPassable(tile),
+          passable: isDWalkPassable(tile),
           field: isDamagingFieldTile(tile),
         });
       }
@@ -173,7 +174,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     const open = [{ ...from, g: 0, f: heuristic(from, to), parent: null }];
     const closed = new Set();
     const key = (position) => `${position.x},${position.y}`;
-    const tolerance = Math.max(0, Number(bot.cave?.config?.waypointTolerance) || 0);
+    const tolerance = Math.max(1, Number(bot.cave?.config?.waypointTolerance) || 0);
 
     while (open.length) {
       let bestIndex = 0;
@@ -192,8 +193,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
         const neighborKey = key(neighbor);
         if (closed.has(neighborKey)) continue;
 
-        const cell = matrix.get(`${neighbor.x},${neighbor.y}`);
-        const g = current.g + (cell?.field ? config.fieldMovementCost : 1);
+        const g = current.g + 1;
         const f = g + heuristic(neighbor, to);
         const existing = open.find((entry) => entry.x === neighbor.x && entry.y === neighbor.y);
         if (existing) {
@@ -231,33 +231,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     state.lastPathLength = path ? path.length : 0;
     state.lastNextTile = null;
     return null;
-  }
-
-  function temporarilyForceFieldTileWalkable(tile, callback) {
-    const fieldName = getDamagingFieldName(tile);
-    if (!fieldName) return callback(false, null);
-
-    const restores = [];
-    const patchMethod = (owner, methodName) => {
-      if (!owner || typeof owner[methodName] !== "function") return;
-      const original = owner[methodName];
-      try {
-        owner[methodName] = () => true;
-        restores.push(() => { owner[methodName] = original; });
-      } catch (_) {}
-    };
-
-    patchMethod(tile, "isWalkable");
-    patchMethod(tile, "isPathable");
-    patchMethod(tile, "isPathfindable");
-
-    try {
-      return callback(true, fieldName);
-    } finally {
-      for (let index = restores.length - 1; index >= 0; index -= 1) {
-        try { restores[index](); } catch (_) {}
-      }
-    }
   }
 
   function normalizeControlText(value) {
@@ -316,7 +289,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     return state.dpadButtons;
   }
 
-  function clickFieldDirection(key, fromPosition, nextTile, fieldName) {
+  function clickDpadDirection(key, fromPosition, nextTile, fieldName) {
     const button = findDpadButtons()?.[key] || null;
     if (!button) {
       state.lastError = `Minibia D-pad control not found for ${key}`;
@@ -326,41 +299,44 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
 
     try {
       button.click();
-      state.lastFieldName = fieldName;
-      state.lastWalkMethod = `Minibia direct D-pad field step (${key})`;
+      state.lastFieldName = fieldName || null;
+      state.lastWalkMethod = fieldName
+        ? `Minibia direct D-pad field step (${key})`
+        : `Minibia direct D-pad step (${key})`;
       state.lastError = null;
-      state.pendingFieldStep = {
+      state.pendingStep = {
         from: { ...fromPosition },
         to: { ...nextTile },
         key,
-        fieldName,
+        fieldName: fieldName || null,
         sentAt: Date.now(),
       };
-      bot.log("cave direct field step requested", {
+      state.stepRetries = 0;
+      bot.log("cave D-walk step requested", {
         key,
         from: fromPosition,
         nextTile,
-        field: fieldName,
+        field: fieldName || null,
       });
       return true;
     } catch (error) {
-      state.lastError = `D-pad field movement failed: ${error?.message || error}`;
+      state.lastError = `D-pad movement failed: ${error?.message || error}`;
       state.lastWalkMethod = null;
       return false;
     }
   }
 
-  function handlePendingFieldStep(fromPosition) {
-    const pending = state.pendingFieldStep;
+  function handlePendingStep(fromPosition) {
+    const pending = state.pendingStep;
     if (!pending) return null;
 
     if (!sameTile(fromPosition, pending.from)) {
-      state.pendingFieldStep = null;
-      state.fieldStepRetries = 0;
-      state.fieldStepCount += 1;
+      state.pendingStep = null;
+      state.stepRetries = 0;
       state.stepCount += 1;
       state.lastStepAt = Date.now();
-      bot.log("cave direct field step confirmed", {
+      if (pending.fieldName) state.fieldStepCount += 1;
+      bot.log("cave D-walk step confirmed", {
         key: pending.key,
         from: pending.from,
         expected: pending.to,
@@ -371,65 +347,35 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       return true;
     }
 
-    if (Date.now() - pending.sentAt < 450) return true;
-    if (state.fieldStepRetries >= 3) {
-      state.lastError = `Direct field step did not move after ${state.fieldStepRetries + 1} attempts`;
-      state.pendingFieldStep = null;
-      state.fieldStepRetries = 0;
+    if (Date.now() - pending.sentAt < config.stepRetryMs) return true;
+    if (state.stepRetries >= config.maxStepRetries) {
+      state.lastError = `D-pad step did not move after ${state.stepRetries + 1} attempts`;
+      state.pendingStep = null;
+      state.stepRetries = 0;
       return false;
     }
 
-    state.fieldStepRetries += 1;
+    state.stepRetries += 1;
     const button = findDpadButtons()?.[pending.key] || null;
     if (!button) {
       state.lastError = `Minibia D-pad control not found for retry ${pending.key}`;
-      state.pendingFieldStep = null;
-      state.fieldStepRetries = 0;
+      state.pendingStep = null;
+      state.stepRetries = 0;
       return false;
     }
-    button.click();
-    pending.sentAt = Date.now();
-    bot.log("cave direct field step retry", {
-      key: pending.key,
-      attempt: state.fieldStepRetries + 1,
-      field: pending.fieldName,
-    });
-    return true;
-  }
-
-  function walkOneCardinalTile(originalFrom, fromPosition, nextTile, key) {
-    if (typeof state.originalFindPath !== "function") {
-      state.lastError = "Original Minibia pathfinder is unavailable";
-      return false;
-    }
-
-    const targetTile = getTileAt(nextTile);
-
     try {
-      const nextPosition = new Position(nextTile.x, nextTile.y, nextTile.z);
-      const result = temporarilyForceFieldTileWalkable(targetTile, (forcedField, fieldName) => {
-        const pathResult = state.originalFindPath(originalFrom, nextPosition);
-        state.lastFieldName = forcedField ? fieldName : null;
-        if (forcedField) state.fieldStepCount += 1;
-        return pathResult;
-      });
-
-      state.lastWalkMethod = state.lastFieldName
-        ? `Minibia forced one-tile field step (${key})`
-        : `Minibia one-tile path (${key})`;
-      state.lastError = null;
-      bot.log("cave Smart A* one-tile walk step requested", {
-        key,
-        from: fromPosition,
-        nextTile,
-        field: state.lastFieldName,
-        pathResult: result == null ? null : typeof result,
+      button.click();
+      pending.sentAt = Date.now();
+      bot.log("cave D-walk step retry", {
+        key: pending.key,
+        attempt: state.stepRetries + 1,
+        field: pending.fieldName,
       });
       return true;
     } catch (error) {
-      state.lastWalkMethod = null;
-      state.lastError = `One-tile movement failed: ${error?.message || error}`;
-      bot.log("cave Smart A* one-tile movement failed", { error });
+      state.lastError = `D-pad retry failed: ${error?.message || error}`;
+      state.pendingStep = null;
+      state.stepRetries = 0;
       return false;
     }
   }
@@ -453,15 +399,18 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
         return originalFindPath.call(this, fromValue, toValue, ...args);
       }
 
+      const pendingResult = handlePendingStep(from);
+      if (pendingResult !== null) return pendingResult;
+
       const nextTile = getNextSmartStep(from, to);
       if (!nextTile) {
-        state.lastError = "Smart A field-crossing path not found";
+        state.lastError = "D-walk A* path not found";
         return null;
       }
 
       const key = pickArrowKey(from, nextTile);
       if (!key) {
-        state.lastError = "Smart A field-crossing next step is not cardinal";
+        state.lastError = "D-walk A* next step is not cardinal";
         return null;
       }
 
@@ -470,11 +419,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       state.lastKey = key;
       state.lastStepAt = Date.now();
 
-      if (fieldName) {
-        return walkOneCardinalTile(fromValue, from, nextTile, key);
-      }
-
-      return originalFindPath.call(this, fromValue, new Position(nextTile.x, nextTile.y, nextTile.z), ...args);
+      return clickDpadDirection(key, from, nextTile, fieldName);
     }
 
     patchedFindPath.__caveArrowKeysPatched = true;
@@ -508,6 +453,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     state.uiTimerId = null;
     matrixCache.clear();
     state.dpadButtons = null;
+    state.pendingStep = null;
   }
 
   bot.caveArrowKeys = { status, destroy, ensureDropdownOption: () => {} };
