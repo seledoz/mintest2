@@ -95,10 +95,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     } catch (_) { return null; }
   }
 
-  // Important: the CURRENT tile may itself be a non-walkable field. We only
-  // need the destination/neighbor to be enterable, so the player's starting
-  // tile must never make the A* search fail. Damaging fields are explicitly
-  // passable regardless of tile.isWalkable().
   function isDWalkPassable(tile) {
     if (!tile) return false;
     if (isDamagingFieldTile(tile)) return true;
@@ -112,8 +108,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     const cached = matrixCache.get(cacheKey);
     if (cached && Date.now() - cached.at <= config.matrixCacheMs) {
       const matrix = cached.matrix;
-      // Always refresh the start/goal tiles so a field that appeared/changed
-      // after the cache was created cannot make D-walk report "no way".
       for (const position of [start, goal]) {
         if (!position || position.z !== z) continue;
         const tile = getTileAt(position);
@@ -138,8 +132,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       }
     }
 
-    // The player's current tile is allowed as an A* starting node even when
-    // the game marks the damaging field as non-walkable.
     for (const position of [start, goal]) {
       if (!position || position.z !== z) continue;
       const tile = getTileAt(position);
@@ -178,10 +170,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     if (sameTile(from, to)) return [from];
 
     const matrix = getMatrix(from.z, from, to);
-    // Do not reject the current tile because it is a damaging field.
     matrix.set(`${from.x},${from.y}`, { passable: true, field: isDamagingFieldTile(getTileAt(from)) });
-
-    // A destination field is also explicitly enterable.
     const destinationTile = getTileAt(to);
     if (destinationTile && isDamagingFieldTile(destinationTile)) {
       matrix.set(`${to.x},${to.y}`, { passable: true, field: true });
@@ -319,7 +308,38 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       if (pendingResult !== null) return pendingResult;
 
       const nextTile = getNextSmartStep(from, to);
-      if (!nextTile) { state.lastError = "D-walk A* path not found"; return null; }
+      if (!nextTile) {
+        // The loaded-tile A* map can legitimately be incomplete even though
+        // the game's own pathfinder has a route. Do not make D-walk unusable
+        // just because our auxiliary matrix cannot see that route.
+        // Preserve the custom A* whenever it has a route, but fall back to the
+        // original pathfinder for ordinary terrain.
+        const currentField = isDamagingFieldTile(getTileAt(from));
+        if (!currentField) {
+          state.lastError = null;
+          state.lastWalkMethod = "Minibia game pathfinder fallback";
+          return originalFindPath.call(this, fromValue, toValue, ...args);
+        }
+
+        // When already standing on a damaging field, the game pathfinder may
+        // reject the starting tile. Find a cardinal, traversable exit that
+        // moves toward the waypoint and send that step directly through the
+        // D-pad.
+        const candidates = [
+          { x: from.x, y: from.y - 1, z: from.z },
+          { x: from.x + 1, y: from.y, z: from.z },
+          { x: from.x, y: from.y + 1, z: from.z },
+          { x: from.x - 1, y: from.y, z: from.z },
+        ].filter((candidate) => isDWalkPassable(getTileAt(candidate)));
+        candidates.sort((a, b) => heuristic(a, to) - heuristic(b, to));
+        const exitTile = candidates[0] || null;
+        const key = exitTile ? pickArrowKey(from, exitTile) : null;
+        if (exitTile && key) return clickDpadDirection(key, from, exitTile, getDamagingFieldName(getTileAt(exitTile)));
+
+        state.lastError = "D-walk A* path not found";
+        return null;
+      }
+
       const key = pickArrowKey(from, nextTile);
       if (!key) { state.lastError = "D-walk A* next step is not cardinal"; return null; }
       const fieldName = getDamagingFieldName(getTileAt(nextTile));
