@@ -71,6 +71,21 @@
     // player's current floor, so a visually plain dirt-floor hole is usable.
     bot.cave.useRopeOnNearestHole = () => false;
 
+    // The normal cave floor-change handler searches nearby transition tiles.
+    // That is exactly what causes the repeated "cave tried rope transition
+    // tile" attempts. A Rope waypoint must bypass that scanner completely;
+    // this module owns the rope action and targets only the waypoint X/Y.
+    const originalHandleFloorChange = typeof bot.cave.handleFloorChange === "function"
+      ? bot.cave.handleFloorChange.bind(bot.cave)
+      : null;
+    if (originalHandleFloorChange && !bot.cave.__directRopeFloorChangePatched) {
+      bot.cave.handleFloorChange = function ropeWaypointFloorChangeGuard(...args) {
+        if (getRopeAction(bot)) return false;
+        return originalHandleFloorChange(...args);
+      };
+      bot.cave.__directRopeFloorChangePatched = true;
+    }
+
     if (pathfinder?.findPath && !pathfinder.__directRopeWaypointPatched) {
       const original = pathfinder.findPath.bind(pathfinder);
       const wrapped = (from, to, ...args) => {
@@ -142,6 +157,10 @@
 
     bot.addCleanup?.(() => {
       window.clearInterval(pollId);
+      if (bot.cave?.__directRopeFloorChangePatched && originalHandleFloorChange) {
+        try { bot.cave.handleFloorChange = originalHandleFloorChange; } catch (_) {}
+        delete bot.cave.__directRopeFloorChangePatched;
+      }
       if (pathfinder?.__directRopeWaypointPatched) {
         try {
           const current = pathfinder.findPath;
