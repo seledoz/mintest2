@@ -1,0 +1,156 @@
+(() => {
+  const actionStorageKey = "minibiaBot.cave.waypointActions";
+  const ropeAction = "rope";
+
+  function normalizePosition(value) {
+    if (!value) return null;
+    const x = Number(value.x), y = Number(value.y), z = Number(value.z);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+    return { x: Math.trunc(x), y: Math.trunc(y), z: Math.trunc(z) };
+  }
+
+  function getRopeAction(bot) {
+    const status = bot?.cave?.status?.();
+    if (!status?.running) return false;
+    const index = Math.trunc(Number(status.currentIndex) || 0);
+    const preset = String(status.activePresetName || bot.cave?.getActivePresetName?.() || "Default").trim().replace(/\s+/g, " ") || "Default";
+    const all = bot.storage.get(actionStorageKey, {});
+    const actions = all && typeof all === "object" && !Array.isArray(all) ? all[preset] : null;
+    return Array.isArray(actions) && actions[index] === ropeAction;
+  }
+
+  function getLoadedTileAt(position) {
+    const chunks = window.gameClient?.world?.chunks || [];
+    for (const chunk of chunks) {
+      if (!chunk?.tiles) continue;
+      for (const tile of chunk.tiles) {
+        const p = normalizePosition(tile?.__position);
+        if (p && p.x === position.x && p.y === position.y && p.z === position.z) return tile;
+      }
+    }
+    return null;
+  }
+
+  function stopMovement() {
+    const pathfinder = window.gameClient?.world?.pathfinder;
+    try { pathfinder?.setPathfindCache?.(null); } catch (_) {}
+    const targets = [pathfinder, window.gameClient?.player, window.gameClient?.world].filter(Boolean);
+    ["stop", "cancel", "clear", "clearPath", "stopWalking", "cancelWalking", "stopAutoWalk", "reset"].forEach((name) => {
+      targets.forEach((target) => {
+        if (typeof target?.[name] !== "function") return;
+        try { target[name](); } catch (_) {}
+      });
+    });
+  }
+
+  function nextIndex(status, length) {
+    if (length <= 1) return 0;
+    const current = Math.max(0, Math.min(length - 1, Math.trunc(Number(status?.currentIndex) || 0)));
+    const direction = Number(status?.direction) || 1;
+    let next = current + direction;
+    if (next >= length) next = length - 2;
+    if (next < 0) next = 1;
+    return Math.max(0, Math.min(length - 1, next));
+  }
+
+  function install(bot) {
+    if (!bot?.cave?.status || bot.cave.__directRopeWaypointInstalled) return;
+    bot.cave.__directRopeWaypointInstalled = true;
+    const state = { pending: false, fromZ: null, lastUse: 0 };
+    const pathfinder = window.gameClient?.world?.pathfinder;
+
+    // Rope waypoints are handled here using the exact waypoint X/Y on the
+    // player's current floor, so a visually plain dirt-floor hole is usable.
+    bot.cave.useRopeOnNearestHole = () => false;
+
+    if (pathfinder?.findPath && !pathfinder.__directRopeWaypointPatched) {
+      const original = pathfinder.findPath.bind(pathfinder);
+      const wrapped = (from, to, ...args) => {
+        try {
+          const status = bot.cave?.status?.();
+          const waypoint = normalizePosition(status?.currentWaypoint);
+          const fromPosition = normalizePosition(from);
+          const toPosition = normalizePosition(to);
+          if (getRopeAction(bot) && waypoint && fromPosition && toPosition && fromPosition.z !== waypoint.z &&
+              toPosition.x === waypoint.x && toPosition.y === waypoint.y && toPosition.z === waypoint.z) {
+            return original(from, new Position(waypoint.x, waypoint.y, fromPosition.z), ...args);
+          }
+        } catch (_) {}
+        return original(from, to, ...args);
+      };
+      wrapped.__directRopeWaypointOriginal = original;
+      pathfinder.findPath = wrapped;
+      pathfinder.__directRopeWaypointPatched = true;
+    }
+
+    const pollId = window.setInterval(() => {
+      try {
+        const status = bot.cave?.status?.();
+        if (!status?.running || !getRopeAction(bot)) {
+          state.pending = false;
+          state.fromZ = null;
+          return;
+        }
+        const player = normalizePosition(bot.getPlayerPosition?.());
+        const waypoint = normalizePosition(status.currentWaypoint);
+        if (!player || !waypoint || player.z === waypoint.z) return;
+
+        if (state.pending) {
+          if (player.z !== state.fromZ) {
+            state.pending = false;
+            state.fromZ = null;
+            const route = bot.cave?.getRoute?.() || [];
+            bot.cave?.setCurrentIndex?.(nextIndex(status, route.length));
+          }
+          return;
+        }
+
+        const targetPosition = { x: waypoint.x, y: waypoint.y, z: player.z };
+        const dx = Math.abs(player.x - targetPosition.x);
+        const dy = Math.abs(player.y - targetPosition.y);
+        if (dx > 1 || dy > 1 || Date.now() - state.lastUse < 500) return;
+
+        const targetTile = getLoadedTileAt(targetPosition);
+        const ropeSource = bot.cave?.findRopeSource?.();
+        if (!targetTile || !ropeSource) return;
+
+        stopMovement();
+        const used = window.gameClient?.mouse?.__handleItemUseWith?.(
+          { which: ropeSource.which, index: ropeSource.index },
+          { which: targetTile, index: 0xFF }
+        );
+        if (used === false) return;
+        state.lastUse = Date.now();
+        state.pending = true;
+        state.fromZ = player.z;
+        bot.log?.("cave rope waypoint used at exact waypoint tile", { target: targetPosition });
+      } catch (error) {
+        bot.log?.("direct cave rope waypoint failed", error?.message || error);
+      }
+    }, 100);
+
+    bot.addCleanup?.(() => {
+      window.clearInterval(pollId);
+      if (pathfinder?.__directRopeWaypointPatched) {
+        try {
+          const current = pathfinder.findPath;
+          const original = current?.__directRopeWaypointOriginal;
+          if (original) pathfinder.findPath = original;
+          delete pathfinder.__directRopeWaypointPatched;
+        } catch (_) {}
+      }
+      delete bot.cave.__directRopeWaypointInstalled;
+    });
+  }
+
+  let attempts = 0;
+  const timerId = window.setInterval(() => {
+    const bot = window.minibiaBot;
+    if (bot) {
+      install(bot);
+      window.clearInterval(timerId);
+    } else if (++attempts >= 80) {
+      window.clearInterval(timerId);
+    }
+  }, 250);
+})();
