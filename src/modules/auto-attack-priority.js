@@ -67,14 +67,14 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
   function getPreferredTarget() {
     if (!bot.attack?.status?.().running || !bot.attack?.config?.enabled) return null;
     const currentTarget = getCurrentTarget();
-    // Auto Attack 2.0 is sticky: once a live target is selected, never replace it
-    // merely because it moved out of attack range, became low HP, or another
-    // monster became closer/higher priority. Re-selection only happens after the
-    // client has actually cleared the target.
-    if (currentTarget && !currentTarget.isDead && currentTarget.dead !== true) return currentTarget;
+    const targetingOverrideActive = (!!config.enabled && config.creatureNames.length > 0) || !!config.highestHpEnabled;
+    // Auto Attack 2.0 is sticky only when neither Creature Priority nor Highest HP
+    // targeting is active. Those targeting modes are explicit overrides and may
+    // select a different live target when their rules prefer one.
+    if (currentTarget && !targetingOverrideActive && !currentTarget.isDead && currentTarget.dead !== true) return currentTarget;
 
     const entries = getTargetEntries();
-    if (!entries.length) return null;
+    if (!entries.length) return currentTarget && !currentTarget.isDead && currentTarget.dead !== true ? currentTarget : null;
     if (config.enabled && config.creatureNames.length) {
       const priorityEntries = entries.filter((entry) => entry.priority >= 0);
       if (priorityEntries.length) {
@@ -83,7 +83,7 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
         return topPriorityEntries.sort(config.highestHpEnabled ? sortHighestHp : sortNearest)[0]?.monster || null;
       }
     }
-    if (!config.highestHpEnabled) return null;
+    if (!config.highestHpEnabled) return currentTarget && !currentTarget.isDead && currentTarget.dead !== true ? currentTarget : null;
     return entries.sort(sortHighestHp)[0]?.monster || null;
   }
   function selectTarget(target, reason = "creature priority") {
@@ -105,9 +105,10 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
       : "highest hp";
     if (!currentTarget) return selectTarget(preferredTarget, reason);
     if (Number(currentTarget.id) === Number(preferredTarget.id)) return false;
-    // Do not switch away from an existing live target. A different preferred
-    // target can only be selected after the current target has been cleared.
-    return false;
+    // Creature Priority and Highest HP are explicit targeting overrides. When
+    // either mode prefers another target, switch immediately instead of allowing
+    // Auto Attack 2.0 sticky targeting to block the selection.
+    return selectTarget(preferredTarget, reason);
   }
   function stopTimer() { if (state.timerId != null) window.clearInterval(state.timerId); state.timerId = null; }
   function shouldRun() {
