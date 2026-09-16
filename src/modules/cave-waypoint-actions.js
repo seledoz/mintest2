@@ -381,6 +381,36 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
     return Math.max(0, Math.min(route.length - 1, nextIndex));
   }
 
+  function waitForFloorChangeAndAdvance(status, index, actionKey, initialPosition) {
+    const startedAt = Date.now();
+    const timeoutMs = 1000;
+    const check = () => {
+      const nextStatus = bot.cave?.status?.();
+      if (!nextStatus?.running) return;
+
+      const currentPosition = normalizePosition(bot.getPlayerPosition?.());
+      if (currentPosition && initialPosition && currentPosition.z !== initialPosition.z) {
+        bot.log("cave waypoint floor change detected", {
+          index: index + 1,
+          fromZ: initialPosition.z,
+          toZ: currentPosition.z,
+        });
+        const nextIndex = getNextRouteIndex(status);
+        bot.cave?.setCurrentIndex?.(nextIndex);
+        return;
+      }
+
+      if (Date.now() - startedAt >= timeoutMs) {
+        bot.log("cave waypoint floor change not detected", { index: index + 1, actionKey });
+        return;
+      }
+
+      window.setTimeout(check, 50);
+    };
+
+    window.setTimeout(check, 50);
+  }
+
   function runWaypointActionCheck() {
     const status = bot.cave?.status?.();
 
@@ -419,12 +449,16 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
 
     if (used) {
       lastHandledKey = actionKey;
-      window.setTimeout(() => {
-        const nextStatus = bot.cave?.status?.();
-        if (!nextStatus?.running) return;
-        const nextIndex = getNextRouteIndex(status);
-        bot.cave?.setCurrentIndex?.(nextIndex);
-      }, 700);
+      if (action === ropeAction && playerPosition) {
+        waitForFloorChangeAndAdvance(status, index, actionKey, playerPosition);
+      } else {
+        window.setTimeout(() => {
+          const nextStatus = bot.cave?.status?.();
+          if (!nextStatus?.running) return;
+          const nextIndex = getNextRouteIndex(status);
+          bot.cave?.setCurrentIndex?.(nextIndex);
+        }, 700);
+      }
     }
   }
 
