@@ -1,10 +1,7 @@
 (() => {
   const bundle = window.__minibiaBotBundle = window.__minibiaBotBundle || {};
   const originalInstallPanel = bundle.installPanel;
-  if (typeof originalInstallPanel !== "function") return;
-
   const actionStorageKey = "minibiaBot.cave.waypointActions";
-  const ropeAction = "rope";
   const rope2Action = "rope2";
   const rope2ButtonId = "minibia-bot-cave-add-rope2";
 
@@ -13,56 +10,31 @@
     return normalized || "Default";
   }
 
-  function getThingDefinition(itemId) {
-    if (!itemId) return null;
-    return window.gameClient?.itemDefinitionsByCid?.[itemId] || window.gameClient?.itemDefinitionsBySid?.[itemId] || window.gameClient?.itemDefinitions?.[itemId] || null;
-  }
-
-  function getThingName(thing) {
-    const definition = getThingDefinition(thing?.id);
-    return String(definition?.properties?.name || thing?.name || "").trim().toLowerCase();
-  }
-
-  function getTileThings(tile) {
-    if (!tile) return [];
-    const things = [];
-    if (tile.id) things.push(tile);
-    if (Array.isArray(tile.items)) tile.items.forEach((item) => item && things.push(item));
-    return things;
-  }
-
-  function isRopeHoleTile(tile) {
-    return getTileThings(tile).some((thing) => {
-      const name = getThingName(thing);
-      return name.includes("hole") || name.includes("rope spot");
-    });
-  }
-
   function botPlayerPosition() {
-    const value = bot?.getPlayerPosition?.();
+    const value = window.minibiaBot?.getPlayerPosition?.();
     if (!value) return null;
     const x = Number(value.x), y = Number(value.y), z = Number(value.z);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+    if (![x, y, z].every(Number.isFinite)) return null;
     return { x: Math.trunc(x), y: Math.trunc(y), z: Math.trunc(z) };
   }
 
-  function findCurrentTile() {
-    const position = botPlayerPosition();
-    if (!position) return null;
-    const chunks = window.gameClient?.world?.chunks || [];
-    for (const chunk of chunks) {
-      if (!Array.isArray(chunk?.tiles)) continue;
-      for (const tile of chunk.tiles) {
-        const p = tile?.__position;
-        if (p && Number(p.x) === position.x && Number(p.y) === position.y && Number(p.z) === position.z) return tile;
-      }
-    }
-    return null;
+  function getPanel() {
+    return document.getElementById("minibia-bot-panel") || document.querySelector("#minibia-bot-panel, .minibia-bot-panel");
+  }
+
+  function findAddWaypointButton(panel) {
+    const byId = panel?.querySelector?.("#minibia-bot-cave-add");
+    if (byId) return byId;
+    return Array.from(panel?.querySelectorAll?.("button") || []).find((button) => {
+      const text = String(button.textContent || "").trim().toLowerCase();
+      return text === "add waypoint" || text === "add way point" || text.includes("add waypoint");
+    }) || null;
   }
 
   function setLastWaypointAction(action) {
-    const route = bot.cave?.getRoute?.() || [];
-    if (!route.length) return false;
+    const bot = window.minibiaBot;
+    const route = bot?.cave?.getRoute?.() || [];
+    if (!route.length || !bot?.storage) return false;
     const name = normalizePresetName(bot.cave?.getActivePresetName?.());
     const all = bot.storage.get(actionStorageKey, {});
     const next = all && typeof all === "object" && !Array.isArray(all) ? all : {};
@@ -75,64 +47,70 @@
   }
 
   function addRope2Button(panel) {
-    const addButton = panel?.querySelector("#minibia-bot-cave-add");
-    if (!panel || !addButton || panel.querySelector(`#${rope2ButtonId}`)) return;
+    const addButton = findAddWaypointButton(panel);
+    if (!panel || !addButton || panel.querySelector(`#${rope2ButtonId}`)) return false;
     const button = document.createElement("button");
     button.type = "button";
     button.id = rope2ButtonId;
     button.textContent = "Add Rope Waypoint 2.0";
-    button.title = "Add a waypoint at the current position. Rope Waypoint 2.0 uses only that exact X/Y coordinate.";
+    button.title = "Adds a waypoint at the current position. Rope Waypoint 2.0 uses only that exact X/Y coordinate.";
     button.addEventListener("click", () => {
-      const position = botPlayerPosition();
-      if (!position) return;
-      bot.cave?.addCurrentPosition?.();
+      const bot = window.minibiaBot;
+      const before = (bot?.cave?.getRoute?.() || []).length;
+      if (!bot?.cave?.addCurrentPosition) return;
+      bot.cave.addCurrentPosition();
+      const route = bot.cave.getRoute?.() || [];
+      if (route.length <= before) return;
       if (!setLastWaypointAction(rope2Action)) return;
-      bot.log?.("cave Rope Waypoint 2.0 added", { waypoint: position });
+      bot.log?.("cave Rope Waypoint 2.0 added", { waypoint: route[route.length - 1] });
       bot.ui?.refreshCaveStatus?.();
       bot.ui?.refreshCaveClosestStatus?.();
     });
     addButton.insertAdjacentElement("afterend", button);
+    return true;
   }
 
   function addRope2ToActionSelects(panel) {
-    panel.querySelectorAll("select").forEach((select) => {
+    panel?.querySelectorAll?.("select")?.forEach((select) => {
       const values = Array.from(select.options).map((option) => option.value);
       if (!values.includes("walk") || (!values.includes("rope") && !values.includes("shovel"))) return;
-      if (!values.includes(rope2Action)) {
-        const option = document.createElement("option");
-        option.value = rope2Action;
-        option.textContent = "Rope Waypoint 2.0";
-        select.appendChild(option);
-      }
+      if (values.includes(rope2Action)) return;
+      const option = document.createElement("option");
+      option.value = rope2Action;
+      option.textContent = "Rope Waypoint 2.0";
+      select.appendChild(option);
     });
   }
 
   function injectRope2Ui() {
-    const panel = document.getElementById("minibia-bot-panel");
-    if (!panel) return;
-    addRope2Button(panel);
+    const panel = getPanel();
+    if (!panel) return false;
+    const added = addRope2Button(panel);
     addRope2ToActionSelects(panel);
+    return added;
   }
 
-  bundle.installPanel = function installPanelWithRopeWaypoint(botInstance) {
-    bot = botInstance;
-    originalInstallPanel(botInstance);
-    injectRope2Ui();
-    const timerId = window.setInterval(injectRope2Ui, 500);
-    const originalInject = botInstance.ui?.inject;
-    if (typeof originalInject === "function") {
-      botInstance.ui.inject = function injectPanelWithRopeWaypoint(...args) {
-        const result = originalInject.apply(this, args);
-        window.setTimeout(injectRope2Ui, 0);
-        return result;
-      };
-    }
-    botInstance.addCleanup?.(() => {
-      window.clearInterval(timerId);
-      if (typeof originalInject === "function") botInstance.ui.inject = originalInject;
-      document.getElementById(rope2ButtonId)?.remove();
-    });
-  };
+  function installPanelWrapper() {
+    if (typeof originalInstallPanel !== "function" || bundle.installPanel !== originalInstallPanel) return;
+    bundle.installPanel = function installPanelWithRopeWaypoint2(bot) {
+      originalInstallPanel(bot);
+      window.setTimeout(injectRope2Ui, 0);
+    };
+  }
+
+  installPanelWrapper();
+
+  // Do not depend on the CaveBot panel lifecycle. The panel can be created/rebuilt
+  // after main.js runs, so keep looking for the real Add Waypoint control.
+  let attempts = 0;
+  const timerId = window.setInterval(() => {
+    installPanelWrapper();
+    if (injectRope2Ui() || ++attempts >= 240) window.clearInterval(timerId);
+  }, 250);
+
+  const observer = new MutationObserver(() => injectRope2Ui());
+  try { observer.observe(document.documentElement, { childList: true, subtree: true }); } catch (_) {}
+  window.setTimeout(() => { try { observer.disconnect(); } catch (_) {} }, 60000);
 
   const rope2Source = "https://raw.githubusercontent.com/seledoz/mintest2/main/src/modules/cave-rope-waypoint-2.js";
   if (!window.__minibiaRopeWaypoint2Loader) {
