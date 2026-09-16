@@ -435,32 +435,35 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
       return;
     }
 
+    // Rope waypoints are owned by cave-rope-waypoint-direct.js. Do not run
+    // the legacy nearest-hole retry loop alongside the direct handler.
+    if (action === ropeAction) return;
+
     const distance = distanceOnSameFloor(playerPosition, waypoint);
     if (!Number.isFinite(distance) || distance > 2) return;
 
     const actionKey = `${action}:${index}`;
     if (actionKey === lastHandledKey && Date.now() - lastToolUseAt < 2000) return;
 
-    const used = action === ropeAction
-      ? useRopeOnNearestHole(waypoint)
-      : action === shovelAction
-        ? useShovelOnNearestHole(waypoint)
-        : false;
+    const used = action === shovelAction
+      ? useShovelOnNearestHole(waypoint)
+      : false;
 
     if (used) {
       lastHandledKey = actionKey;
-      if (action === ropeAction && playerPosition) {
-        waitForFloorChangeAndAdvance(status, index, actionKey, playerPosition);
-      } else {
-        window.setTimeout(() => {
-          const nextStatus = bot.cave?.status?.();
-          if (!nextStatus?.running) return;
-          const nextIndex = getNextRouteIndex(status);
-          bot.cave?.setCurrentIndex?.(nextIndex);
-        }, 700);
-      }
+      window.setTimeout(() => {
+        const nextStatus = bot.cave?.status?.();
+        if (!nextStatus?.running) return;
+        const nextIndex = getNextRouteIndex(status);
+        bot.cave?.setCurrentIndex?.(nextIndex);
+      }, 700);
     }
   }
+
+  // Expose the rope source lookup to the direct rope waypoint handler. This
+  // does not change normal pathing or Smart A; it only lets the direct handler
+  // reuse the existing equipment/container lookup.
+  bot.cave.findRopeSource = findRopeSource;
 
   const originalAddWaypoint = bot.cave?.addWaypoint?.bind(bot.cave);
   const originalAddWaypointCurrentSpot = bot.cave?.addWaypointCurrentSpot?.bind(bot.cave);
@@ -503,131 +506,45 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
   }
 
   if (originalCreatePreset) {
-    bot.cave.createPreset = (name) => {
-      const result = originalCreatePreset(name);
-      if (result) savePresetActions([], result.name);
+    bot.cave.createPreset = (...args) => {
+      const result = originalCreatePreset(...args);
+      if (result) savePresetActions(getWaypointActions(), args[0]);
       return result;
     };
   }
 
   if (originalLoadPreset) {
-    bot.cave.loadPreset = (name) => {
-      const result = originalLoadPreset(name);
-      if (result) savePresetActions(getPresetActions(result.name), result.name);
+    bot.cave.loadPreset = (...args) => {
+      const result = originalLoadPreset(...args);
+      if (result) savePresetActions(getWaypointActions(), args[0]);
       return result;
     };
   }
 
   if (originalSavePreset) {
-    bot.cave.savePreset = (name, options = {}) => {
-      const result = originalSavePreset(name, options);
-      if (result) savePresetActions(getWaypointActions(), result.name);
+    bot.cave.savePreset = (...args) => {
+      const result = originalSavePreset(...args);
+      if (result) savePresetActions(getWaypointActions(), args[0]);
       return result;
     };
   }
-
-  const actionTimerId = window.setInterval(() => {
-    try {
-      runWaypointActionCheck();
-    } catch (error) {
-      bot.log("cave waypoint action failed", error?.message || error);
-    }
-  }, 100);
-
-  bot.addCleanup(() => {
-    window.clearInterval(actionTimerId);
-    clearWaitTimer();
-  });
-
-  function installPanelControls() {
-    const recordButton = document.getElementById("minibia-bot-cave-add");
-    if (!recordButton) return;
-
-    let select = document.getElementById("minibia-bot-cave-waypoint-action");
-    if (!select) {
-      const wrapper = document.createElement("label");
-      wrapper.className = "mb-field";
-      wrapper.setAttribute("for", "minibia-bot-cave-waypoint-action");
-
-      const label = document.createElement("span");
-      label.className = "mb-field-label";
-      label.textContent = "Waypoint Action";
-
-      select = document.createElement("select");
-      select.id = "minibia-bot-cave-waypoint-action";
-
-      const walkOption = document.createElement("option");
-      walkOption.value = noopAction;
-      walkOption.textContent = "Walk";
-
-      const ropeOption = document.createElement("option");
-      ropeOption.value = ropeAction;
-      ropeOption.textContent = "Use Rope";
-
-      const shovelOption = document.createElement("option");
-      shovelOption.value = shovelAction;
-      shovelOption.textContent = "Use Shovel";
-
-      const waitOption = document.createElement("option");
-      waitOption.value = waitAction;
-      waitOption.textContent = "Waypoint Wait (1 Minute)";
-
-      select.appendChild(walkOption);
-      select.appendChild(ropeOption);
-      select.appendChild(shovelOption);
-      select.appendChild(waitOption);
-      wrapper.appendChild(label);
-      wrapper.appendChild(select);
-
-      recordButton.closest(".mb-row")?.insertAdjacentElement("afterend", wrapper);
-
-      recordButton.addEventListener("click", () => {
-        window.setTimeout(() => {
-          setLastWaypointAction(select.value);
-        }, 0);
-      });
-    }
-
-    if (!document.getElementById("minibia-bot-cave-record-wait")) {
-      const waitButton = document.createElement("button");
-      waitButton.type = "button";
-      waitButton.id = "minibia-bot-cave-record-wait";
-      waitButton.className = recordButton.className;
-      waitButton.textContent = "Add Waypoint Wait";
-      waitButton.title = "Add a waypoint at your current position that pauses Cavebot movement for 1 minute";
-      waitButton.addEventListener("click", () => {
-        const added = bot.cave?.addWaypointCurrentSpot?.({ action: waitAction });
-        if (added) bot.log("waypoint wait added", { waypoint: added, waitMs: waitDurationMs });
-      });
-      recordButton.insertAdjacentElement("afterend", waitButton);
-    }
-  }
-
-  function patchUiInject() {
-    if (!bot.ui?.inject || bot.ui.__caveWaypointActionsPatched) return;
-    const originalInject = bot.ui.inject.bind(bot.ui);
-    bot.ui.inject = (...args) => {
-      const result = originalInject(...args);
-      installPanelControls();
-      return result;
-    };
-    bot.ui.__caveWaypointActionsPatched = true;
-  }
-
-  patchUiInject();
-  window.setTimeout(patchUiInject, 0);
 
   bot.cave.getWaypointActions = getWaypointActions;
   bot.cave.setWaypointAction = setWaypointAction;
   bot.cave.setLastWaypointAction = setLastWaypointAction;
-  bot.cave.useRopeOnNearestHole = useRopeOnNearestHole;
-  bot.cave.useShovelOnNearestHole = useShovelOnNearestHole;
-  bot.cave.waypointWaitStatus = () => ({
-    active: waitState.active,
-    index: waitState.index,
-    startedAt: waitState.startedAt,
-    resumeAt: waitState.resumeAt,
-    remainingMs: waitState.active ? Math.max(0, waitState.resumeAt - Date.now()) : 0,
-    durationMs: waitDurationMs,
+
+  const timerId = window.setInterval(runWaypointActionCheck, 100);
+  bot.addCleanup?.(() => {
+    window.clearInterval(timerId);
+    clearWaitTimer();
+    if (bot.cave.findRopeSource === findRopeSource) delete bot.cave.findRopeSource;
   });
 };
+
+if (window.minibiaBot) {
+  try {
+    window.__minibiaBotBundle.installCaveWaypointActionsModule(window.minibiaBot);
+  } catch (error) {
+    console.error("[minibia-bot] cave waypoint actions failed", error);
+  }
+}
