@@ -1,0 +1,41 @@
+name: Rope 2.0 cave exception
+on:
+  push:
+    branches:
+      - fix/rope2-cave-exception
+permissions:
+  contents: write
+jobs:
+  patch:
+    if: ${{ !contains(github.event.head_commit.message, 'Apply Rope 2.0 cave-engine exception') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch cave engine
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/modules/cave.js')
+          s = p.read_text()
+          marker = '  function handleFloorChange(waypoint, now = Date.now()) {\n'
+          helper = '''  function isCurrentRope2Waypoint() {\n    const raw = bot.storage.get("minibiaBot.cave.waypointActions", {});\n    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;\n    const actions = raw[getActivePresetName()];\n    if (!Array.isArray(actions)) return false;\n    return String(actions[state.currentIndex] || "").trim().toLowerCase() === "rope2";\n  }\n\n'''
+          guard = '    if (isCurrentRope2Waypoint()) return false;\n'
+          if marker not in s:
+              raise SystemExit('handleFloorChange marker not found')
+          if 'function isCurrentRope2Waypoint()' not in s:
+              s = s.replace(marker, helper + marker, 1)
+          if guard not in s[s.index(marker):s.index(marker)+400]:
+              s = s.replace(marker, marker + guard, 1)
+          p.write_text(s)
+          PY
+          ./build.sh
+      - name: Commit patch and remove workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/rope2-cave-exception.yml
+          git add src/modules/cave.js pz-bot.js
+          git commit -m "Apply Rope 2.0 cave-engine exception"
+          git push origin HEAD:fix/rope2-cave-exception
