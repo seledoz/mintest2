@@ -81,18 +81,182 @@
     return Math.max(0, Math.min(length - 1, next));
   }
 
-  function markLastWaypoint(bot) {
-    const route = bot?.cave?.getRoute?.() || [];
-    if (!route.length) return false;
-    const name = presetName(bot);
-    const all = bot.storage.get(ACTION_KEY, {});
-    const next = all && typeof all === "object" && !Array.isArray(all) ? all : {};
-    const actions = Array.isArray(next[name]) ? next[name].slice() : [];
-    while (actions.length < route.length) actions.push("walk");
-    actions[route.length - 1] = ACTION;
-    next[name] = actions.slice(0, route.length);
-    bot.storage.set(ACTION_KEY, next);
-    return true;
+  function install(bot) {
+    if (!bot || bot.cave?.__ropeWaypoint2Installed) return;
+    bot.cave.__ropeWaypoint2Installed = true;
+    const state = { pending: false, fromZ: null, index: -1, lastUse: 0, directUse: false };
+    const world = window.gameClient?.world;
+    const mouse = window.gameClient?.mouse;
+
+    // Rope 2.0 owns the transition completely. Cavebot's normal floor-change
+    // code scans world.chunks and can otherwise try nearby rope/hole tiles.
+    // While this action is active, expose only the exact waypoint X/Y on the
+    // player's current Z to that generic scanner.
+    let originalChunks = null;
+    let guardedChunks = null;
+    let chunksPatched = false;
+    const patchChunkScanner = () => {
+      if (!world || chunksPatched) return;
+      const currentChunks = world.chunks;
+      if (!Array.isArray(currentChunks)) return;
+      originalChunks = currentChunks;
+      guardedChunks = new Proxy(currentChunks, {
+        get(target, property, receiver) {
+          if (property !== Symbol.iterator || !isRope2(bot)) return Reflect.get(target, property, receiver);
+          const status = bot.cave?.status?.();
+          const waypoint = currentWaypoint(bot, status);
+          const player = normalizePosition(bot.getPlayerPosition?.());
+          if (!waypoint || !player || player.z === waypoint.z) return Reflect.get(target, property, receiver);
+          const exactX = waypoint.x;
+          const exactY = waypoint.y;
+          const exactZ = player.z;
+          const filtered = [];
+          for (const chunk of target) {
+            if (!chunk?.tiles || !Array.isArray(chunk.tiles)) {
+              filtered.push(chunk);
+              continue;
+            }
+            const tiles = chunk.tiles.filter((tile) => {
+              const p = normalizePosition(tile?.__position);
+              return p && p.x === exactX && p.y === exactY && p.z === exactZ;
+            });
+            if (tiles.length) filtered.push({ ...chunk, tiles });
+          }
+          return filtered[Symbol.iterator].bind(filtered);
+        },
+      });
+      try {
+        world.chunks = guardedChunks;
+        chunksPatched = world.chunks === guardedChunks;
+      } catch (_) {
+        originalChunks = null;
+        guardedChunks = null;
+      }
+    };
+    patchChunkScanner();
+
+    // The learned-transition branch in cave.js obtains its source tile through
+    // world.getTileFromWorldPosition. Return null for any non-exact Rope 2.0
+    // transition source so it cannot bypass the chunk filter and rope elsewhere.
+    let originalGetTileFromWorldPosition = null;
+    if (world && typeof world.getTileFromWorldPosition === "function" && !world.__ropeWaypoint2TileGuard) {
+      originalGetTileFromWorldPosition = world.getTileFromWorldPosition.bind(world);
+      const guardedGetTile = function ropeWaypoint2TileGuard(position, ...args) {
+        if (isRope2(bot)) {
+          const status = bot.cave?.status?.();
+          const waypoint = currentWaypoint(bot, status);
+          const player = normalizePosition(bot.getPlayerPosition?.());
+          const requested = normalizePosition(position);
+          if (waypoint && player && requested && player.z !== waypoint.z &&
+              (requested.x !== waypoint.x || requested.y !== waypoint.y || requested.z !== player.z)) {
+            return null;
+          }
+        }
+        return originalGetTileFromWorldPosition(position, ...args);
+      };
+      guardedGetTile.__ropeWaypoint2Original = originalGetTileFromWorldPosition;
+      try {
+        world.getTileFromWorldPosition = guardedGetTile;
+        world.__ropeWaypoint2TileGuard = true;
+      } catch (_) {}
+    }
+
+    // Block any generic rope use while Rope 2.0 is active. The only permitted
+    // rope use is the one issued by this module against the exact waypoint tile.
+    let originalMouseUse = null;
+    if (mouse?.__handleItemUseWith__ && !mouse.__ropeWaypoint2MouseGuard) {
+      originalMouseUse = mouse.__handleItemUseWith__;
+      const guardedMouseUse = function ropeWaypoint2MouseGuard(source, target, ...args) {
+        if (isRope2(bot) && !state.directUse) return false;
+        return originalMouseUse.call(this, source, target, ...args);
+      };
+      guardedMouseUse.__ropeWaypoint2Original = originalMouseUse;
+      try {
+        mouse.__handleItemUseWith__ = guardedMouseUse;
+        mouse.__ropeWaypoint2MouseGuard = true;
+      } catch (_) {}
+    }
+
+    const pollId = window.setInterval(() => {
+      try {
+        patchChunkScanner();
+        const status = bot.cave?.status?.();
+        if (!status?.running || !isRope2(bot)) {
+          state.pending = false; state.fromZ = null; state.index = -1;
+          return;
+        }
+        const player = normalizePosition(bot.getPlayerPosition?.());
+        const waypoint = currentWaypoint(bot, status);
+        if (!player || !waypoint) return;
+        const index = Math.trunc(Number(status.currentIndex) || 0);
+        if (state.index !== index) { state.index = index; state.pending = false; state.fromZ = null; }
+
+        if (state.pending) {
+          if (player.z !== state.fromZ) {
+            const fromZ = state.fromZ;
+            state.pending = false; state.fromZ = null;
+            const route = bot.cave?.getRoute?.() || [];
+            bot.cave?.setCurrentIndex?.(nextIndex(status, route.length));
+            bot.log?.("cave Rope Waypoint 2.0 floor change detected", { index: index + 1, fromZ, toZ: player.z });
+          }
+          return;
+        }
+
+        // Exact waypoint X/Y is the only rope target. The bot may stand on the
+        // waypoint tile or an adjacent tile; it never searches nearby holes.
+        const dx = Math.abs(player.x - waypoint.x);
+        const dy = Math.abs(player.y - waypoint.y);
+        if (player.z !== waypoint.z || dx > 1 || dy > 1) return;
+        if (Date.now() - state.lastUse < 500) return;
+
+        const targetPosition = { x: waypoint.x, y: waypoint.y, z: player.z };
+        const targetTile = getLoadedTileAt(targetPosition);
+        const rope = findRopeSource(bot);
+        if (!targetTile || !rope) return;
+
+        stopMovement();
+        state.directUse = true;
+        let used;
+        try {
+          used = window.gameClient?.mouse?.__handleItemUseWith__?.(
+            { which: rope.which, index: rope.index },
+            { which: targetTile, index: 0xFF }
+          );
+        } finally {
+          state.directUse = false;
+        }
+        if (used === false) return;
+        state.lastUse = Date.now();
+        state.pending = true;
+        state.fromZ = player.z;
+        bot.log?.("cave Rope Waypoint 2.0 used exact waypoint tile", { waypoint: targetPosition, index: index + 1 });
+      } catch (error) {
+        bot.log?.("cave Rope Waypoint 2.0 failed", error?.message || error);
+      }
+    }, 100);
+
+    let attempts = 0;
+    const buttonTimer = window.setInterval(() => {
+      if (injectButton(bot) || ++attempts >= 80) window.clearInterval(buttonTimer);
+    }, 250);
+
+    bot.addCleanup?.(() => {
+      window.clearInterval(pollId);
+      window.clearInterval(buttonTimer);
+      document.getElementById(BUTTON_ID)?.remove();
+      if (world && chunksPatched && originalChunks) {
+        try { world.chunks = originalChunks; } catch (_) {}
+      }
+      if (world?.__ropeWaypoint2TileGuard && originalGetTileFromWorldPosition) {
+        try { world.getTileFromWorldPosition = originalGetTileFromWorldPosition; } catch (_) {}
+        delete world.__ropeWaypoint2TileGuard;
+      }
+      if (mouse?.__ropeWaypoint2MouseGuard && originalMouseUse) {
+        try { mouse.__handleItemUseWith__ = originalMouseUse; } catch (_) {}
+        delete mouse.__ropeWaypoint2MouseGuard;
+      }
+      delete bot.cave.__ropeWaypoint2Installed;
+    });
   }
 
   function injectButton(bot) {
@@ -118,72 +282,18 @@
     return true;
   }
 
-  function install(bot) {
-    if (!bot || bot.cave?.__ropeWaypoint2Installed) return;
-    bot.cave.__ropeWaypoint2Installed = true;
-    const state = { pending: false, fromZ: null, index: -1, lastUse: 0 };
-    const pollId = window.setInterval(() => {
-      try {
-        const status = bot.cave?.status?.();
-        if (!status?.running || !isRope2(bot)) {
-          state.pending = false; state.fromZ = null; state.index = -1;
-          return;
-        }
-        const player = normalizePosition(bot.getPlayerPosition?.());
-        const waypoint = currentWaypoint(bot, status);
-        if (!player || !waypoint) return;
-        const index = Math.trunc(Number(status.currentIndex) || 0);
-        if (state.index !== index) { state.index = index; state.pending = false; state.fromZ = null; }
-
-        if (state.pending) {
-          if (player.z !== state.fromZ) {
-            const fromZ = state.fromZ;
-            state.pending = false; state.fromZ = null;
-            const route = bot.cave?.getRoute?.() || [];
-            bot.cave?.setCurrentIndex?.(nextIndex(status, route.length));
-            bot.log?.("cave Rope Waypoint 2.0 floor change detected", { index: index + 1, fromZ, toZ: player.z });
-          }
-          return;
-        }
-
-        // Rope Waypoint 2.0 never searches for a nearby hole. The waypoint X/Y
-        // is the target, and the player's current Z is the only tile we use.
-        const dx = Math.abs(player.x - waypoint.x);
-        const dy = Math.abs(player.y - waypoint.y);
-        if (player.z !== waypoint.z || dx > 1 || dy > 1) return;
-        if (Date.now() - state.lastUse < 500) return;
-
-        const targetPosition = { x: waypoint.x, y: waypoint.y, z: player.z };
-        const targetTile = getLoadedTileAt(targetPosition);
-        const rope = findRopeSource(bot);
-        if (!targetTile || !rope) return;
-
-        stopMovement();
-        const used = window.gameClient?.mouse?.__handleItemUseWith__?.(
-          { which: rope.which, index: rope.index },
-          { which: targetTile, index: 0xFF }
-        );
-        if (used === false) return;
-        state.lastUse = Date.now();
-        state.pending = true;
-        state.fromZ = player.z;
-        bot.log?.("cave Rope Waypoint 2.0 used exact waypoint tile", { waypoint: targetPosition, index: index + 1 });
-      } catch (error) {
-        bot.log?.("cave Rope Waypoint 2.0 failed", error?.message || error);
-      }
-    }, 100);
-
-    let attempts = 0;
-    const buttonTimer = window.setInterval(() => {
-      if (injectButton(bot) || ++attempts >= 80) window.clearInterval(buttonTimer);
-    }, 250);
-
-    bot.addCleanup?.(() => {
-      window.clearInterval(pollId);
-      window.clearInterval(buttonTimer);
-      document.getElementById(BUTTON_ID)?.remove();
-      delete bot.cave.__ropeWaypoint2Installed;
-    });
+  function markLastWaypoint(bot) {
+    const route = bot?.cave?.getRoute?.() || [];
+    if (!route.length) return false;
+    const name = presetName(bot);
+    const all = bot.storage.get(ACTION_KEY, {});
+    const next = all && typeof all === "object" && !Array.isArray(all) ? all : {};
+    const actions = Array.isArray(next[name]) ? next[name].slice() : [];
+    while (actions.length < route.length) actions.push("walk");
+    actions[route.length - 1] = ACTION;
+    next[name] = actions.slice(0, route.length);
+    bot.storage.set(ACTION_KEY, next);
+    return true;
   }
 
   let attempts = 0;
