@@ -30,7 +30,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   };
 
   const matrixCache = new Map();
-  const damagingFieldPattern = /(?:fire|poison|energy)\s*(?:field|wall|damage)/i;
+  const damagingFieldPattern = /(?:fire|poison|energy)\s*(?:field|wall|damage|ground|tile)/i;
 
   function normalizePosition(value) {
     if (!value) return null;
@@ -63,14 +63,34 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   function getThingName(thing) {
     if (!thing) return "";
     const definition = getThingDefinition(thing.id);
-    return String(definition?.properties?.name || thing?.name || "").trim().toLowerCase();
+    const values = [
+      definition?.properties?.name,
+      definition?.name,
+      thing?.name,
+      thing?.type,
+      thing?.category,
+      thing?.properties?.name,
+      thing?.properties?.type,
+      thing?.properties?.category,
+    ];
+    return values.filter((value) => value != null).map((value) => String(value)).join(" ").trim().toLowerCase();
   }
 
   function getTileThings(tile) {
     if (!tile) return [];
     const things = [];
-    if (tile.id) things.push(tile);
-    if (Array.isArray(tile.items)) tile.items.forEach((item) => { if (item) things.push(item); });
+    const add = (value) => {
+      if (!value) return;
+      if (Array.isArray(value)) value.forEach(add);
+      else if (!things.includes(value)) things.push(value);
+    };
+    if (tile.id) add(tile);
+    add(tile.items);
+    add(tile.things);
+    add(tile.topThing);
+    try { add(tile.getItems?.()); } catch (_) {}
+    try { add(tile.getThings?.()); } catch (_) {}
+    try { add(tile.getTopThing?.()); } catch (_) {}
     return things;
   }
 
@@ -80,7 +100,20 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       const name = getThingName(thing);
       if (damagingFieldPattern.test(name)) return name;
     }
-    return null;
+    // Some client tile implementations expose the field only on the tile
+    // itself rather than inside items/things. Inspect the common descriptive
+    // properties without changing normal walkability handling.
+    const tileText = [
+      tile?.name,
+      tile?.type,
+      tile?.category,
+      tile?.properties?.name,
+      tile?.properties?.type,
+      tile?.properties?.category,
+      tile?.topThing?.name,
+      tile?.topThing?.type,
+    ].filter((value) => value != null).map((value) => String(value)).join(" ").trim().toLowerCase();
+    return damagingFieldPattern.test(tileText) ? tileText : null;
   }
 
   function isDamagingFieldTile(tile) {
