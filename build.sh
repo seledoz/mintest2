@@ -46,6 +46,7 @@ cat \
   src/ui/panel.js \
   src/modules/auto-target-v2-panel.js \
   src/modules/cave-rope-waypoint-ui.js \
+  src/modules/cave-rope-waypoint-direct.js \
   src/main.js \
   > pz-bot.js
 
