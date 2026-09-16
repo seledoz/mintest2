@@ -98,7 +98,7 @@
     const patchChunkScanner = () => {
       if (!world || chunksPatched) return;
       const currentChunks = world.chunks;
-      if (!Array.isArray(currentChunks)) return;
+      if (!currentChunks || typeof currentChunks[Symbol.iterator] !== "function") return;
       originalChunks = currentChunks;
       guardedChunks = new Proxy(currentChunks, {
         get(target, property, receiver) {
