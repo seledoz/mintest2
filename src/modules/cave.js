@@ -1016,7 +1016,16 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     bot.log("cave used floor-change tile", { source: position, targetZ: waypoint?.z ?? null });
     return true;
   }
+  function isCurrentRope2Waypoint() {
+    const raw = bot.storage.get("minibiaBot.cave.waypointActions", {});
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+    const actions = raw[getActivePresetName()];
+    if (!Array.isArray(actions)) return false;
+    return String(actions[state.currentIndex] || "").trim().toLowerCase() === "rope2";
+  }
+
   function handleFloorChange(waypoint, now = Date.now()) {
+    if (isCurrentRope2Waypoint()) return false;
     const position = normalizePosition(bot.getPlayerPosition());
     if (!position || !waypoint || position.z === waypoint.z) return false;
     const visibleCandidate = findNearbyTransitionTile(position, waypoint);
