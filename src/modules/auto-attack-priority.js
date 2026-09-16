@@ -90,24 +90,28 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
       const distance = getTileDistance(playerPosition, position);
       const history = state.movementHistory.get(id) || { distances: [], lastSeenAt: 0 };
       history.distances.push(distance);
-      if (history.distances.length > 5) history.distances.shift();
+      if (history.distances.length > 10) history.distances.shift();
       history.lastSeenAt = Date.now();
       state.movementHistory.set(id, history);
       seenIds.add(id);
     });
     for (const [id, history] of state.movementHistory.entries()) {
-      if (!seenIds.has(id) && Date.now() - history.lastSeenAt > 1500) state.movementHistory.delete(id);
+      if (!seenIds.has(id) && Date.now() - history.lastSeenAt > 3000) state.movementHistory.delete(id);
     }
   }
   function isFleeingTarget(monster) {
     if (!config.fleeingTargetEnabled || !monster?.id) return false;
     const history = state.movementHistory.get(Number(monster.id));
-    if (!history || history.distances.length < 3) return false;
+    if (!history || history.distances.length < 4) return false;
     const healthPercent = getHealthPercent(monster);
     if (healthPercent == null || healthPercent > 35) return false;
     const d = history.distances;
-    const startedClose = Math.min(d[0], d[1] ?? d[0]) <= 2;
-    return startedClose && d[d.length - 1] > d[d.length - 2] && d[d.length - 2] > d[d.length - 3] && d[d.length - 1] - d[d.length - 3] >= 2;
+    const minimumDistance = Math.min(...d);
+    const currentDistance = d[d.length - 1];
+    const previousDistance = d[d.length - 2];
+    const outwardMoves = d.slice(1).reduce((count, value, index) => count + (value > d[index] ? 1 : 0), 0);
+    const netOutward = currentDistance - minimumDistance;
+    return minimumDistance <= 2 && netOutward >= 2 && currentDistance > previousDistance && outwardMoves >= 2;
   }
   function getFleeingTarget() {
     if (!config.fleeingTargetEnabled) return null;
