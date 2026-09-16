@@ -215,7 +215,8 @@
   }
 
   function injectRopeWaypointButton(bot) {
-    installRopeWaypointBehavior(bot);
+    // Runtime rope execution is owned by cave-rope-waypoint-direct.js.
+    // This module only owns the CaveBot UI button and waypoint action storage.
     const panel = document.getElementById("minibia-bot-panel");
     const addButton = panel?.querySelector("#minibia-bot-cave-add");
     if (!panel || !addButton || panel.querySelector("#minibia-bot-cave-add-rope")) return !!panel;
