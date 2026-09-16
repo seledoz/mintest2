@@ -130,7 +130,7 @@
     const pathfinder = window.gameClient?.world?.pathfinder;
     if (pathfinder?.findPath && !pathfinder.__minibiaRopeWaypointOption1Patched) {
       const originalFindPath = pathfinder.findPath.bind(pathfinder);
-      pathfinder.findPath = (from, to, ...args) => {
+      const ropeFindPath = (from, to, ...args) => {
         try {
           const status = bot.cave?.status?.();
           const waypoint = status?.currentWaypoint;
@@ -156,6 +156,8 @@
         }
         return originalFindPath(from, to, ...args);
       };
+      ropeFindPath.__minibiaRopeWaypointOriginal = originalFindPath;
+      pathfinder.findPath = ropeFindPath;
       pathfinder.__minibiaRopeWaypointOption1Patched = true;
     }
 
@@ -181,12 +183,13 @@
 
         if (state.ropePending) {
           if (playerPosition.z !== state.pendingFromZ) {
+            const fromZ = state.pendingFromZ;
             state.ropePending = false;
             state.pendingFromZ = null;
             const route = bot.cave?.getRoute?.() || [];
             const nextIndex = getNextRouteIndex(status, route.length);
             bot.log?.("cave rope waypoint floor change detected", {
-              fromZ: state.pendingFromZ,
+              fromZ,
               toZ: playerPosition.z,
               nextIndex: nextIndex + 1,
             });
@@ -220,8 +223,14 @@
       if (state.pollId != null) window.clearInterval(state.pollId);
       state.pollId = null;
       if (pathfinder?.__minibiaRopeWaypointOption1Patched) {
-        try { pathfinder.findPath = pathfinder.findPath.__minibiaRopeWaypointOriginal || pathfinder.findPath; } catch (_) {}
+        try {
+          const current = pathfinder.findPath;
+          const original = current?.__minibiaRopeWaypointOriginal;
+          if (original) pathfinder.findPath = original;
+          delete pathfinder.__minibiaRopeWaypointOption1Patched;
+        } catch (_) {}
       }
+      delete bot.cave.__ropeWaypointOption1Installed;
     });
   }
 
