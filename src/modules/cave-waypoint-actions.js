@@ -13,6 +13,7 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
   ];
   const noopAction = "walk";
   const ropeAction = "rope";
+  const rope2Action = "rope2";
   const shovelAction = "shovel";
   const waitAction = "wait";
   const waitDurationMs = 60 * 1000;
@@ -34,7 +35,7 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
   }
 
   function normalizeAction(action) {
-    if (action === ropeAction || action === shovelAction || action === waitAction) return action;
+    if (action === ropeAction || action === rope2Action || action === shovelAction || action === waitAction) return action;
     return noopAction;
   }
 
@@ -435,9 +436,9 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
       return;
     }
 
-    // Rope waypoints are owned by cave-rope-waypoint-direct.js. Do not run
-    // the legacy nearest-hole retry loop alongside the direct handler.
-    if (action === ropeAction) return;
+    // Rope waypoints are owned by their dedicated direct handlers. Do not run
+    // the legacy nearest-hole retry loop alongside either Rope implementation.
+    if (action === ropeAction || action === rope2Action) return;
 
     const distance = distanceOnSameFloor(playerPosition, waypoint);
     if (!Number.isFinite(distance) || distance > 2) return;
