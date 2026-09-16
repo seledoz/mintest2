@@ -66,15 +66,38 @@
     bot.cave.__directRopeWaypointInstalled = true;
     const state = { pending: false, fromZ: null, lastUse: 0 };
     const pathfinder = window.gameClient?.world?.pathfinder;
+    const mouse = window.gameClient?.mouse;
 
-    // Rope waypoints are handled here using the exact waypoint X/Y on the
-    // player's current floor, so a visually plain dirt-floor hole is usable.
     bot.cave.useRopeOnNearestHole = () => false;
 
-    // The normal cave floor-change handler searches nearby transition tiles.
-    // That is exactly what causes the repeated "cave tried rope transition
-    // tile" attempts. A Rope waypoint must bypass that scanner completely;
-    // this module owns the rope action and targets only the waypoint X/Y.
+    // Block the generic Cavebot floor-change scanner at the final tool-use
+    // boundary. Even if internal cave.js code reaches one of the surrounding
+    // transition tiles, a Rope waypoint can ONLY use the exact waypoint X/Y
+    // on the player's current Z. This is intentionally limited to rope uses.
+    if (mouse?.__handleItemUseWith__ && !mouse.__directRopeWaypointMouseGuard) {
+      const originalMouseUse = mouse.__handleItemUseWith__;
+      const guardedMouseUse = function directRopeWaypointMouseGuard(source, target, ...args) {
+        try {
+          if (getRopeAction(bot)) {
+            const status = bot.cave?.status?.();
+            const waypoint = getCurrentWaypoint(bot, status);
+            const player = normalizePosition(bot.getPlayerPosition?.());
+            const targetPosition = normalizePosition(target?.which?.__position);
+            const sourceItem = source?.which?.getSlotItem?.(source?.index);
+            const sourceName = String(sourceItem?.name || window.gameClient?.itemDefinitionsByCid?.[sourceItem?.id]?.properties?.name || window.gameClient?.itemDefinitionsBySid?.[sourceItem?.id]?.properties?.name || "").toLowerCase();
+            if (sourceName.includes("rope") && waypoint && player && targetPosition) {
+              const exact = targetPosition.x === waypoint.x && targetPosition.y === waypoint.y && targetPosition.z === player.z;
+              if (!exact) return false;
+            }
+          }
+        } catch (_) {}
+        return originalMouseUse.call(this, source, target, ...args);
+      };
+      guardedMouseUse.__directRopeWaypointOriginal = originalMouseUse;
+      mouse.__handleItemUseWith__ = guardedMouseUse;
+      mouse.__directRopeWaypointMouseGuard = true;
+    }
+
     const originalHandleFloorChange = typeof bot.cave.handleFloorChange === "function"
       ? bot.cave.handleFloorChange.bind(bot.cave)
       : null;
@@ -128,9 +151,6 @@
           return;
         }
 
-        // The waypoint X/Y is the rope-hole coordinate. We do not search for
-        // a named hole, because this game can expose it as plain "dirt floor"
-        // with the hole only described as "hole in the ceiling".
         const targetPosition = { x: waypoint.x, y: waypoint.y, z: player.z };
         const dx = Math.abs(player.x - targetPosition.x);
         const dy = Math.abs(player.y - targetPosition.y);
@@ -141,7 +161,7 @@
         if (!targetTile || !ropeSource) return;
 
         stopMovement();
-        const used = window.gameClient?.mouse?.__handleItemUseWith?.(
+        const used = window.gameClient?.mouse?.__handleItemUseWith__?.(
           { which: ropeSource.which, index: ropeSource.index },
           { which: targetTile, index: 0xFF }
         );
@@ -157,6 +177,13 @@
 
     bot.addCleanup?.(() => {
       window.clearInterval(pollId);
+      if (mouse?.__directRopeWaypointMouseGuard) {
+        try {
+          const original = mouse.__handleItemUseWith__?.__directRopeWaypointOriginal;
+          if (original) mouse.__handleItemUseWith__ = original;
+        } catch (_) {}
+        delete mouse.__directRopeWaypointMouseGuard;
+      }
       if (bot.cave?.__directRopeFloorChangePatched && originalHandleFloorChange) {
         try { bot.cave.handleFloorChange = originalHandleFloorChange; } catch (_) {}
         delete bot.cave.__directRopeFloorChangePatched;
