@@ -438,7 +438,7 @@ window.__minibiaBotBundle.installCaveWaypointActionsModule = function installCav
     const distance = distanceOnSameFloor(playerPosition, waypoint);
     if (!Number.isFinite(distance) || distance > 2) return;
 
-    const actionKey = `${action}:${index}:${getPositionKey(playerPosition)}`;
+    const actionKey = `${action}:${index}`;
     if (actionKey === lastHandledKey && Date.now() - lastToolUseAt < 2000) return;
 
     const used = action === ropeAction
