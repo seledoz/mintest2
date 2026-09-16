@@ -316,9 +316,12 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     } catch (error) { state.lastError = `D-pad movement failed: ${error?.message || error}`; return false; }
   }
 
-  function handlePendingStep(fromPosition) {
+  // Only consume a pending D-walk step when the pathfinder call is for the
+  // exact movement request we issued. Other callers (for example outfit UI)
+  // may use the same pathfinder object; they must fall through untouched.
+  function handlePendingStep(fromPosition, toPosition) {
     const pending = state.pendingStep;
-    if (!pending) return null;
+    if (!pending || !sameTile(toPosition, pending.to)) return null;
     if (!sameTile(fromPosition, pending.from)) {
       state.pendingStep = null;
       state.stepRetries = 0;
@@ -351,7 +354,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       const from = normalizePosition(fromValue), to = normalizePosition(toValue);
       if (!from || !to || from.z !== to.z) return originalFindPath.call(this, fromValue, toValue, ...args);
 
-      const pendingResult = handlePendingStep(from);
+      const pendingResult = handlePendingStep(from, to);
       if (pendingResult !== null) return pendingResult;
 
       const nextTile = getNextSmartStep(from, to);
