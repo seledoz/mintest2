@@ -21,8 +21,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     dpadButtons: null,
   };
 
-  // D-walk has its own A* route planner. Damaging fields are always passable.
-  // Smart A / cave.js pathfinding is not modified.
+  // D-walk has its own A* route planner and always treats damaging fields as
+  // traversable. Smart A / cave.js pathfinding is not modified.
   const config = {
     matrixCacheMs: 250,
     stepRetryMs: 250,
@@ -31,12 +31,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
 
   const matrixCache = new Map();
   const damagingFieldPattern = /(?:fire|poison|energy)\s*(?:field|wall|damage)/i;
-  // Common Tibia/OT field item ids. Name metadata is preferred, but these ids
-  // keep field detection working when the client does not expose item names.
-  const damagingFieldIds = new Set([
-    2118, 2119, 2120, 2121, 2122, 2123, 2124, 2125, 2126, 2127,
-    1490, 1491, 1492, 1493, 1494, 1495, 1496,
-  ]);
 
   function normalizePosition(value) {
     if (!value) return null;
@@ -50,9 +44,11 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     return !!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z;
   }
 
-  function isArrowModeActive() {
+  function isArrowModeActive(to) {
     const caveStatus = bot.cave?.status?.() || null;
-    return !!caveStatus?.running && caveStatus?.config?.pathfinderMode === "arrow";
+    if (!caveStatus?.running || caveStatus?.config?.pathfinderMode !== "arrow") return false;
+    if (!caveStatus.currentWaypoint) return false;
+    return sameTile(to, caveStatus.currentWaypoint);
   }
 
   function getThingDefinition(itemId) {
@@ -67,13 +63,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   function getThingName(thing) {
     if (!thing) return "";
     const definition = getThingDefinition(thing.id);
-    return String(
-      definition?.properties?.name
-      || definition?.name
-      || thing?.properties?.name
-      || thing?.name
-      || ""
-    ).trim().toLowerCase();
+    return String(definition?.properties?.name || thing?.name || "").trim().toLowerCase();
   }
 
   function getTileThings(tile) {
@@ -87,12 +77,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   function getDamagingFieldName(tile) {
     if (!tile) return null;
     for (const thing of getTileThings(tile)) {
-      if (damagingFieldIds.has(Number(thing?.id))) return getThingName(thing) || `field:${thing.id}`;
       const name = getThingName(thing);
       if (damagingFieldPattern.test(name)) return name;
-      const properties = thing?.properties || getThingDefinition(thing?.id)?.properties || {};
-      const fieldType = String(properties?.field || properties?.magicField || properties?.type || "").trim().toLowerCase();
-      if (fieldType && /(?:fire|poison|energy|magicfield)/i.test(fieldType)) return fieldType;
     }
     return null;
   }
@@ -109,6 +95,10 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     } catch (_) { return null; }
   }
 
+  // Important: the CURRENT tile may itself be a non-walkable field. We only
+  // need the destination/neighbor to be enterable, so the player's starting
+  // tile must never make the A* search fail. Damaging fields are explicitly
+  // passable regardless of tile.isWalkable().
   function isDWalkPassable(tile) {
     if (!tile) return false;
     if (isDamagingFieldTile(tile)) return true;
@@ -122,6 +112,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     const cached = matrixCache.get(cacheKey);
     if (cached && Date.now() - cached.at <= config.matrixCacheMs) {
       const matrix = cached.matrix;
+      // Always refresh the start/goal tiles so a field that appeared/changed
+      // after the cache was created cannot make D-walk report "no way".
       for (const position of [start, goal]) {
         if (!position || position.z !== z) continue;
         const tile = getTileAt(position);
@@ -146,6 +138,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       }
     }
 
+    // The player's current tile is allowed as an A* starting node even when
+    // the game marks the damaging field as non-walkable.
     for (const position of [start, goal]) {
       if (!position || position.z !== z) continue;
       const tile = getTileAt(position);
@@ -165,24 +159,16 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     ];
     return directions
       .map((d) => ({ x: node.x + d.x, y: node.y + d.y, z: node.z }))
-      .filter((p) => {
-        const key = `${p.x},${p.y}`;
-        if (matrix.has(key)) return matrix.get(key)?.passable;
-        // The chunk cache can omit a newly-created field. Query the live tile
-        // before declaring this neighbor unreachable.
-        const tile = getTileAt(p);
-        if (!tile) return false;
-        const entry = { passable: isDWalkPassable(tile), field: isDamagingFieldTile(tile) };
-        matrix.set(key, entry);
-        return entry.passable;
-      });
+      .filter((p) => matrix.get(`${p.x},${p.y}`)?.passable);
   }
 
   function heuristic(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
 
   function reconstructPath(node) {
     const path = [];
-    for (let current = node; current; current = current.parent) path.unshift({ x: current.x, y: current.y, z: current.z });
+    for (let current = node; current; current = current.parent) {
+      path.unshift({ x: current.x, y: current.y, z: current.z });
+    }
     return path;
   }
 
@@ -192,7 +178,10 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     if (sameTile(from, to)) return [from];
 
     const matrix = getMatrix(from.z, from, to);
+    // Do not reject the current tile because it is a damaging field.
     matrix.set(`${from.x},${from.y}`, { passable: true, field: isDamagingFieldTile(getTileAt(from)) });
+
+    // A destination field is also explicitly enterable.
     const destinationTile = getTileAt(to);
     if (destinationTile && isDamagingFieldTile(destinationTile)) {
       matrix.set(`${to.x},${to.y}`, { passable: true, field: true });
@@ -314,25 +303,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     catch (error) { state.lastError = `D-pad retry failed: ${error?.message || error}`; state.pendingStep = null; state.stepRetries = 0; return false; }
   }
 
-  function walkOneCardinalTile(fromValue, from, nextTile, key) {
-    if (typeof state.originalFindPath !== "function") {
-      state.lastError = "Original Minibia pathfinder is unavailable";
-      return false;
-    }
-    try {
-      const to = new Position(nextTile.x, nextTile.y, nextTile.z);
-      const result = state.originalFindPath(fromValue, to);
-      state.lastWalkMethod = `Minibia pathfinder D-walk step (${key})`;
-      state.lastError = null;
-      state.lastKey = key;
-      state.lastStepAt = Date.now();
-      return result;
-    } catch (error) {
-      state.lastError = `D-walk pathfinder step failed: ${error?.message || error}`;
-      return false;
-    }
-  }
-
   function installPathfinderPatch() {
     const pathfinder = window.gameClient?.world?.pathfinder;
     if (!pathfinder || typeof pathfinder.findPath !== "function") return false;
@@ -341,7 +311,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     state.originalFindPath = originalFindPath;
 
     function patchedFindPath(fromValue, toValue, ...args) {
-      if (!isArrowModeActive()) return originalFindPath.call(this, fromValue, toValue, ...args);
+      if (!isArrowModeActive(toValue)) return originalFindPath.call(this, fromValue, toValue, ...args);
       const from = normalizePosition(fromValue), to = normalizePosition(toValue);
       if (!from || !to || from.z !== to.z) return originalFindPath.call(this, fromValue, toValue, ...args);
 
@@ -349,38 +319,10 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       if (pendingResult !== null) return pendingResult;
 
       const nextTile = getNextSmartStep(from, to);
-      if (!nextTile) {
-        const currentField = isDamagingFieldTile(getTileAt(from));
-        if (!currentField) {
-          state.lastError = null;
-          state.lastWalkMethod = "Minibia game pathfinder fallback";
-          return originalFindPath.call(this, fromValue, toValue, ...args);
-        }
-
-        const candidates = [
-          { x: from.x, y: from.y - 1, z: from.z },
-          { x: from.x + 1, y: from.y, z: from.z },
-          { x: from.x, y: from.y + 1, z: from.z },
-          { x: from.x - 1, y: from.y, z: from.z },
-        ].filter((candidate) => isDWalkPassable(getTileAt(candidate)));
-        candidates.sort((a, b) => heuristic(a, to) - heuristic(b, to));
-        const exitTile = candidates[0] || null;
-        const key = exitTile ? pickArrowKey(from, exitTile) : null;
-        if (exitTile && key) return clickDpadDirection(key, from, exitTile, getDamagingFieldName(getTileAt(exitTile)));
-
-        state.lastError = "D-walk A* path not found";
-        return null;
-      }
-
+      if (!nextTile) { state.lastError = "D-walk A* path not found"; return null; }
       const key = pickArrowKey(from, nextTile);
       if (!key) { state.lastError = "D-walk A* next step is not cardinal"; return null; }
       const fieldName = getDamagingFieldName(getTileAt(nextTile));
-
-      // Normal tiles use the game's proven one-tile pathfinder movement.
-      // Damaging fields use the D-pad directly because the game pathfinder
-      // rejects them. This preserves ordinary D-walk while allowing field
-      // crossing without changing Smart A.
-      if (!fieldName) return walkOneCardinalTile(fromValue, from, nextTile, key);
       return clickDpadDirection(key, from, nextTile, fieldName);
     }
 
