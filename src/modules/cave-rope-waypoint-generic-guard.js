@@ -36,41 +36,67 @@
 
   function install(bot) {
     if (!bot?.cave?.status || window.__minibiaRopeGenericGuardInstalled) return;
-    const mouse = window.gameClient?.mouse;
-    if (!mouse || typeof mouse.__handleItemUseWith__ !== "function") return;
 
-    const original = mouse.__handleItemUseWith__;
-    const wrapped = function guardedRopeUse(source, target, ...args) {
-      try {
-        if (isRopeSource(source) && isRopeAction(bot)) {
-          const waypoint = getCurrentWaypoint(bot);
-          const player = normalizePosition(bot.getPlayerPosition?.());
-          const targetPosition = normalizePosition(target?.which?.__position || target?.which?.position);
-
-          // During a rope waypoint, only the exact waypoint X/Y on the
-          // player's current floor may receive a rope. This blocks the
-          // generic cave floor-change scanner from trying multiple tiles.
-          if (!waypoint || !player || !targetPosition ||
-              targetPosition.z !== player.z ||
-              targetPosition.x !== waypoint.x ||
-              targetPosition.y !== waypoint.y) {
-            bot.log?.("cave blocked generic rope target", { target: targetPosition, waypoint, player });
-            return false;
-          }
+    // The cave tick calls handleFloorChange() whenever a waypoint is on a
+    // different floor. Rope waypoints have their own direct handler, so the
+    // generic transition scanner must not run at all for those waypoints.
+    const originalHandleFloorChange = bot.cave.handleFloorChange;
+    if (typeof originalHandleFloorChange === "function" && !originalHandleFloorChange.__minibiaRopeGenericFloorGuard) {
+      const guardedHandleFloorChange = function guardedHandleFloorChange(waypoint, ...args) {
+        if (isRopeAction(bot)) {
+          bot.logDebug?.("cave skipped generic floor-change scan for rope waypoint", { waypoint });
+          return false;
         }
-      } catch (_) {}
-      return original.call(this, source, target, ...args);
-    };
+        return originalHandleFloorChange.call(this, waypoint, ...args);
+      };
+      guardedHandleFloorChange.__minibiaRopeGenericFloorGuard = true;
+      guardedHandleFloorChange.__minibiaRopeGenericFloorGuardOriginal = originalHandleFloorChange;
+      bot.cave.handleFloorChange = guardedHandleFloorChange;
+    }
 
-    wrapped.__minibiaRopeGenericGuard = true;
-    wrapped.__minibiaRopeGenericGuardOriginal = original;
-    mouse.__handleItemUseWith__ = wrapped;
+    const mouse = window.gameClient?.mouse;
+    if (mouse && typeof mouse.__handleItemUseWith__ === "function") {
+      const originalMouseUse = mouse.__handleItemUseWith__;
+      const wrappedMouseUse = function guardedRopeUse(source, target, ...args) {
+        try {
+          if (isRopeSource(source) && isRopeAction(bot)) {
+            const waypoint = getCurrentWaypoint(bot);
+            const player = normalizePosition(bot.getPlayerPosition?.());
+            const targetPosition = normalizePosition(target?.which?.__position || target?.which?.position);
+
+            // If any other runtime still attempts a rope, only the exact
+            // waypoint X/Y on the player's current floor is allowed.
+            if (!waypoint || !player || !targetPosition ||
+                targetPosition.z !== player.z ||
+                targetPosition.x !== waypoint.x ||
+                targetPosition.y !== waypoint.y) {
+              bot.log?.("cave blocked generic rope target", { target: targetPosition, waypoint, player });
+              return false;
+            }
+          }
+        } catch (_) {}
+        return originalMouseUse.call(this, source, target, ...args);
+      };
+
+      wrappedMouseUse.__minibiaRopeGenericGuard = true;
+      wrappedMouseUse.__minibiaRopeGenericGuardOriginal = originalMouseUse;
+      mouse.__handleItemUseWith__ = wrappedMouseUse;
+
+      bot.addCleanup?.(() => {
+        try {
+          if (mouse.__handleItemUseWith__?.__minibiaRopeGenericGuard) {
+            mouse.__handleItemUseWith__ = originalMouseUse;
+          }
+        } catch (_) {}
+      });
+    }
+
     window.__minibiaRopeGenericGuardInstalled = true;
 
     bot.addCleanup?.(() => {
       try {
-        if (mouse.__handleItemUseWith__?.__minibiaRopeGenericGuard) {
-          mouse.__handleItemUseWith__ = original;
+        if (bot.cave.handleFloorChange?.__minibiaRopeGenericFloorGuard) {
+          bot.cave.handleFloorChange = originalHandleFloorChange;
         }
       } catch (_) {}
       try { delete window.__minibiaRopeGenericGuardInstalled; } catch (_) { window.__minibiaRopeGenericGuardInstalled = false; }
