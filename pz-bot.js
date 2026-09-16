@@ -45,6 +45,7 @@
     "src/modules/quick-controls-settings.js",
     "src/ui/panel.js",
     "src/modules/cave-rope-waypoint-ui.js",
+    "src/modules/cave-rope-waypoint-direct.js",
     "src/modules/auto-attack-rune-toggle.js",
     "src/modules/auto-target-v2-panel.js",
     "src/modules/panel-scroll.js",
