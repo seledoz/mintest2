@@ -66,6 +66,13 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
   function sortNearest(left, right) { return left.distance - right.distance || Number(left.monster?.id || 0) - Number(right.monster?.id || 0); }
   function getPreferredTarget() {
     if (!bot.attack?.status?.().running || !bot.attack?.config?.enabled) return null;
+    const currentTarget = getCurrentTarget();
+    // Auto Attack 2.0 is sticky: once a live target is selected, never replace it
+    // merely because it moved out of attack range, became low HP, or another
+    // monster became closer/higher priority. Re-selection only happens after the
+    // client has actually cleared the target.
+    if (currentTarget && !currentTarget.isDead && currentTarget.dead !== true) return currentTarget;
+
     const entries = getTargetEntries();
     if (!entries.length) return null;
     if (config.enabled && config.creatureNames.length) {
@@ -98,7 +105,9 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
       : "highest hp";
     if (!currentTarget) return selectTarget(preferredTarget, reason);
     if (Number(currentTarget.id) === Number(preferredTarget.id)) return false;
-    return selectTarget(preferredTarget, reason);
+    // Do not switch away from an existing live target. A different preferred
+    // target can only be selected after the current target has been cleared.
+    return false;
   }
   function stopTimer() { if (state.timerId != null) window.clearInterval(state.timerId); state.timerId = null; }
   function shouldRun() {
