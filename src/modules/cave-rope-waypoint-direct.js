@@ -19,6 +19,14 @@
     return Array.isArray(actions) && actions[index] === ropeAction;
   }
 
+  function getCurrentWaypoint(bot, status = bot?.cave?.status?.()) {
+    const direct = normalizePosition(status?.currentWaypoint);
+    if (direct) return direct;
+    const route = bot?.cave?.getRoute?.() || [];
+    const index = Math.trunc(Number(status?.currentIndex) || 0);
+    return normalizePosition(route[index]);
+  }
+
   function getLoadedTileAt(position) {
     const chunks = window.gameClient?.world?.chunks || [];
     for (const chunk of chunks) {
@@ -68,7 +76,7 @@
       const wrapped = (from, to, ...args) => {
         try {
           const status = bot.cave?.status?.();
-          const waypoint = normalizePosition(status?.currentWaypoint);
+          const waypoint = getCurrentWaypoint(bot, status);
           const fromPosition = normalizePosition(from);
           const toPosition = normalizePosition(to);
           if (getRopeAction(bot) && waypoint && fromPosition && toPosition && fromPosition.z !== waypoint.z &&
@@ -92,7 +100,7 @@
           return;
         }
         const player = normalizePosition(bot.getPlayerPosition?.());
-        const waypoint = normalizePosition(status.currentWaypoint);
+        const waypoint = getCurrentWaypoint(bot, status);
         if (!player || !waypoint || player.z === waypoint.z) return;
 
         if (state.pending) {
@@ -105,6 +113,9 @@
           return;
         }
 
+        // The waypoint X/Y is the rope-hole coordinate. We do not search for
+        // a named hole, because this game can expose it as plain "dirt floor"
+        // with the hole only described as "hole in the ceiling".
         const targetPosition = { x: waypoint.x, y: waypoint.y, z: player.z };
         const dx = Math.abs(player.x - targetPosition.x);
         const dy = Math.abs(player.y - targetPosition.y);
