@@ -31,6 +31,12 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
 
   const matrixCache = new Map();
   const damagingFieldPattern = /(?:fire|poison|energy)\s*(?:field|wall|damage)/i;
+  // Common Tibia/OT field item ids. Name metadata is preferred, but these ids
+  // keep field detection working when the client does not expose item names.
+  const damagingFieldIds = new Set([
+    2118, 2119, 2120, 2121, 2122, 2123, 2124, 2125, 2126, 2127,
+    1490, 1491, 1492, 1493, 1494, 1495, 1496,
+  ]);
 
   function normalizePosition(value) {
     if (!value) return null;
@@ -61,7 +67,13 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   function getThingName(thing) {
     if (!thing) return "";
     const definition = getThingDefinition(thing.id);
-    return String(definition?.properties?.name || thing?.name || "").trim().toLowerCase();
+    return String(
+      definition?.properties?.name
+      || definition?.name
+      || thing?.properties?.name
+      || thing?.name
+      || ""
+    ).trim().toLowerCase();
   }
 
   function getTileThings(tile) {
@@ -75,8 +87,12 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   function getDamagingFieldName(tile) {
     if (!tile) return null;
     for (const thing of getTileThings(tile)) {
+      if (damagingFieldIds.has(Number(thing?.id))) return getThingName(thing) || `field:${thing.id}`;
       const name = getThingName(thing);
       if (damagingFieldPattern.test(name)) return name;
+      const properties = thing?.properties || getThingDefinition(thing?.id)?.properties || {};
+      const fieldType = String(properties?.field || properties?.magicField || properties?.type || "").trim().toLowerCase();
+      if (fieldType && /(?:fire|poison|energy|magicfield)/i.test(fieldType)) return fieldType;
     }
     return null;
   }
@@ -149,16 +165,24 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     ];
     return directions
       .map((d) => ({ x: node.x + d.x, y: node.y + d.y, z: node.z }))
-      .filter((p) => matrix.get(`${p.x},${p.y}`)?.passable);
+      .filter((p) => {
+        const key = `${p.x},${p.y}`;
+        if (matrix.has(key)) return matrix.get(key)?.passable;
+        // The chunk cache can omit a newly-created field. Query the live tile
+        // before declaring this neighbor unreachable.
+        const tile = getTileAt(p);
+        if (!tile) return false;
+        const entry = { passable: isDWalkPassable(tile), field: isDamagingFieldTile(tile) };
+        matrix.set(key, entry);
+        return entry.passable;
+      });
   }
 
   function heuristic(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
 
   function reconstructPath(node) {
     const path = [];
-    for (let current = node; current; current = current.parent) {
-      path.unshift({ x: current.x, y: current.y, z: current.z });
-    }
+    for (let current = node; current; current = current.parent) path.unshift({ x: current.x, y: current.y, z: current.z });
     return path;
   }
 
