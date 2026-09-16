@@ -13,13 +13,8 @@
     const status = bot?.cave?.status?.();
     if (!status?.running) return false;
     const index = Math.trunc(Number(status.currentIndex) || 0);
-
-    // Use the same action resolver as the waypoint-action module. This keeps
-    // Rope ownership stable when the active preset/index changes after a floor
-    // transition instead of falling back to Cavebot's generic floor scanner.
     const resolvedActions = bot.cave?.getWaypointActions?.();
     if (Array.isArray(resolvedActions)) return resolvedActions[index] === ropeAction;
-
     const preset = String(bot.cave?.getActivePresetName?.() || status.activePresetName || "Default").trim().replace(/\s+/g, " ") || "Default";
     const all = bot.storage.get(actionStorageKey, {});
     const actions = all && typeof all === "object" && !Array.isArray(all) ? all[preset] : null;
@@ -74,8 +69,57 @@
     const state = { pending: false, fromZ: null, lastUse: 0, index: -1 };
     const pathfinder = window.gameClient?.world?.pathfinder;
     const mouse = window.gameClient?.mouse;
+    const world = window.gameClient?.world;
 
     bot.cave.useRopeOnNearestHole = () => false;
+
+    // Cavebot's generic floor-change handler searches world.chunks for nearby
+    // transition tiles. During a Rope waypoint, expose only the exact waypoint
+    // X/Y on the player's current Z to that scanner. This prevents it from
+    // probing the surrounding 3x3/9-square area while leaving normal chunk data
+    // untouched for every other cave action.
+    let originalChunks = null;
+    let guardedChunks = null;
+    let chunksPatched = false;
+    const patchChunkScanner = () => {
+      if (!world || !Object.prototype.hasOwnProperty.call(world, "chunks") || chunksPatched) return;
+      const currentChunks = world.chunks;
+      if (!Array.isArray(currentChunks)) return;
+      originalChunks = currentChunks;
+      guardedChunks = new Proxy(currentChunks, {
+        get(target, property, receiver) {
+          if (property !== Symbol.iterator || !getRopeAction(bot)) return Reflect.get(target, property, receiver);
+          const status = bot.cave?.status?.();
+          const waypoint = getCurrentWaypoint(bot, status);
+          const player = normalizePosition(bot.getPlayerPosition?.());
+          if (!waypoint || !player || player.z === waypoint.z) return Reflect.get(target, property, receiver);
+          const exactX = waypoint.x;
+          const exactY = waypoint.y;
+          const exactZ = player.z;
+          const filtered = [];
+          for (const chunk of target) {
+            if (!chunk?.tiles || !Array.isArray(chunk.tiles)) {
+              filtered.push(chunk);
+              continue;
+            }
+            const tiles = chunk.tiles.filter((tile) => {
+              const p = normalizePosition(tile?.__position);
+              return p && p.x === exactX && p.y === exactY && p.z === exactZ;
+            });
+            if (tiles.length) filtered.push({ ...chunk, tiles });
+          }
+          return filtered[Symbol.iterator].bind(filtered);
+        },
+      });
+      try {
+        world.chunks = guardedChunks;
+        chunksPatched = world.chunks === guardedChunks;
+      } catch (_) {
+        originalChunks = null;
+        guardedChunks = null;
+      }
+    };
+    patchChunkScanner();
 
     if (mouse?.__handleItemUseWith__ && !mouse.__directRopeWaypointMouseGuard) {
       const originalMouseUse = mouse.__handleItemUseWith__;
@@ -134,6 +178,7 @@
 
     const pollId = window.setInterval(() => {
       try {
+        patchChunkScanner();
         const status = bot.cave?.status?.();
         const ropeNow = getRopeAction(bot);
         if (!status?.running || !ropeNow) {
@@ -163,9 +208,6 @@
           return;
         }
 
-        // The only valid Rope target is the waypoint's X/Y on the player's
-        // current floor. Never search nearby tiles and never substitute a
-        // learned transition tile.
         const targetPosition = { x: waypoint.x, y: waypoint.y, z: player.z };
         const dx = Math.abs(player.x - targetPosition.x);
         const dy = Math.abs(player.y - targetPosition.y);
@@ -192,6 +234,9 @@
 
     bot.addCleanup?.(() => {
       window.clearInterval(pollId);
+      if (chunksPatched && world && originalChunks) {
+        try { world.chunks = originalChunks; } catch (_) {}
+      }
       if (mouse?.__directRopeWaypointMouseGuard) {
         try {
           const original = mouse.__handleItemUseWith__?.__directRopeWaypointOriginal;
