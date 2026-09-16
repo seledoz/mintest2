@@ -21,8 +21,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     dpadButtons: null,
   };
 
-  // D-walk has its own A* route planner and always treats damaging fields as
-  // traversable. Smart A / cave.js pathfinding is not modified.
+  // D-walk has its own A* route planner. Damaging fields are always passable.
+  // Smart A / cave.js pathfinding is not modified.
   const config = {
     matrixCacheMs: 250,
     stepRetryMs: 250,
@@ -44,11 +44,9 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     return !!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z;
   }
 
-  function isArrowModeActive(to) {
+  function isArrowModeActive() {
     const caveStatus = bot.cave?.status?.() || null;
-    if (!caveStatus?.running || caveStatus?.config?.pathfinderMode !== "arrow") return false;
-    if (!caveStatus.currentWaypoint) return false;
-    return sameTile(to, caveStatus.currentWaypoint);
+    return !!caveStatus?.running && caveStatus?.config?.pathfinderMode === "arrow";
   }
 
   function getThingDefinition(itemId) {
@@ -292,6 +290,25 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     catch (error) { state.lastError = `D-pad retry failed: ${error?.message || error}`; state.pendingStep = null; state.stepRetries = 0; return false; }
   }
 
+  function walkOneCardinalTile(fromValue, from, nextTile, key) {
+    if (typeof state.originalFindPath !== "function") {
+      state.lastError = "Original Minibia pathfinder is unavailable";
+      return false;
+    }
+    try {
+      const to = new Position(nextTile.x, nextTile.y, nextTile.z);
+      const result = state.originalFindPath(fromValue, to);
+      state.lastWalkMethod = `Minibia pathfinder D-walk step (${key})`;
+      state.lastError = null;
+      state.lastKey = key;
+      state.lastStepAt = Date.now();
+      return result;
+    } catch (error) {
+      state.lastError = `D-walk pathfinder step failed: ${error?.message || error}`;
+      return false;
+    }
+  }
+
   function installPathfinderPatch() {
     const pathfinder = window.gameClient?.world?.pathfinder;
     if (!pathfinder || typeof pathfinder.findPath !== "function") return false;
@@ -300,7 +317,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     state.originalFindPath = originalFindPath;
 
     function patchedFindPath(fromValue, toValue, ...args) {
-      if (!isArrowModeActive(toValue)) return originalFindPath.call(this, fromValue, toValue, ...args);
+      if (!isArrowModeActive()) return originalFindPath.call(this, fromValue, toValue, ...args);
       const from = normalizePosition(fromValue), to = normalizePosition(toValue);
       if (!from || !to || from.z !== to.z) return originalFindPath.call(this, fromValue, toValue, ...args);
 
@@ -309,11 +326,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
 
       const nextTile = getNextSmartStep(from, to);
       if (!nextTile) {
-        // The loaded-tile A* map can legitimately be incomplete even though
-        // the game's own pathfinder has a route. Do not make D-walk unusable
-        // just because our auxiliary matrix cannot see that route.
-        // Preserve the custom A* whenever it has a route, but fall back to the
-        // original pathfinder for ordinary terrain.
         const currentField = isDamagingFieldTile(getTileAt(from));
         if (!currentField) {
           state.lastError = null;
@@ -321,10 +333,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
           return originalFindPath.call(this, fromValue, toValue, ...args);
         }
 
-        // When already standing on a damaging field, the game pathfinder may
-        // reject the starting tile. Find a cardinal, traversable exit that
-        // moves toward the waypoint and send that step directly through the
-        // D-pad.
         const candidates = [
           { x: from.x, y: from.y - 1, z: from.z },
           { x: from.x + 1, y: from.y, z: from.z },
@@ -343,6 +351,12 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       const key = pickArrowKey(from, nextTile);
       if (!key) { state.lastError = "D-walk A* next step is not cardinal"; return null; }
       const fieldName = getDamagingFieldName(getTileAt(nextTile));
+
+      // Normal tiles use the game's proven one-tile pathfinder movement.
+      // Damaging fields use the D-pad directly because the game pathfinder
+      // rejects them. This preserves ordinary D-walk while allowing field
+      // crossing without changing Smart A.
+      if (!fieldName) return walkOneCardinalTile(fromValue, from, nextTile, key);
       return clickDpadDirection(key, from, nextTile, fieldName);
     }
 
