@@ -100,9 +100,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       const name = getThingName(thing);
       if (damagingFieldPattern.test(name)) return name;
     }
-    // Some client tile implementations expose the field only on the tile
-    // itself rather than inside items/things. Inspect the common descriptive
-    // properties without changing normal walkability handling.
     const tileText = [
       tile?.name,
       tile?.type,
@@ -128,10 +125,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     } catch (_) { return null; }
   }
 
-  // Important: the CURRENT tile may itself be a non-walkable field. We only
-  // need the destination/neighbor to be enterable, so the player's starting
-  // tile must never make the A* search fail. Damaging fields are explicitly
-  // passable regardless of tile.isWalkable().
+  // Fields are deliberately flattened into ordinary D-walk passability.
+  // There is no special movement cost or field-only movement rule.
   function isDWalkPassable(tile) {
     if (!tile) return false;
     if (isDamagingFieldTile(tile)) return true;
@@ -145,8 +140,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     const cached = matrixCache.get(cacheKey);
     if (cached && Date.now() - cached.at <= config.matrixCacheMs) {
       const matrix = cached.matrix;
-      // Always refresh the start/goal tiles so a field that appeared/changed
-      // after the cache was created cannot make D-walk report "no way".
       for (const position of [start, goal]) {
         if (!position || position.z !== z) continue;
         const tile = getTileAt(position);
@@ -171,8 +164,6 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       }
     }
 
-    // The player's current tile is allowed as an A* starting node even when
-    // the game marks the damaging field as non-walkable.
     for (const position of [start, goal]) {
       if (!position || position.z !== z) continue;
       const tile = getTileAt(position);
@@ -192,7 +183,21 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     ];
     return directions
       .map((d) => ({ x: node.x + d.x, y: node.y + d.y, z: node.z }))
-      .filter((p) => matrix.get(`${p.x},${p.y}`)?.passable);
+      .filter((p) => {
+        const key = `${p.x},${p.y}`;
+        const cachedTile = matrix.get(key);
+        if (cachedTile) return !!cachedTile.passable;
+
+        // A chunk snapshot can omit the tile immediately beside the player,
+        // which is especially important when the player is standing on a
+        // damaging field. Fall back to the live tile so entering AND leaving
+        // a field uses exactly the same passability test as every other tile.
+        const tile = getTileAt(p);
+        if (!tile) return false;
+        const passable = isDWalkPassable(tile);
+        matrix.set(key, { passable, field: isDamagingFieldTile(tile) });
+        return passable;
+      });
   }
 
   function heuristic(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
@@ -211,10 +216,8 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     if (sameTile(from, to)) return [from];
 
     const matrix = getMatrix(from.z, from, to);
-    // Do not reject the current tile because it is a damaging field.
     matrix.set(`${from.x},${from.y}`, { passable: true, field: isDamagingFieldTile(getTileAt(from)) });
 
-    // A destination field is also explicitly enterable.
     const destinationTile = getTileAt(to);
     if (destinationTile && isDamagingFieldTile(destinationTile)) {
       matrix.set(`${to.x},${to.y}`, { passable: true, field: true });
