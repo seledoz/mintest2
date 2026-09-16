@@ -13,7 +13,14 @@
     const status = bot?.cave?.status?.();
     if (!status?.running) return false;
     const index = Math.trunc(Number(status.currentIndex) || 0);
-    const preset = String(status.activePresetName || bot.cave?.getActivePresetName?.() || "Default").trim().replace(/\s+/g, " ") || "Default";
+
+    // Use the same action resolver as the waypoint-action module. This keeps
+    // Rope ownership stable when the active preset/index changes after a floor
+    // transition instead of falling back to Cavebot's generic floor scanner.
+    const resolvedActions = bot.cave?.getWaypointActions?.();
+    if (Array.isArray(resolvedActions)) return resolvedActions[index] === ropeAction;
+
+    const preset = String(bot.cave?.getActivePresetName?.() || status.activePresetName || "Default").trim().replace(/\s+/g, " ") || "Default";
     const all = bot.storage.get(actionStorageKey, {});
     const actions = all && typeof all === "object" && !Array.isArray(all) ? all[preset] : null;
     return Array.isArray(actions) && actions[index] === ropeAction;
@@ -64,16 +71,12 @@
   function install(bot) {
     if (!bot?.cave?.status || bot.cave.__directRopeWaypointInstalled) return;
     bot.cave.__directRopeWaypointInstalled = true;
-    const state = { pending: false, fromZ: null, lastUse: 0 };
+    const state = { pending: false, fromZ: null, lastUse: 0, index: -1 };
     const pathfinder = window.gameClient?.world?.pathfinder;
     const mouse = window.gameClient?.mouse;
 
     bot.cave.useRopeOnNearestHole = () => false;
 
-    // Block the generic Cavebot floor-change scanner at the final tool-use
-    // boundary. Even if internal cave.js code reaches one of the surrounding
-    // transition tiles, a Rope waypoint can ONLY use the exact waypoint X/Y
-    // on the player's current Z. This is intentionally limited to rope uses.
     if (mouse?.__handleItemUseWith__ && !mouse.__directRopeWaypointMouseGuard) {
       const originalMouseUse = mouse.__handleItemUseWith__;
       const guardedMouseUse = function directRopeWaypointMouseGuard(source, target, ...args) {
@@ -82,7 +85,7 @@
             const status = bot.cave?.status?.();
             const waypoint = getCurrentWaypoint(bot, status);
             const player = normalizePosition(bot.getPlayerPosition?.());
-            const targetPosition = normalizePosition(target?.which?.__position);
+            const targetPosition = normalizePosition(target?.which?.__position || target?.which?.position);
             const sourceItem = source?.which?.getSlotItem?.(source?.index);
             const sourceName = String(sourceItem?.name || window.gameClient?.itemDefinitionsByCid?.[sourceItem?.id]?.properties?.name || window.gameClient?.itemDefinitionsBySid?.[sourceItem?.id]?.properties?.name || "").toLowerCase();
             if (sourceName.includes("rope") && waypoint && player && targetPosition) {
@@ -132,14 +135,23 @@
     const pollId = window.setInterval(() => {
       try {
         const status = bot.cave?.status?.();
-        if (!status?.running || !getRopeAction(bot)) {
+        const ropeNow = getRopeAction(bot);
+        if (!status?.running || !ropeNow) {
           state.pending = false;
           state.fromZ = null;
+          state.index = -1;
           return;
         }
         const player = normalizePosition(bot.getPlayerPosition?.());
         const waypoint = getCurrentWaypoint(bot, status);
         if (!player || !waypoint || player.z === waypoint.z) return;
+
+        const currentIndex = Math.trunc(Number(status.currentIndex) || 0);
+        if (state.index !== currentIndex) {
+          state.index = currentIndex;
+          state.pending = false;
+          state.fromZ = null;
+        }
 
         if (state.pending) {
           if (player.z !== state.fromZ) {
@@ -151,6 +163,9 @@
           return;
         }
 
+        // The only valid Rope target is the waypoint's X/Y on the player's
+        // current floor. Never search nearby tiles and never substitute a
+        // learned transition tile.
         const targetPosition = { x: waypoint.x, y: waypoint.y, z: player.z };
         const dx = Math.abs(player.x - targetPosition.x);
         const dy = Math.abs(player.y - targetPosition.y);
@@ -169,7 +184,7 @@
         state.lastUse = Date.now();
         state.pending = true;
         state.fromZ = player.z;
-        bot.log?.("cave rope waypoint used at exact waypoint tile", { target: targetPosition });
+        bot.log?.("cave rope waypoint used at exact waypoint tile", { target: targetPosition, waypointIndex: currentIndex + 1 });
       } catch (error) {
         bot.log?.("direct cave rope waypoint failed", error?.message || error);
       }
