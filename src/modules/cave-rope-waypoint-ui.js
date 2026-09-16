@@ -1,8 +1,4 @@
 (() => {
-  const bundle = window.__minibiaBotBundle = window.__minibiaBotBundle || {};
-  const originalInstallPanel = bundle.installPanel;
-  if (typeof originalInstallPanel !== "function") return;
-
   const actionStorageKey = "minibiaBot.cave.waypointActions";
   const ropeAction = "rope";
 
@@ -78,7 +74,7 @@
   function injectRopeWaypointButton(bot) {
     const panel = document.getElementById("minibia-bot-panel");
     const addButton = panel?.querySelector("#minibia-bot-cave-add");
-    if (!panel || !addButton || panel.querySelector("#minibia-bot-cave-add-rope")) return;
+    if (!panel || !addButton || panel.querySelector("#minibia-bot-cave-add-rope")) return !!panel;
 
     const ropeButton = document.createElement("button");
     ropeButton.type = "button";
@@ -101,26 +97,23 @@
     });
 
     addButton.insertAdjacentElement("afterend", ropeButton);
+    return true;
   }
 
-  bundle.installPanel = function installPanelWithRopeWaypoint(bot) {
-    // The original installer creates the panel immediately, so inject the rope
-    // button both now and on any later panel reinjection.
-    originalInstallPanel(bot);
-    injectRopeWaypointButton(bot);
+  // Expose a direct installer so main.js can use it after the panel exists.
+  window.__minibiaInstallRopeWaypointButton = injectRopeWaypointButton;
 
-    const originalInject = bot.ui?.inject;
-    if (typeof originalInject !== "function") return;
-
-    bot.ui.inject = function injectPanelWithRopeWaypoint(...args) {
-      const result = originalInject.apply(this, args);
-      injectRopeWaypointButton(bot);
-      return result;
-    };
-
-    bot.addCleanup?.(() => {
-      bot.ui.inject = originalInject;
-      document.getElementById("minibia-bot-cave-add-rope")?.remove();
-    });
-  };
+  // main.js creates the panel after this source file is loaded. Poll briefly so
+  // the button is installed after the real Cavebot panel is actually present.
+  let attempts = 0;
+  const timerId = window.setInterval(() => {
+    attempts += 1;
+    const bot = window.minibiaBot;
+    if (bot && injectRopeWaypointButton(bot)) {
+      window.clearInterval(timerId);
+      bot.addCleanup?.(() => window.clearInterval(timerId));
+      return;
+    }
+    if (attempts >= 80) window.clearInterval(timerId);
+  }, 250);
 })();
