@@ -1,4 +1,8 @@
 (() => {
+  const bundle = window.__minibiaBotBundle = window.__minibiaBotBundle || {};
+  const originalInstallPanel = bundle.installPanel;
+  if (typeof originalInstallPanel !== "function") return;
+
   const actionStorageKey = "minibiaBot.cave.waypointActions";
   const ropeAction = "rope";
 
@@ -7,26 +11,18 @@
     return normalized || "Default";
   }
 
-  function getRopeWaypointAction(bot) {
-    const status = bot?.cave?.status?.();
-    if (!status?.running) return null;
-    const index = Math.trunc(Number(status.currentIndex) || 0);
-    const presetName = normalizePresetName(status.activePresetName || bot.cave?.getActivePresetName?.());
-    const allActions = bot.storage.get(actionStorageKey, {});
-    const actions = allActions && typeof allActions === "object" && !Array.isArray(allActions)
-      ? allActions[presetName]
-      : null;
-    return Array.isArray(actions) && actions[index] === ropeAction ? ropeAction : null;
-  }
-
-  function getThingDefinition(thing) {
-    const id = thing?.id;
-    if (!id) return null;
-    return window.gameClient?.itemDefinitionsByCid?.[id] || window.gameClient?.itemDefinitionsBySid?.[id] || window.gameClient?.itemDefinitions?.[id] || null;
+  function getThingDefinition(itemId) {
+    if (!itemId) return null;
+    return (
+      window.gameClient?.itemDefinitionsByCid?.[itemId] ||
+      window.gameClient?.itemDefinitionsBySid?.[itemId] ||
+      window.gameClient?.itemDefinitions?.[itemId] ||
+      null
+    );
   }
 
   function getThingName(thing) {
-    const definition = getThingDefinition(thing);
+    const definition = getThingDefinition(thing?.id);
     return String(definition?.properties?.name || thing?.name || "").trim().toLowerCase();
   }
 
@@ -38,170 +34,38 @@
     return things;
   }
 
-  // Rope holes can appear as a visually plain "dirt floor" tile. Prefer an
-  // explicit hole/rope-spot object, but also inspect tile metadata for a hole.
-  function isRopeTargetTile(tile) {
-    const things = getTileThings(tile);
-    if (things.some((thing) => {
+  function isRopeHoleTile(tile) {
+    return getTileThings(tile).some((thing) => {
       const name = getThingName(thing);
       return name.includes("hole") || name.includes("rope spot");
-    })) return true;
-
-    const raw = [tile?.name, tile?.description, tile?.type, tile?.properties?.name]
-      .map((value) => String(value || "").trim().toLowerCase())
-      .filter(Boolean)
-      .join(" ");
-    return raw.includes("hole") || raw.includes("rope spot");
+    });
   }
 
-  function getLoadedTiles() {
+  function findCurrentTile() {
+    const position = botPlayerPosition();
+    if (!position) return null;
     const chunks = window.gameClient?.world?.chunks || [];
-    const tiles = [];
     for (const chunk of chunks) {
-      if (!chunk?.tiles) continue;
-      for (const tile of chunk.tiles) if (tile?.__position) tiles.push(tile);
+      if (!Array.isArray(chunk?.tiles)) continue;
+      for (const tile of chunk.tiles) {
+        const p = tile?.__position;
+        if (!p) continue;
+        if (Number(p.x) === position.x && Number(p.y) === position.y && Number(p.z) === position.z) return tile;
+      }
     }
-    return tiles;
+    return null;
   }
 
-  function normalizePosition(value) {
+  function botPlayerPosition() {
+    const value = bot?.getPlayerPosition?.();
     if (!value) return null;
     const x = Number(value.x), y = Number(value.y), z = Number(value.z);
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
     return { x: Math.trunc(x), y: Math.trunc(y), z: Math.trunc(z) };
   }
 
-  function findRopeHole(playerPosition, waypoint) {
-    if (!playerPosition || !waypoint || playerPosition.z === waypoint.z) return null;
-    const waypointDistance = Math.abs(playerPosition.x - waypoint.x) + Math.abs(playerPosition.y - waypoint.y);
-    const radius = Math.max(4, Math.min(20, waypointDistance + 2));
-    let best = null, bestScore = Number.POSITIVE_INFINITY;
-    getLoadedTiles().forEach((tile) => {
-      const position = normalizePosition(tile.__position);
-      if (!position || position.z !== playerPosition.z || !isRopeTargetTile(tile)) return;
-      if (Math.abs(position.x - playerPosition.x) > radius || Math.abs(position.y - playerPosition.y) > radius) return;
-      const playerDistance = Math.abs(position.x - playerPosition.x) + Math.abs(position.y - playerPosition.y);
-      const waypointDistance = Math.abs(position.x - waypoint.x) + Math.abs(position.y - waypoint.y);
-      const score = playerDistance * 10 + waypointDistance;
-      if (score < bestScore) {
-        bestScore = score;
-        best = { tile, position };
-      }
-    });
-    return best;
-  }
-
-  function isBesideOrSameTile(a, b) {
-    return !!a && !!b && a.z === b.z && Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1;
-  }
-
-  function stopCurrentMovement() {
-    const pathfinder = window.gameClient?.world?.pathfinder;
-    const targets = [pathfinder, window.gameClient?.player, window.gameClient?.world].filter(Boolean);
-    ["stop", "cancel", "clear", "clearPath", "stopWalking", "cancelWalking", "stopAutoWalk", "reset"].forEach((name) => {
-      targets.forEach((target) => {
-        if (typeof target?.[name] !== "function") return;
-        try { target[name](); } catch (_) {}
-      });
-    });
-  }
-
-  function getNextRouteIndex(status, routeLength) {
-    if (routeLength <= 1) return 0;
-    const currentIndex = Math.max(0, Math.min(routeLength - 1, Math.trunc(Number(status?.currentIndex) || 0)));
-    const direction = Number(status?.direction) || 1;
-    let nextIndex = currentIndex + direction;
-    if (nextIndex >= routeLength) nextIndex = routeLength - 2;
-    if (nextIndex < 0) nextIndex = 1;
-    return Math.max(0, Math.min(routeLength - 1, nextIndex));
-  }
-
-  function installRopeWaypointBehavior(bot) {
-    if (!bot?.cave?.status || bot.cave.__ropeWaypointOption1Installed) return;
-    bot.cave.__ropeWaypointOption1Installed = true;
-    const state = { ropePending: false, pendingFromZ: null, lastUseAt: 0, pollId: null, target: null };
-    const pathfinder = window.gameClient?.world?.pathfinder;
-
-    if (pathfinder?.findPath && !pathfinder.__minibiaRopeWaypointOption1Patched) {
-      const originalFindPath = pathfinder.findPath.bind(pathfinder);
-      const ropeFindPath = (from, to, ...args) => {
-        try {
-          const status = bot.cave?.status?.();
-          const waypoint = status?.currentWaypoint;
-          const action = getRopeWaypointAction(bot);
-          const fromPosition = normalizePosition(from), toPosition = normalizePosition(to);
-          const isCurrentWaypoint = !!waypoint && !!toPosition && Number(waypoint.x) === toPosition.x && Number(waypoint.y) === toPosition.y && Number(waypoint.z) === toPosition.z;
-          if (action === ropeAction && fromPosition && toPosition && fromPosition.z !== toPosition.z && isCurrentWaypoint) {
-            const ropeHole = findRopeHole(fromPosition, waypoint);
-            if (ropeHole) {
-              state.target = ropeHole;
-              bot.log?.("cave rope waypoint pathing to rope hole", { waypoint, ropeHole: ropeHole.position });
-              return originalFindPath(from, new Position(ropeHole.position.x, ropeHole.position.y, fromPosition.z), ...args);
-            }
-          }
-        } catch (error) { bot.log?.("cave rope waypoint path override failed", error?.message || error); }
-        return originalFindPath(from, to, ...args);
-      };
-      ropeFindPath.__minibiaRopeWaypointOriginal = originalFindPath;
-      pathfinder.findPath = ropeFindPath;
-      pathfinder.__minibiaRopeWaypointOption1Patched = true;
-    }
-
-    const poll = () => {
-      try {
-        const status = bot.cave?.status?.();
-        if (!status?.running) { state.ropePending = false; state.pendingFromZ = null; state.target = null; return; }
-        if (getRopeWaypointAction(bot) !== ropeAction) { state.ropePending = false; state.pendingFromZ = null; state.target = null; return; }
-        const playerPosition = normalizePosition(bot.getPlayerPosition?.());
-        const waypoint = normalizePosition(status.currentWaypoint);
-        if (!playerPosition || !waypoint || playerPosition.z === waypoint.z) return;
-
-        if (state.ropePending) {
-          if (playerPosition.z !== state.pendingFromZ) {
-            const fromZ = state.pendingFromZ;
-            state.ropePending = false; state.pendingFromZ = null; state.target = null;
-            const route = bot.cave?.getRoute?.() || [];
-            const nextIndex = getNextRouteIndex(status, route.length);
-            bot.log?.("cave rope waypoint floor change detected", { fromZ, toZ: playerPosition.z, nextIndex: nextIndex + 1 });
-            bot.cave?.setCurrentIndex?.(nextIndex);
-          }
-          return;
-        }
-
-        if (!state.target || state.target.position.z !== playerPosition.z) state.target = findRopeHole(playerPosition, waypoint);
-        const ropeHole = state.target;
-        if (!ropeHole || !isBesideOrSameTile(playerPosition, ropeHole.position)) return;
-        if (Date.now() - state.lastUseAt < 500) return;
-
-        const ropeSource = bot.cave?.findRopeSource?.();
-        if (!ropeSource) return;
-        stopCurrentMovement();
-        const used = window.gameClient?.mouse?.__handleItemUseWith?.({ which: ropeSource.which, index: ropeSource.index }, { which: ropeHole.tile, index: 0xFF });
-        if (used === false) return;
-        state.lastUseAt = Date.now();
-        state.ropePending = true;
-        state.pendingFromZ = playerPosition.z;
-        bot.log?.("cave rope waypoint used at detected rope hole", { waypoint, ropeHole: ropeHole.position });
-      } catch (error) { bot.log?.("cave rope waypoint behavior failed", error?.message || error); }
-    };
-
-    state.pollId = window.setInterval(poll, 100);
-    bot.addCleanup?.(() => {
-      if (state.pollId != null) window.clearInterval(state.pollId);
-      state.pollId = null;
-      if (pathfinder?.__minibiaRopeWaypointOption1Patched) {
-        try {
-          const current = pathfinder.findPath, original = current?.__minibiaRopeWaypointOriginal;
-          if (original) pathfinder.findPath = original;
-          delete pathfinder.__minibiaRopeWaypointOption1Patched;
-        } catch (_) {}
-      }
-      delete bot.cave.__ropeWaypointOption1Installed;
-    });
-  }
-
-  function markLastWaypointAsRope(bot) {
-    const route = bot?.cave?.getRoute?.() || [];
+  function markLastWaypointAsRope() {
+    const route = bot.cave?.getRoute?.() || [];
     if (!route.length) return false;
     const presetName = normalizePresetName(bot.cave?.getActivePresetName?.());
     const allActions = bot.storage.get(actionStorageKey, {});
@@ -214,34 +78,57 @@
     return true;
   }
 
-  function injectRopeWaypointButton(bot) {
-    // Runtime rope execution is owned by cave-rope-waypoint-direct.js.
-    // This module only owns the CaveBot UI button and waypoint action storage.
-    const panel = document.getElementById("minibia-bot-panel");
-    const addButton = panel?.querySelector("#minibia-bot-cave-add");
-    if (!panel || !addButton || panel.querySelector("#minibia-bot-cave-add-rope")) return !!panel;
-    const ropeButton = document.createElement("button");
-    ropeButton.type = "button"; ropeButton.id = "minibia-bot-cave-add-rope"; ropeButton.textContent = "Add Rope Waypoint";
-    ropeButton.title = "Add a rope waypoint at your current position.";
-    ropeButton.addEventListener("click", () => {
-      const beforeLength = (bot?.cave?.getRoute?.() || []).length;
-      bot.cave?.addCurrentPosition?.();
-      const afterRoute = bot?.cave?.getRoute?.() || [];
-      if (afterRoute.length <= beforeLength) { bot.log?.("cave rope waypoint not added: current position could not be added", {}); return; }
-      if (!markLastWaypointAsRope(bot)) return;
-      bot.log?.("cave rope waypoint added", { waypoint: bot.getPlayerPosition?.() });
-      bot.ui?.refreshCaveStatus?.(); bot.ui?.refreshCaveClosestStatus?.();
-    });
-    addButton.insertAdjacentElement("afterend", ropeButton);
-    return true;
-  }
+  bundle.installPanel = function installPanelWithRopeWaypoint(bot) {
+    originalInstallPanel(bot);
 
-  window.__minibiaInstallRopeWaypointButton = injectRopeWaypointButton;
-  let attempts = 0;
-  const timerId = window.setInterval(() => {
-    attempts += 1;
-    const bot = window.minibiaBot;
-    if (bot && injectRopeWaypointButton(bot)) { window.clearInterval(timerId); bot.addCleanup?.(() => window.clearInterval(timerId)); return; }
-    if (attempts >= 80) window.clearInterval(timerId);
-  }, 250);
+    const originalInject = bot.ui?.inject;
+    if (typeof originalInject !== "function") return;
+
+    bot.ui.inject = function injectPanelWithRopeWaypoint(...args) {
+      const result = originalInject.apply(this, args);
+      const panel = document.getElementById("minibia-bot-panel");
+      const addButton = panel?.querySelector("#minibia-bot-cave-add");
+      if (!panel || !addButton || panel.querySelector("#minibia-bot-cave-add-rope")) return result;
+
+      const ropeButton = document.createElement("button");
+      ropeButton.type = "button";
+      ropeButton.id = "minibia-bot-cave-add-rope";
+      ropeButton.textContent = "Add Rope Waypoint";
+      ropeButton.title = "Stand directly on the rope hole, then add this waypoint.";
+      ropeButton.addEventListener("click", () => {
+        const tile = findCurrentTile();
+        if (!tile || !isRopeHoleTile(tile)) {
+          bot.log?.("cave rope waypoint not added: stand directly on a rope hole", {});
+          window.alert("Stand directly on the rope hole before adding a Rope Waypoint.");
+          return;
+        }
+
+        bot.cave?.addCurrentPosition?.();
+        markLastWaypointAsRope();
+        bot.log?.("cave rope waypoint added", { waypoint: botPlayerPosition() });
+        bot.ui?.refreshCaveStatus?.();
+        bot.ui?.refreshCaveClosestStatus?.();
+      });
+
+      addButton.insertAdjacentElement("afterend", ropeButton);
+      return result;
+    };
+
+    bot.addCleanup?.(() => {
+      bot.ui.inject = originalInject;
+      document.getElementById("minibia-bot-cave-add-rope")?.remove();
+    });
+  };
+
+  // Load the new Rope Waypoint 2.0 as a separate module so the saved normal
+  // Rope Waypoint UI/behavior remains isolated from the new exact-coordinate action.
+  const rope2Source = "https://raw.githubusercontent.com/seledoz/mintest2/main/src/modules/cave-rope-waypoint-2.js";
+  if (!window.__minibiaRopeWaypoint2Loader) {
+    window.__minibiaRopeWaypoint2Loader = true;
+    const script = document.createElement("script");
+    script.src = `${rope2Source}?t=${Date.now()}`;
+    script.async = true;
+    script.onerror = () => console.error("[minibia-bot] Failed to load Rope Waypoint 2.0");
+    document.head.appendChild(script);
+  }
 })();
