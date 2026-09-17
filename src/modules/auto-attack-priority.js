@@ -132,8 +132,6 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     }
     const currentTarget = getCurrentTarget();
     const currentTargetAlive = currentTarget && !currentTarget.isDead && currentTarget.dead !== true;
-    const targetingOverrideActive = (!!config.enabled && config.creatureNames.length > 0) || !!config.highestHpEnabled;
-    if (!targetingOverrideActive && currentTargetAlive) return currentTarget;
     const entries = getTargetEntries();
     if (!entries.length) return currentTargetAlive ? currentTarget : null;
     if (config.enabled && config.creatureNames.length) {
@@ -141,10 +139,9 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
       if (priorityEntries.length) {
         const bestPriority = Math.min(...priorityEntries.map((entry) => entry.priority));
         const topPriorityEntries = priorityEntries.filter((entry) => entry.priority === bestPriority);
-        if (currentTargetAlive) {
-          const currentEntry = topPriorityEntries.find((entry) => Number(entry.monster?.id) === Number(currentTarget.id));
-          if (currentEntry) return currentTarget;
-        }
+        // Highest HP must be allowed to switch between monsters in the same priority tier.
+        // Without this guard, the current target was always retained and Highest HP could never take effect.
+        if (!config.highestHpEnabled && currentTargetAlive && topPriorityEntries.some((entry) => Number(entry.monster?.id) === Number(currentTarget.id))) return currentTarget;
         return topPriorityEntries.sort(config.highestHpEnabled ? sortHighestHp : sortNearest)[0]?.monster || null;
       }
       if (!config.highestHpEnabled) return currentTargetAlive ? currentTarget : null;
@@ -160,7 +157,6 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     return true;
   }
   function trySelectPriorityTarget() {
-    if (!shouldRun()) return false;
     const preferredTarget = getPreferredTarget();
     if (!preferredTarget) return false;
     const currentTarget = getCurrentTarget();
