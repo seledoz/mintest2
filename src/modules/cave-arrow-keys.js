@@ -1,7 +1,31 @@
 window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 
+(function cleanStaleCaveArrowPathfinder() {
+  const pathfinder = window.gameClient?.world?.pathfinder;
+  if (!pathfinder || typeof pathfinder.findPath !== "function") return;
+  let findPath = pathfinder.findPath;
+  for (let depth = 0; depth < 16; depth += 1) {
+    if (findPath?.__caveArrowKeysPatched && typeof findPath.__caveArrowKeysOriginal === "function") {
+      findPath = findPath.__caveArrowKeysOriginal;
+      continue;
+    }
+    if (findPath?.__caveWaypointTolerancePatched && typeof findPath.__originalFindPath === "function") {
+      findPath = findPath.__originalFindPath;
+      continue;
+    }
+    break;
+  }
+  if (findPath !== pathfinder.findPath) pathfinder.findPath = findPath;
+})();
+
 window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrowKeysModule(bot) {
-  if (!bot || bot.caveArrowKeys?.destroy) return bot?.caveArrowKeys;
+  if (!bot) return null;
+
+  // Never keep an old module instance alive across source-loader reloads.
+  if (bot.caveArrowKeys?.destroy) {
+    try { bot.caveArrowKeys.destroy(); } catch (_) {}
+    bot.caveArrowKeys = null;
+  }
 
   const state = {
     installed: false,
@@ -21,15 +45,10 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     dpadButtons: null,
   };
 
-  // D-walk has its own A* route planner and always treats damaging fields as
-  // traversable. Smart A / cave.js pathfinding is not modified.
-  const config = {
-    matrixCacheMs: 250,
-    stepRetryMs: 250,
-    maxStepRetries: 3,
-  };
-
+  // D-walk owns only Arrow/D-pad mode. Smart A/Game/Direct are never intercepted.
+  const config = { matrixCacheMs: 250, stepRetryMs: 250, maxStepRetries: 3 };
   const matrixCache = new Map();
+  const damagingFieldIds = new Set([1487, 1488, 1490, 1491, 1492, 1493, 1494, 1495, 1496, 1500, 1501]);
   const damagingFieldPattern = /(?:fire|poison|energy)\s*(?:field|wall|damage|ground|tile)/i;
 
   function normalizePosition(value) {
@@ -39,55 +58,35 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     return { x: Math.trunc(x), y: Math.trunc(y), z: Math.trunc(z) };
   }
 
-  function sameTile(left, right) {
-    const a = normalizePosition(left), b = normalizePosition(right);
+  function sameTile(a, b) {
+    a = normalizePosition(a); b = normalizePosition(b);
     return !!a && !!b && a.x === b.x && a.y === b.y && a.z === b.z;
   }
 
   function isArrowModeActive(to) {
     const caveStatus = bot.cave?.status?.() || null;
-    if (!caveStatus?.running || caveStatus?.config?.pathfinderMode !== "arrow") return false;
-    if (!caveStatus.currentWaypoint) return false;
-    return sameTile(to, caveStatus.currentWaypoint);
+    return !!(caveStatus?.running && caveStatus?.config?.pathfinderMode === "arrow" && caveStatus.currentWaypoint && sameTile(to, caveStatus.currentWaypoint));
   }
 
-  function getThingDefinition(itemId) {
-    if (!itemId) return null;
+  function getThingDefinition(id) {
+    if (!id) return null;
     const client = window.gameClient;
-    return client?.itemDefinitionsByCid?.[itemId]
-      || client?.itemDefinitionsBySid?.[itemId]
-      || client?.itemDefinitions?.[itemId]
-      || null;
+    return client?.itemDefinitionsByCid?.[id] || client?.itemDefinitionsBySid?.[id] || client?.itemDefinitions?.[id] || null;
   }
 
   function getThingName(thing) {
     if (!thing) return "";
     const definition = getThingDefinition(thing.id);
-    const values = [
-      definition?.properties?.name,
-      definition?.name,
-      thing?.name,
-      thing?.type,
-      thing?.category,
-      thing?.properties?.name,
-      thing?.properties?.type,
-      thing?.properties?.category,
-    ];
-    return values.filter((value) => value != null).map((value) => String(value)).join(" ").trim().toLowerCase();
+    return [definition?.properties?.name, definition?.name, thing.name, thing.type, thing.category, thing.properties?.name, thing.properties?.type, thing.properties?.category]
+      .filter((v) => v != null).map(String).join(" ").trim().toLowerCase();
   }
 
   function getTileThings(tile) {
     if (!tile) return [];
     const things = [];
-    const add = (value) => {
-      if (!value) return;
-      if (Array.isArray(value)) value.forEach(add);
-      else if (!things.includes(value)) things.push(value);
-    };
+    const add = (v) => { if (!v) return; if (Array.isArray(v)) v.forEach(add); else if (!things.includes(v)) things.push(v); };
     if (tile.id) add(tile);
-    add(tile.items);
-    add(tile.things);
-    add(tile.topThing);
+    add(tile.items); add(tile.things); add(tile.topThing);
     try { add(tile.getItems?.()); } catch (_) {}
     try { add(tile.getThings?.()); } catch (_) {}
     try { add(tile.getTopThing?.()); } catch (_) {}
@@ -97,157 +96,112 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   function getDamagingFieldName(tile) {
     if (!tile) return null;
     for (const thing of getTileThings(tile)) {
+      const id = Number(thing?.id);
+      if (damagingFieldIds.has(id)) return getThingName(thing) || `field ${id}`;
       const name = getThingName(thing);
       if (damagingFieldPattern.test(name)) return name;
     }
-    // Some client tile implementations expose the field only on the tile
-    // itself rather than inside items/things. Inspect the common descriptive
-    // properties without changing normal walkability handling.
-    const tileText = [
-      tile?.name,
-      tile?.type,
-      tile?.category,
-      tile?.properties?.name,
-      tile?.properties?.type,
-      tile?.properties?.category,
-      tile?.topThing?.name,
-      tile?.topThing?.type,
-    ].filter((value) => value != null).map((value) => String(value)).join(" ").trim().toLowerCase();
-    return damagingFieldPattern.test(tileText) ? tileText : null;
+    const text = [tile.name, tile.type, tile.category, tile.properties?.name, tile.properties?.type, tile.properties?.category, tile.topThing?.name, tile.topThing?.type]
+      .filter((v) => v != null).map(String).join(" ").trim().toLowerCase();
+    return damagingFieldPattern.test(text) ? text : null;
   }
 
-  function isDamagingFieldTile(tile) {
-    return !!getDamagingFieldName(tile);
+  function isDWalkPassable(tile) {
+    if (!tile) return false;
+    if (getDamagingFieldName(tile)) return true;
+    try { return typeof tile.isWalkable === "function" && tile.isWalkable(); } catch (_) { return false; }
   }
 
   function getTileAt(position) {
-    const pos = normalizePosition(position);
-    if (!pos) return null;
-    try {
-      return window.gameClient?.world?.getTileFromWorldPosition?.(new Position(pos.x, pos.y, pos.z)) || null;
-    } catch (_) { return null; }
-  }
-
-  // Important: the CURRENT tile may itself be a non-walkable field. We only
-  // need the destination/neighbor to be enterable, so the player's starting
-  // tile must never make the A* search fail. Damaging fields are explicitly
-  // passable regardless of tile.isWalkable().
-  function isDWalkPassable(tile) {
-    if (!tile) return false;
-    if (isDamagingFieldTile(tile)) return true;
-    try {
-      return typeof tile.isWalkable === "function" && tile.isWalkable();
-    } catch (_) { return false; }
+    const p = normalizePosition(position);
+    if (!p) return null;
+    try { return window.gameClient?.world?.getTileFromWorldPosition?.(new Position(p.x, p.y, p.z)) || null; } catch (_) { return null; }
   }
 
   function getMatrix(z, start, goal) {
     const cacheKey = String(z);
     const cached = matrixCache.get(cacheKey);
     if (cached && Date.now() - cached.at <= config.matrixCacheMs) {
-      const matrix = cached.matrix;
-      // Always refresh the start/goal tiles so a field that appeared/changed
-      // after the cache was created cannot make D-walk report "no way".
-      for (const position of [start, goal]) {
-        if (!position || position.z !== z) continue;
-        const tile = getTileAt(position);
-        if (tile) matrix.set(`${position.x},${position.y}`, {
-          passable: isDWalkPassable(tile), field: isDamagingFieldTile(tile),
-        });
+      for (const p of [start, goal]) {
+        if (!p || p.z !== z) continue;
+        const tile = getTileAt(p);
+        if (tile) cached.matrix.set(`${p.x},${p.y}`, { passable: isDWalkPassable(tile), field: !!getDamagingFieldName(tile) });
       }
-      return matrix;
+      return cached.matrix;
     }
-
     const matrix = new Map();
     const chunks = window.gameClient?.world?.chunks || [];
     for (const chunk of chunks) {
-      if (!chunk?.tiles) continue;
+      if (!Array.isArray(chunk?.tiles)) continue;
       for (const tile of chunk.tiles) {
-        const pos = normalizePosition(tile?.__position);
-        if (!pos || pos.z !== z) continue;
-        matrix.set(`${pos.x},${pos.y}`, {
-          passable: isDWalkPassable(tile),
-          field: isDamagingFieldTile(tile),
-        });
+        const p = normalizePosition(tile?.__position);
+        if (p && p.z === z) matrix.set(`${p.x},${p.y}`, { passable: isDWalkPassable(tile), field: !!getDamagingFieldName(tile) });
       }
     }
-
-    // The player's current tile is allowed as an A* starting node even when
-    // the game marks the damaging field as non-walkable.
-    for (const position of [start, goal]) {
-      if (!position || position.z !== z) continue;
-      const tile = getTileAt(position);
-      if (tile) matrix.set(`${position.x},${position.y}`, {
-        passable: isDWalkPassable(tile), field: isDamagingFieldTile(tile),
-      });
+    for (const p of [start, goal]) {
+      if (!p || p.z !== z) continue;
+      const tile = getTileAt(p);
+      if (tile) matrix.set(`${p.x},${p.y}`, { passable: isDWalkPassable(tile), field: !!getDamagingFieldName(tile) });
     }
-    if (start) matrix.set(`${start.x},${start.y}`, { passable: true, field: isDamagingFieldTile(getTileAt(start)) });
-
+    if (start) matrix.set(`${start.x},${start.y}`, { passable: true, field: !!getDamagingFieldName(getTileAt(start)) });
     matrixCache.set(cacheKey, { matrix, at: Date.now() });
     return matrix;
   }
 
   function getNeighbors(node, matrix) {
-    const directions = [
-      { x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 },
-    ];
-    return directions
+    return [{ x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 }]
       .map((d) => ({ x: node.x + d.x, y: node.y + d.y, z: node.z }))
-      .filter((p) => matrix.get(`${p.x},${p.y}`)?.passable);
+      .filter((p) => {
+        const key = `${p.x},${p.y}`;
+        if (matrix.has(key)) return !!matrix.get(key).passable;
+        const tile = getTileAt(p);
+        if (!tile) return false;
+        const passable = isDWalkPassable(tile);
+        matrix.set(key, { passable, field: !!getDamagingFieldName(tile) });
+        return passable;
+      });
   }
 
   function heuristic(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
-
-  function reconstructPath(node) {
-    const path = [];
-    for (let current = node; current; current = current.parent) {
-      path.unshift({ x: current.x, y: current.y, z: current.z });
-    }
-    return path;
-  }
 
   function findPathAStar(start, goal) {
     const from = normalizePosition(start), to = normalizePosition(goal);
     if (!from || !to || from.z !== to.z) return null;
     if (sameTile(from, to)) return [from];
-
     const matrix = getMatrix(from.z, from, to);
-    // Do not reject the current tile because it is a damaging field.
-    matrix.set(`${from.x},${from.y}`, { passable: true, field: isDamagingFieldTile(getTileAt(from)) });
-
-    // A destination field is also explicitly enterable.
+    matrix.set(`${from.x},${from.y}`, { passable: true, field: !!getDamagingFieldName(getTileAt(from)) });
     const destinationTile = getTileAt(to);
-    if (destinationTile && isDamagingFieldTile(destinationTile)) {
-      matrix.set(`${to.x},${to.y}`, { passable: true, field: true });
-    }
+    if (destinationTile && getDamagingFieldName(destinationTile)) matrix.set(`${to.x},${to.y}`, { passable: true, field: true });
 
+    const tolerance = Math.max(1, Number(bot.cave?.status?.()?.config?.waypointTolerance) || 0);
     const open = [{ ...from, g: 0, f: heuristic(from, to), parent: null }];
     const closed = new Set();
     const key = (p) => `${p.x},${p.y}`;
-    const tolerance = Math.max(1, Number(bot.cave?.config?.waypointTolerance) || 0);
-
     while (open.length) {
       let bestIndex = 0;
       for (let i = 1; i < open.length; i += 1) if (open[i].f < open[bestIndex].f) bestIndex = i;
       const current = open.splice(bestIndex, 1)[0];
-      if (heuristic(current, to) <= tolerance) return reconstructPath(current);
+      if (heuristic(current, to) <= tolerance) {
+        const path = [];
+        for (let node = current; node; node = node.parent) path.unshift({ x: node.x, y: node.y, z: node.z });
+        return path;
+      }
       closed.add(key(current));
-
       for (const neighbor of getNeighbors(current, matrix)) {
         const neighborKey = key(neighbor);
         if (closed.has(neighborKey)) continue;
         const g = current.g + 1;
-        const f = g + heuristic(neighbor, to);
         const existing = open.find((entry) => entry.x === neighbor.x && entry.y === neighbor.y);
         if (existing) {
-          if (g < existing.g) { existing.g = g; existing.f = f; existing.parent = current; }
-        } else open.push({ ...neighbor, g, f, parent: current });
+          if (g < existing.g) { existing.g = g; existing.f = g + heuristic(neighbor, to); existing.parent = current; }
+        } else open.push({ ...neighbor, g, f: g + heuristic(neighbor, to), parent: current });
       }
     }
     return null;
   }
 
   function pickArrowKey(from, to) {
-    const dx = Number(to.x) - Number(from.x), dy = Number(to.y) - Number(from.y);
+    const dx = to.x - from.x, dy = to.y - from.y;
     if (dx === 1 && dy === 0) return "ArrowRight";
     if (dx === -1 && dy === 0) return "ArrowLeft";
     if (dx === 0 && dy === 1) return "ArrowDown";
@@ -255,20 +209,9 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     return null;
   }
 
-  function getNextSmartStep(from, to) {
-    const path = findPathAStar(from, to);
-    state.lastPathLength = path ? path.length : 0;
-    state.lastNextTile = path?.length > 1 ? { ...path[1] } : null;
-    return path?.length > 1 ? path[1] : null;
-  }
-
-  function normalizeControlText(value) {
-    return String(value || "").replace(/\uFE0E|\uFE0F/g, "").replace(/\s+/g, "").trim().toLowerCase();
-  }
-
   function getButtonDirection(button) {
-    const text = normalizeControlText(button?.textContent);
-    const label = normalizeControlText(button?.getAttribute?.("aria-label") || button?.getAttribute?.("title") || button?.dataset?.direction || button?.dataset?.key || "");
+    const text = String(button?.textContent || "").replace(/\uFE0E|\uFE0F/g, "").replace(/\s+/g, "").toLowerCase();
+    const label = String(button?.getAttribute?.("aria-label") || button?.getAttribute?.("title") || button?.dataset?.direction || button?.dataset?.key || "").replace(/\s+/g, "").toLowerCase();
     const values = new Set([text, label]);
     if (values.has("▲") || values.has("up") || values.has("north") || values.has("arrowup")) return "ArrowUp";
     if (values.has("▶") || values.has("right") || values.has("east") || values.has("arrowright")) return "ArrowRight";
@@ -279,7 +222,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
 
   function findDpadButtons() {
     if (state.dpadButtons && Object.values(state.dpadButtons).every((b) => b?.isConnected)) return state.dpadButtons;
-    const candidates = Array.from(document.querySelectorAll("button")).map((button) => ({ button, key: getButtonDirection(button) })).filter((e) => e.key);
+    const candidates = Array.from(document.querySelectorAll("button")).map((button) => ({ button, key: getButtonDirection(button) })).filter((entry) => entry.key);
     for (const entry of candidates) {
       let container = entry.button.parentElement;
       for (let depth = 0; container && depth < 7; depth += 1, container = container.parentElement) {
@@ -297,15 +240,15 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     return state.dpadButtons;
   }
 
-  function clickDpadDirection(key, fromPosition, nextTile, fieldName) {
-    const button = findDpadButtons()?.[key] || null;
+  function clickDpadDirection(key, from, next, fieldName) {
+    const button = findDpadButtons()?.[key];
     if (!button) { state.lastError = `Minibia D-pad control not found for ${key}`; return false; }
     try {
       button.click();
       state.lastFieldName = fieldName || null;
       state.lastWalkMethod = fieldName ? `Minibia direct D-pad field step (${key})` : `Minibia direct D-pad step (${key})`;
       state.lastError = null;
-      state.pendingStep = { from: { ...fromPosition }, to: { ...nextTile }, key, fieldName: fieldName || null, sentAt: Date.now() };
+      state.pendingStep = { from: { ...from }, to: { ...next }, key, fieldName: fieldName || null, sentAt: Date.now() };
       state.stepRetries = 0;
       state.lastKey = key;
       state.lastStepAt = Date.now();
@@ -313,14 +256,11 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
     } catch (error) { state.lastError = `D-pad movement failed: ${error?.message || error}`; return false; }
   }
 
-  function handlePendingStep(fromPosition) {
+  function handlePendingStep(from, to) {
     const pending = state.pendingStep;
-    if (!pending) return null;
-    if (!sameTile(fromPosition, pending.from)) {
-      state.pendingStep = null;
-      state.stepRetries = 0;
-      state.stepCount += 1;
-      state.lastStepAt = Date.now();
+    if (!pending || !sameTile(to, pending.to)) return null;
+    if (!sameTile(from, pending.from)) {
+      state.pendingStep = null; state.stepRetries = 0; state.stepCount += 1; state.lastStepAt = Date.now();
       if (pending.fieldName) state.fieldStepCount += 1;
       return true;
     }
@@ -330,7 +270,7 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       state.pendingStep = null; state.stepRetries = 0; return false;
     }
     state.stepRetries += 1;
-    const button = findDpadButtons()?.[pending.key] || null;
+    const button = findDpadButtons()?.[pending.key];
     if (!button) { state.lastError = `Minibia D-pad control not found for retry ${pending.key}`; state.pendingStep = null; state.stepRetries = 0; return false; }
     try { button.click(); pending.sentAt = Date.now(); return true; }
     catch (error) { state.lastError = `D-pad retry failed: ${error?.message || error}`; state.pendingStep = null; state.stepRetries = 0; return false; }
@@ -339,7 +279,9 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   function installPathfinderPatch() {
     const pathfinder = window.gameClient?.world?.pathfinder;
     if (!pathfinder || typeof pathfinder.findPath !== "function") return false;
-    if (state.installed && pathfinder.findPath.__caveArrowKeysPatched) return true;
+    if (pathfinder.findPath.__caveArrowKeysPatched && pathfinder.findPath.__caveArrowKeysModuleToken === state) {
+      state.installed = true; return true;
+    }
     const originalFindPath = pathfinder.findPath.__caveArrowKeysOriginal || pathfinder.findPath;
     state.originalFindPath = originalFindPath;
 
@@ -347,19 +289,19 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
       if (!isArrowModeActive(toValue)) return originalFindPath.call(this, fromValue, toValue, ...args);
       const from = normalizePosition(fromValue), to = normalizePosition(toValue);
       if (!from || !to || from.z !== to.z) return originalFindPath.call(this, fromValue, toValue, ...args);
-
-      const pendingResult = handlePendingStep(from);
-      if (pendingResult !== null) return pendingResult;
-
-      const nextTile = getNextSmartStep(from, to);
-      if (!nextTile) { state.lastError = "D-walk A* path not found"; return null; }
-      const key = pickArrowKey(from, nextTile);
+      const pending = handlePendingStep(from, to);
+      if (pending !== null) return pending;
+      const path = findPathAStar(from, to);
+      state.lastPathLength = path ? path.length : 0;
+      state.lastNextTile = path?.length > 1 ? { ...path[1] } : null;
+      if (!path || path.length < 2) { state.lastError = "D-walk A* path not found"; return null; }
+      const key = pickArrowKey(from, path[1]);
       if (!key) { state.lastError = "D-walk A* next step is not cardinal"; return null; }
-      const fieldName = getDamagingFieldName(getTileAt(nextTile));
-      return clickDpadDirection(key, from, nextTile, fieldName);
+      return clickDpadDirection(key, from, path[1], getDamagingFieldName(getTileAt(path[1])));
     }
 
     patchedFindPath.__caveArrowKeysPatched = true;
+    patchedFindPath.__caveArrowKeysModuleToken = state;
     patchedFindPath.__caveArrowKeysOriginal = originalFindPath;
     pathfinder.findPath = patchedFindPath;
     state.installed = true;
@@ -369,14 +311,27 @@ window.__minibiaBotBundle.installCaveArrowKeysModule = function installCaveArrow
   function ensurePathfinderPatch() {
     if (installPathfinderPatch()) return;
     let attempts = 0;
-    const timerId = window.setInterval(() => { attempts += 1; if (installPathfinderPatch() || attempts >= 80) window.clearInterval(timerId); }, 250);
+    const timerId = window.setInterval(() => {
+      attempts += 1;
+      if (installPathfinderPatch() || attempts >= 80) window.clearInterval(timerId);
+    }, 250);
     bot.addCleanup?.(() => window.clearInterval(timerId));
+    state.uiTimerId = timerId;
   }
 
   function status() { return { ...state, config: { ...config } }; }
+
   function destroy() {
     if (state.uiTimerId != null) window.clearInterval(state.uiTimerId);
-    state.uiTimerId = null; matrixCache.clear(); state.dpadButtons = null; state.pendingStep = null;
+    state.uiTimerId = null;
+    const pathfinder = window.gameClient?.world?.pathfinder;
+    if (pathfinder?.findPath?.__caveArrowKeysModuleToken === state && state.originalFindPath) {
+      pathfinder.findPath = state.originalFindPath;
+    }
+    matrixCache.clear();
+    state.pendingStep = null;
+    state.dpadButtons = null;
+    state.installed = false;
   }
 
   bot.caveArrowKeys = { status, destroy, ensureDropdownOption: () => {} };
