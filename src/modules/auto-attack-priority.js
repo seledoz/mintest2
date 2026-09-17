@@ -157,6 +157,7 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     return true;
   }
   function trySelectPriorityTarget() {
+    if (!shouldRun()) return false;
     const preferredTarget = getPreferredTarget();
     if (!preferredTarget) return false;
     const currentTarget = getCurrentTarget();
