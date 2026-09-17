@@ -166,8 +166,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
 })();
 
 // Adds a second square hotkey as a lower-priority fallback.
-// Square Hotkey #1 gets an authoritative cast attempt before #2. If #1 is
-// cooling down, Square Hotkey #2 may cast if its own conditions are met.
+// Square Hotkey #1 is authoritative whenever its monster/range conditions are met.
 (function installSecondSquareHotkey() {
   const storageKey = "minibiaBot.attackAoe.square2.config";
   const sectionId = "minibia-bot-auto-attack-aoe-square2-section";
@@ -292,15 +291,13 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     if (primaryConfig.requireAutoAttackRunning !== false && !bot.attack?.status?.().running) return false;
     if (bot.attackAoe?.shouldReservePriority?.()) return false;
     if (now - state.lastHotkeyAt < nonNegativeInt(config.cooldownMs, 2000)) return false;
+    // If #1 conditions are met, #2 is never eligible — even when #1 is cooling down.
+    if (primarySquareConditionsMet(status)) return false;
     return countMonsters(positiveInt(config.squareRange, 3), primaryConfig) >= positiveInt(config.minMonsters, 2);
   }
 
   function canCastSecond(now = Date.now()) {
-    if (!normalizeSlot(config.hotbarSlot)) return false;
-    const status = getPrimaryStatus();
-    if (!secondConditionsMet(now, status)) return false;
-    if (primarySquareIsReady(status)) return false;
-    return true;
+    return secondConditionsMet(now, getPrimaryStatus());
   }
 
   function triggerSecond(now = Date.now()) {
@@ -308,17 +305,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     const status = getPrimaryStatus();
     if (!secondConditionsMet(now, status)) return false;
 
-    // Strict priority handoff: if #1 meets its monster/range conditions, let the
-    // primary module make the authoritative cooldown check and cast attempt first.
-    // Only when that attempt returns false (for example #1 is cooling down) may #2 fire.
-    if (primarySquareConditionsMet(status)) {
-      const primaryCast = bot?.attackAoe?.triggerSquareSpell?.(now);
-      if (primaryCast) {
-        refreshUi();
-        return false;
-      }
-    }
-
+    // #1 conditions are known to be false here, so #2 is the only square spell eligible.
     const primaryConfig = status?.config || {};
     const slot = normalizeSlot(config.hotbarSlot);
     const monsterCount = countMonsters(positiveInt(config.squareRange, 3), primaryConfig);
