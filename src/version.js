@@ -17,6 +17,33 @@ window.__minibiaBotBundle.versionInfo = {
   date: "%%DATE%%"
 };
 
+// Prevent the core reconnect watcher from installing its document-wide
+// attribute MutationObserver during startup. The watcher was observing
+// class/style/hidden/aria-hidden/value changes across the entire game DOM,
+// which can fire continuously and block the main thread while the bot loads.
+// Keep other MutationObservers untouched.
+if (!window.__minNewReconnectObserverGuardInstalled && window.MutationObserver?.prototype?.observe) {
+  window.__minNewReconnectObserverGuardInstalled = true;
+  const nativeObserve = window.MutationObserver.prototype.observe;
+  window.MutationObserver.prototype.observe = function minibiaReconnectObserverGuard(target, options) {
+    try {
+      const stack = String(new Error().stack || "");
+      const filters = Array.isArray(options?.attributeFilter) ? options.attributeFilter : [];
+      const isCoreReconnectObserver =
+        stack.includes("src/core.js") &&
+        options?.subtree === true &&
+        options?.attributes === true &&
+        filters.includes("class") &&
+        filters.includes("style") &&
+        filters.includes("hidden") &&
+        filters.includes("aria-hidden") &&
+        filters.includes("value");
+      if (isCoreReconnectObserver) return;
+    } catch (_) {}
+    return nativeObserve.call(this, target, options);
+  };
+}
+
 // Capture the Anti Paralyze toggle before its module-level change handler.
 // The module synchronizes the UI while saving the spell, which otherwise
 // resets a newly checked box before start() is called.
