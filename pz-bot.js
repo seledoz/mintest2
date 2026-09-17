@@ -50,6 +50,7 @@
     "src/modules/github-waypoint-library.js",
     "src/modules/captcha-alarm.js",
     "src/main.js",
+    "src/modules/auto-attack-sticky-target.js",
     "src/modules/explosion-on-crosshairs.js",
     "src/modules/remove-legacy-great-fireball.js",
     "src/modules/anti-paralyze-toggle-fix.js",
