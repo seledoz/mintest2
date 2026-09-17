@@ -139,9 +139,6 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
       if (priorityEntries.length) {
         const bestPriority = Math.min(...priorityEntries.map((entry) => entry.priority));
         const topPriorityEntries = priorityEntries.filter((entry) => entry.priority === bestPriority);
-        // Highest HP must be allowed to switch between monsters in the same priority tier.
-        // Without this guard, the current target was always retained and Highest HP could never take effect.
-        if (!config.highestHpEnabled && currentTargetAlive && topPriorityEntries.some((entry) => Number(entry.monster?.id) === Number(currentTarget.id))) return currentTarget;
         return topPriorityEntries.sort(config.highestHpEnabled ? sortHighestHp : sortNearest)[0]?.monster || null;
       }
       if (!config.highestHpEnabled) return currentTargetAlive ? currentTarget : null;
