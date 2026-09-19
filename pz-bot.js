@@ -55,6 +55,7 @@
     "src/modules/remove-legacy-great-fireball.js",
     "src/modules/anti-paralyze-toggle-fix.js",
     "src/modules/player-screen-alert.js",
+    "src/modules/player-mana-potion.js",
     "src/modules/monster-xray-alarm.js",
     "src/modules/emergency-mana-ring.js",
     "src/modules/auto-attack-keep-distance.js",
