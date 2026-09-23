@@ -89,7 +89,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
     const hpAttempt = state.pendingHpAttempt;
     if (hpAttempt) {
       if (didHpHealSucceed(stats, hpAttempt)) { state.lastHpHealAt = hpAttempt.attemptedAt; state.pendingHpAttempt = null; bot.log("confirmed hp heal", { slot: hpAttempt.slot }); }
-      else if (now - hpAttempt.attemptedAt >= Math.max(50, Number(config.healConfirmMs) || 0)) { state.pendingHpAttempt = null; scheduleHpRetry(); bot.log("hp heal did not register; starting 100ms retry", { slot: hpAttempt.slot }); }
+      else if (now - hpAttempt.attemptedAt >= Math.max(50, Number(config.healConfirmMs) || 0)) { state.pendingHpAttempt = null; bot.log("hp heal did not register; 100ms retry loop active", { slot: hpAttempt.slot }); }
     }
     const manaAttempt = state.pendingManaAttempt;
     if (manaAttempt) {
@@ -108,7 +108,7 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
   function triggerHpHeal(now = Date.now(), stats = readStats()) {
     if (!canUseHpHeal(now, stats)) return false;
     const slot = normalizeHotbarSlot(config.hpHotbarSlot); const clicked = bot.clickHotbar(slot - 1);
-    if (clicked) { state.lastHpAttemptAt = now; state.pendingHpAttempt = { attemptedAt: now, slot, hpBefore: Number(stats.hp?.current ?? 0), manaBefore: Number(stats.mana?.current ?? 0) }; bot.log("pressed hp heal hotkey", { slot, minHp: config.minHp }); }
+    if (clicked) { state.lastHpAttemptAt = now; state.pendingHpAttempt = { attemptedAt: now, slot, hpBefore: Number(stats.hp?.current ?? 0), manaBefore: Number(stats.mana?.current ?? 0) }; scheduleHpRetry(); bot.log("pressed hp heal hotkey", { slot, minHp: config.minHp }); }
     return clicked;
   }
   function triggerManaHeal(now = Date.now(), stats = readStats()) {
