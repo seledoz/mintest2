@@ -224,6 +224,7 @@
     currentBundle.installCaveWaypointActionsModule?.(bot);
 
     bot.ui.inject();
+    currentBundle.installSpellTimerModule?.(bot);
     currentBundle.installQuickControlsSettingsModule?.(bot);
     currentBundle.installRuneV3KeyboardModule?.(bot);
     bot.gmDefaultChatKillSwitch?.injectPanelControl?.();
@@ -239,6 +240,9 @@
     installLureCaveProgressPreserver(bot);
     currentBundle.installGithubWaypointLibraryModule?.(bot);
     installGmKillSwitchBelowGithub(bot);
+    bot.spellTimer?.ensureUi?.();
+    window.setTimeout(() => bot.spellTimer?.ensureUi?.(), 0);
+    window.setTimeout(() => bot.spellTimer?.ensureUi?.(), 250);
     removePanelDebugSection();
     window.setTimeout(removePanelDebugSection, 0);
     bot.caveArrowKeys?.ensureDropdownOption?.();
@@ -254,6 +258,7 @@
       xray: bot.xray.status(),
       panic: bot.panic.status(),
       gmDefaultChatKillSwitch: bot.gmDefaultChatKillSwitch?.status?.() || null,
+      spellTimer: bot.spellTimer?.status?.() || null,
       rune: bot.rune.status(),
       runeV2: bot.runeV2?.status?.() || null,
       runeV3: bot.runeV3?.status?.() || null,
