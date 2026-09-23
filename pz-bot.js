@@ -68,31 +68,6 @@
     "src/modules/profiles.js",
   ];
 
-  function purgeLegacyModuleCollapseUi() {
-    const selectors = [
-      "#minibia-bot-panel .mb-module-collapse",
-      "#minibia-bot-panel .mb-module-titlebar",
-      "#minibia-bot-panel .mb-module-body",
-    ];
-    selectors.forEach((selector) => {
-      document.querySelectorAll(selector).forEach((element) => element.remove());
-    });
-    document.querySelectorAll("#minibia-bot-panel .mb-section").forEach((section) => {
-      section.classList.remove("mb-module-collapsed");
-      delete section.dataset.moduleCollapsed;
-      delete section.dataset.moduleCollapseKey;
-      section.querySelectorAll(".mb-module-body").forEach((body) => {
-        body.hidden = false;
-        body.style.removeProperty("display");
-      });
-      const title = section.querySelector(".mb-module-title");
-      if (title) {
-        title.classList.remove("mb-module-title");
-        title.removeAttribute("data-module-collapse-key");
-      }
-    });
-  }
-
   function purgeLegacyCaveWaitDelay() {
     const waitButton = document.getElementById("minibia-bot-cave-wait-add");
     const waitInput = document.getElementById("minibia-bot-cave-wait-minutes");
@@ -139,7 +114,7 @@
   }
   function removePanelDebugSection(){const t=document.getElementById("minibia-bot-debug-enabled"),s=t?.closest?.(".mb-section");if(s){s.remove();return;}const labels=Array.from(document.querySelectorAll("#minibia-bot-panel .mb-label"));const l=labels.find(x=>String(x.textContent||"").trim().toLowerCase()==="debug");l?.closest?.(".mb-section")?.remove();}
   function removePanicRunnerSection(){const b=document.getElementById("minibia-bot-set-home"),s=b?.closest?.(".mb-section");if(s){s.remove();return;}document.getElementById("minibia-bot-home")?.closest?.(".mb-section")?.remove();document.getElementById("minibia-bot-panic-unknown")?.closest?.(".mb-section")?.remove();document.getElementById("minibia-bot-panic-health")?.closest?.(".mb-section")?.remove();document.getElementById("minibia-bot-panic-return")?.closest?.(".mb-section")?.remove();}
-  function ensureFreshModuleCollapseUi(){const panel=document.getElementById("minibia-bot-panel");if(!panel)return;Array.from(panel.querySelectorAll(".mb-section")).forEach(section=>{if(section.dataset.mbFreshCollapse==="true")return;const label=Array.from(section.children).find(el=>el.classList?.contains("mb-label"));if(!label)return;const header=document.createElement("div");header.className="mb-module-header";const button=document.createElement("button");button.type="button";button.className="mb-module-collapse";button.textContent="−";button.title="Collapse";button.setAttribute("aria-label","Collapse module");header.appendChild(label);header.appendChild(button);const body=document.createElement("div");body.className="mb-module-body";Array.from(section.children).forEach(child=>{if(child!==label)body.appendChild(child);});section.replaceChildren(header,body);section.dataset.mbFreshCollapse="true";button.addEventListener("click",event=>{event.preventDefault();event.stopPropagation();const collapsed=body.hidden;body.hidden=!collapsed;button.textContent=collapsed?"−":"+";button.title=collapsed?"Collapse":"Expand";button.setAttribute("aria-label",collapsed?"Collapse module":"Expand module");});});}  function keepPanelTitleBlank(){blankPanelTitle();ensureLeftCollapseButton();removePanelDebugSection();removePanicRunnerSection();let attempts=0;const timerId=window.setInterval(()=>{blankPanelTitle();ensureLeftCollapseButton();removePanelDebugSection();removePanicRunnerSection();purgeLegacyCaveWaitDelay();attempts+=1;if(attempts>=20)window.clearInterval(timerId);},250);}
+  function keepPanelTitleBlank(){blankPanelTitle();ensureLeftCollapseButton();removePanelDebugSection();removePanicRunnerSection();let attempts=0;const timerId=window.setInterval(()=>{blankPanelTitle();ensureLeftCollapseButton();removePanelDebugSection();removePanicRunnerSection();purgeLegacyCaveWaitDelay();attempts+=1;if(attempts>=20)window.clearInterval(timerId);},250);}
   function normalizeCavePathfinderModeUi(){
     const select=document.getElementById("minibia-bot-cave-pathfinder-mode");
     if(!select)return;
@@ -158,6 +133,6 @@
     return code;
   }
   async function loadSourceFile(path){const response=await fetch(`${rawBaseUrl}/${path}?t=${Date.now()}`,{cache:"no-store"});if(!response.ok)throw new Error(`Failed to load ${path}: HTTP ${response.status}`);let code=await response.text();code=code.replace("currentBundle.installAutoAttackStickyTargetModule?.(bot);\\n    ensureStickyTargetPanelToggle(bot);","currentBundle.installAutoAttackStickyTargetModule?.(bot);");code=addSafeUiPerformanceOptimizations(code,path);if(path==="src/version.js")code=code.replaceAll("%%BRANCH%%",ref).replaceAll("%%COMMIT%%","source-loader").replaceAll("%%DATE%%",new Date().toISOString());const sourceUrl=`${rawBaseUrl}/${path}`;try{(0,eval)(`${code}\n//# sourceURL=${sourceUrl}`);}catch(error){console.error(`[minibia-bot] Failed to evaluate ${path}`,error);throw error;}}
-  async function load(){purgeLegacyModuleCollapseUi();purgeLegacyCaveWaitDelay();if(window.minibiaBot?.destroy){try{window.minibiaBot.destroy();}catch(error){console.warn("[minibia-bot] Existing bot cleanup failed",error);}}purgeLegacyCaveWaitDelay();installUiCompatibilityShim();delete window.__minibiaBotBundle;window.__minibiaBotBundle={};for(const path of sourceFiles)await loadSourceFile(path);purgeLegacyCaveWaitDelay();keepPanelTitleBlank();window.setTimeout(ensureFreshModuleCollapseUi,0);window.setTimeout(ensureFreshModuleCollapseUi,250);window.setTimeout(ensureFreshModuleCollapseUi,1000);normalizeCavePathfinderModeUi();window.setTimeout(normalizeCavePathfinderModeUi,250);window.setTimeout(normalizeCavePathfinderModeUi,1000);console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);}
+  async function load(){purgeLegacyCaveWaitDelay();if(window.minibiaBot?.destroy){try{window.minibiaBot.destroy();}catch(error){console.warn("[minibia-bot] Existing bot cleanup failed",error);}}purgeLegacyCaveWaitDelay();installUiCompatibilityShim();delete window.__minibiaBotBundle;window.__minibiaBotBundle={};for(const path of sourceFiles)await loadSourceFile(path);purgeLegacyCaveWaitDelay();keepPanelTitleBlank();normalizeCavePathfinderModeUi();window.setTimeout(normalizeCavePathfinderModeUi,250);window.setTimeout(normalizeCavePathfinderModeUi,1000);console.log(`[minibia-bot] Loaded source files from ${repository}@${ref}`);}
   load().catch(error=>console.error("[minibia-bot] Source loader failed",error));
 })();
