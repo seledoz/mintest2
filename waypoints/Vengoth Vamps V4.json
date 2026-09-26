@@ -1,7 +1,7 @@
 {
   "version": 1,
   "name": "Vengoth Vamps V4",
-  "updatedAt": "2026-09-26T17:55:46.614Z",
+  "updatedAt": "2026-09-26T17:56:16.337Z",
   "route": [
     {
       "x": 32966,
@@ -73,6 +73,13 @@
     {
       "x": 32957,
       "y": 31465,
+      "z": 6,
+      "action": "use",
+      "useDirection": "W"
+    },
+    {
+      "x": 32951,
+      "y": 31461,
       "z": 6,
       "action": "use",
       "useDirection": "W"
