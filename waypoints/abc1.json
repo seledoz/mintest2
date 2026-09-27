@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "name": "abc1",
+  "updatedAt": "2026-09-27T02:05:11.305Z",
+  "route": [
+    {
+      "x": 32482,
+      "y": 31633,
+      "z": 10,
+      "action": "walk",
+      "useDirection": "E"
+    },
+    {
+      "x": 32485,
+      "y": 31633,
+      "z": 10,
+      "action": "use",
+      "useDirection": "E"
+    },
+    {
+      "x": 32492,
+      "y": 31633,
+      "z": 10,
+      "action": "walk",
+      "useDirection": "W"
+    },
+    {
+      "x": 32487,
+      "y": 31633,
+      "z": 10,
+      "action": "use",
+      "useDirection": "W"
+    },
+    {
+      "x": 32482,
+      "y": 31631,
+      "z": 10,
+      "action": "walk",
+      "useDirection": "N"
+    }
+  ],
+  "transitions": []
+}
