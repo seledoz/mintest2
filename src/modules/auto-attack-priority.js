@@ -98,6 +98,20 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
       : "highest hp";
     if (!currentTarget) return selectTarget(preferredTarget, reason);
     if (Number(currentTarget.id) === Number(preferredTarget.id)) return false;
+
+    // When Sticky Target is enabled, do not fight it over another monster
+    // at the same priority rank. Creature Priority may still replace the
+    // current target when the preferred creature has a strictly higher rank.
+    const stickyEnabled = bot.attackStickyTarget?.config?.enabled === true;
+    if (stickyEnabled) {
+      const currentPriority = getPriorityIndex(currentTarget);
+      const preferredPriority = getPriorityIndex(preferredTarget);
+
+      if (preferredPriority >= 0 && currentPriority >= 0 && preferredPriority >= currentPriority) {
+        return false;
+      }
+    }
+
     return selectTarget(preferredTarget, reason);
   }
   function stopTimer() { if (state.timerId != null) window.clearInterval(state.timerId); state.timerId = null; }
