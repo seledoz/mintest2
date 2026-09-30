@@ -21,7 +21,7 @@ window.__minibiaBotBundle.installRuneModule = function installRuneModule(bot) {
       minFoodSeconds: 30,
       runeSpellWords: "adori vita vis",
       runeManaCost: 600,
-      runeCooldownMs: 2100,
+      runeCooldownMs: 1050,
       enabled: false,
     },
     bot.storage.get(configStorageKey, {})
