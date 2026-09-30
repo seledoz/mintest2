@@ -14,7 +14,7 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
     {
       manaCost: 600,
       hotkey: "1",
-      cooldownMs: 3500,
+      cooldownMs: 2040,
       enabled: false,
     },
     bot.storage.get(runeV2StorageKey, {})
@@ -140,7 +140,7 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
       } finally {
         scheduleRuneV2Tick();
       }
-    }, 1000);
+    }, 200);
   }
 
   function startRuneV2(overrides = {}) {
