@@ -35171,9 +35171,9 @@ const HotbarManager = function () {
   //   __runeAttackGlobalUntil — spell→rune cross-cooldown, attack bucket only
   //   __runeHealGlobalUntil   — spell→rune cross-cooldown, heal bucket only
   this.__runeAttackUntil = 0;
-  this.__runeAttackDuration = 2000;
+  this.__runeAttackDuration = 1050;
   this.__runeHealUntil = 0;
-  this.__runeHealDuration = 2000;
+  this.__runeHealDuration = 1050;
   this.__runeAttackGlobalUntil = 0;
   this.__runeAttackGlobalDuration = 1000;
   this.__runeHealGlobalUntil = 0;
@@ -36913,16 +36913,16 @@ HotbarManager.prototype.updateItemCount = function (itemId, fluidType, count) {
         // (attack vs heal — server keeps these locks independent so
         // SD on cooldown doesn't dim UH and vice-versa).
         let isAttack = def.properties.aggressive !== false;
-        let until = performance.now() + 2000;
+        let until = performance.now() + 1050;
         if (isAttack) {
           if (until > this.__runeAttackUntil) {
             this.__runeAttackUntil = until;
-            this.__runeAttackDuration = 2000;
+            this.__runeAttackDuration = 1050;
           }
         } else {
           if (until > this.__runeHealUntil) {
             this.__runeHealUntil = until;
-            this.__runeHealDuration = 2000;
+            this.__runeHealDuration = 1050;
           }
         }
       }
