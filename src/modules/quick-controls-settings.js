@@ -14,7 +14,7 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
     {
       manaCost: 600,
       hotkey: "1",
-      cooldownMs: 2040,
+      cooldownMs: 2100,
       enabled: false,
     },
     bot.storage.get(runeV2StorageKey, {})
