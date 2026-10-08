@@ -86,9 +86,11 @@ window.__minibiaBotBundle.installHealModule = function installHealModule(bot) {
   }
   function resolvePendingAttempts(stats, now = Date.now()) {
     const hpAttempt = state.pendingHpAttempt;
-    if (hpAttempt) {
-      if (didHpHealSucceed(stats, hpAttempt)) { state.lastHpHealAt = hpAttempt.attemptedAt; state.pendingHpAttempt = null; stopHpRetry(); bot.log("confirmed hp heal", { slot: hpAttempt.slot }); }
-      else if (now - hpAttempt.attemptedAt >= Math.max(50, Number(config.healConfirmMs) || 0)) { state.pendingHpAttempt = null; bot.log("hp heal did not register; 100ms retry loop active", { slot: hpAttempt.slot }); }
+    if (hpAttempt && didHpHealSucceed(stats, hpAttempt)) {
+      state.lastHpHealAt = hpAttempt.attemptedAt;
+      state.pendingHpAttempt = null;
+      stopHpRetry();
+      bot.log("confirmed hp heal", { slot: hpAttempt.slot });
     }
     const manaAttempt = state.pendingManaAttempt;
     if (manaAttempt) {
