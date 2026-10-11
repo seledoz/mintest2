@@ -16,10 +16,12 @@ window.__minibiaBotBundle.installAutoInvisibleModule = function installAutoInvis
       spellWords: "utana vid",
       recastCooldownMs: 2000,
       enabled: false,
+      ignoreMonsterGuard: false,
     },
     bot.storage.get(configStorageKey, {})
   );
   config.tickMs = 500;
+  config.ignoreMonsterGuard = !!config.ignoreMonsterGuard;
 
   function persistConfig() {
     bot.storage.set(configStorageKey, { ...config });
@@ -140,6 +142,7 @@ window.__minibiaBotBundle.installAutoInvisibleModule = function installAutoInvis
   function start(overrides = {}) {
     Object.assign(config, overrides, { enabled: true });
     config.tickMs = 500;
+    config.ignoreMonsterGuard = !!config.ignoreMonsterGuard;
     persistConfig();
 
     if (state.running) {
@@ -190,6 +193,10 @@ window.__minibiaBotBundle.installAutoInvisibleModule = function installAutoInvis
 
     if (Object.prototype.hasOwnProperty.call(nextConfig, "recastCooldownMs")) {
       nextConfig.recastCooldownMs = Math.max(0, Number(nextConfig.recastCooldownMs) || 0);
+    }
+
+    if (Object.prototype.hasOwnProperty.call(nextConfig, "ignoreMonsterGuard")) {
+      nextConfig.ignoreMonsterGuard = !!nextConfig.ignoreMonsterGuard;
     }
 
     Object.assign(config, nextConfig);
