@@ -113,6 +113,7 @@ window.__minibiaBotBundle.installGreatFireballV2Module = function installGreatFi
     if (!bot.clickHotbar || bot.__gfbV2PriorityPatched) return;
     const originalClickHotbar = bot.clickHotbar.bind(bot);
     bot.clickHotbar = function clickHotbarWithGfbPriority(index, ...args) {
+      if (args[0]?.source === "auto-heal") return originalClickHotbar(index, ...args);
       const attemptedSlot = Math.trunc(Number(index)) + 1;
       const gfbSlot = normalizeHotbarSlot(config.hotbarSlot);
       if (state.running && config.enabled && attemptedSlot === gfbSlot && state.lastCastAt && Date.now() - state.lastCastAt < config.cooldownMs) {
