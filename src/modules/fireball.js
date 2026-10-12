@@ -121,6 +121,7 @@ window.__minibiaBotBundle.installFireballModule = function installFireballModule
     if (!bot.clickHotbar || bot.__fireballPriorityPatched) return;
     const originalClickHotbar = bot.clickHotbar.bind(bot);
     bot.clickHotbar = function clickHotbarWithFireballPriority(index, ...args) {
+      if (args[0]?.source === "auto-heal") return originalClickHotbar(index, ...args);
       const attemptedSlot = Math.trunc(Number(index)) + 1;
       const fireballSlot = normalizeHotbarSlot(config.hotbarSlot);
       if (shouldReservePriority() && attemptedSlot !== fireballSlot && getBlockedSlots().has(attemptedSlot)) {
