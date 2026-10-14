@@ -5,7 +5,7 @@ window.__minibiaBotBundle.installCaptchaAlarmModule = function installCaptchaAla
 
   const state = { active: false, visible: false, observer: null, beepTimerId: null, stopTimerId: null, lastTriggerAt: 0 };
   const alarmDurationMs = 3000;
-  const cooldownMs = 52000;
+  const cooldownMs = 56000;
   const beepIntervalMs = 1000;
   const ignoredSelector = "#minibia-bot-panel, #k9x-panel, #minibia-bot-style, script, style";
 
