@@ -88,6 +88,8 @@ window.__minibiaBotBundle.installExplosionOnCrosshairsModule = function installE
     if (!bot.clickHotbar || bot.__explosionCrosshairsPriorityPatched) return;
     const original = bot.clickHotbar.bind(bot);
     bot.clickHotbar = (index, ...args) => {
+      // Auto Heal must bypass Explosion's priority reservation, matching Fireball.
+      if (args[0]?.source === "auto-heal") return original(index, ...args);
       const attempted = Math.trunc(Number(index)) + 1;
       const own = slot(config.hotbarSlot);
       if (reservePriority() && attempted !== own && blockedSlots().has(attempted)) return false;
