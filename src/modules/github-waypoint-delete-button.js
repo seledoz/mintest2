@@ -108,8 +108,8 @@
     if (document.getElementById("minibia-bot-cave-record-wait")) return true;
     const button = document.createElement("button");
     button.type = "button"; button.id = "minibia-bot-cave-record-wait"; button.className = addButton.className; button.textContent = "Add Waypoint Wait";
-    button.title = "Add a waypoint at your current position that pauses Cavebot movement for 1 minute";
-    button.addEventListener("click", () => { const added = window.minibiaBot?.cave?.addWaypointCurrentSpot?.({ action: "wait" }); if (added) window.minibiaBot?.log?.("waypoint wait added", { waypoint: added, waitMs: 60000 }); });
+    button.title = "Add a waypoint at your current position that pauses Cavebot movement for 30 seconds";
+    button.addEventListener("click", () => { const added = window.minibiaBot?.cave?.addWaypointCurrentSpot?.({ action: "wait", waitMs: 30000 }); if (added) window.minibiaBot?.log?.("waypoint wait added", { waypoint: added, waitMs: 30000 }); });
     addButton.insertAdjacentElement("afterend", button);
     return true;
   }
