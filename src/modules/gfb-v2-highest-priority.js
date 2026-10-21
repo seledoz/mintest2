@@ -52,6 +52,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
     add(bot?.attack?.config?.runeHotbarSlot);
     add(bot?.attackAoe?.config?.spellHotbarSlot);
     add(getSquare2Slot());
+    add(bot?.fireball?.config?.hotbarSlot);
     return slots;
   }
 
@@ -98,7 +99,7 @@ window.__minibiaBotBundle = window.__minibiaBotBundle || {};
       const note = document.createElement("div");
       note.className = "mb-small-note";
       note.id = noteId;
-      note.textContent = "Highest Priority blocks the other two AoE hotkeys and the auto-attack rune while GFB 2.0 has enough creatures to cast, including while GFB is cooling down.";
+      note.textContent = "Highest Priority blocks Fireball, the other AoE hotkeys, and the auto-attack rune while GFB 2.0 has enough creatures to cast, including while GFB is cooling down.";
       checkbox?.closest?.("label")?.insertAdjacentElement("afterend", note);
     }
 
