@@ -5,20 +5,13 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
   let observer = null;
   const runeV2StorageKey = "minibiaBot.runeV2.config";
-  const runeV2State = {
-    running: false,
-    timerId: null,
-    lastActivationAt: 0,
-  };
-  const runeV2Config = Object.assign(
-    {
-      manaCost: 600,
-      hotkey: "1",
-      cooldownMs: 2100,
-      enabled: false,
-    },
-    bot.storage.get(runeV2StorageKey, {})
-  );
+  const runeV2State = { running: false, timerId: null, lastActivationAt: 0, nextManaThreshold: null };
+  const runeV2StoredConfig = bot.storage.get(runeV2StorageKey, {}) || {};
+  const runeV2LegacyManaCost = clampManaCost(runeV2StoredConfig.manaCost, 600);
+  const runeV2Config = Object.assign({ minManaCost: 600, maxManaCost: 600, hotkey: "1", cooldownMs: 2100, enabled: false }, runeV2StoredConfig);
+  if (!Object.prototype.hasOwnProperty.call(runeV2StoredConfig, "minManaCost")) runeV2Config.minManaCost = runeV2LegacyManaCost;
+  if (!Object.prototype.hasOwnProperty.call(runeV2StoredConfig, "maxManaCost")) runeV2Config.maxManaCost = runeV2LegacyManaCost;
+  delete runeV2Config.manaCost;
 
   // A saved profile can restore enabled=true before the Rune 2.0 checkbox is
   // installed. Do not auto-start from persisted config alone; the checkbox
@@ -71,29 +64,35 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
     return fallbackMatch ? fallbackMatch[1] : "1";
   }
 
+  function normalizeRuneV2ManaRange(minValue, maxValue) {
+    const minManaCost = clampManaCost(minValue, runeV2Config.minManaCost ?? 600);
+    const maxManaCost = Math.max(minManaCost, clampManaCost(maxValue, runeV2Config.maxManaCost ?? minManaCost));
+    return { minManaCost, maxManaCost };
+  }
+  function chooseNextRuneV2ManaThreshold() {
+    const range = normalizeRuneV2ManaRange(runeV2Config.minManaCost, runeV2Config.maxManaCost);
+    runeV2State.nextManaThreshold = range.minManaCost + Math.floor(Math.random() * (range.maxManaCost - range.minManaCost + 1));
+    return runeV2State.nextManaThreshold;
+  }
   function persistRuneV2Config() {
+    delete runeV2Config.manaCost;
     bot.storage.set(runeV2StorageKey, { ...runeV2Config });
   }
+  chooseNextRuneV2ManaThreshold();
 
   function getRuneV2GateStatus(now = Date.now()) {
     const stats = bot.rune?.readStats?.();
     const mana = stats?.mana;
     const nearbyMonsters = bot.hasteParalyzeMonsterRangeGuard?.getMonstersWithinRange?.(4) || [];
     const monsterSafe = nearbyMonsters.length === 0;
+    if (runeV2State.nextManaThreshold == null) chooseNextRuneV2ManaThreshold();
     if (!mana) {
-      return {
-        hasStats: false,
-        enoughHp: true,
-        enoughMana: false,
-        cooldownReady: false,
-        cooldownRemainingMs: runeV2Config.cooldownMs,
-        monsterSafe,
-        nearbyMonsterCount: nearbyMonsters.length,
-        canActivate: false,
-      };
+      return { hasStats: false, enoughHp: true, enoughMana: false, manaThreshold: runeV2State.nextManaThreshold,
+        minManaCost: runeV2Config.minManaCost, maxManaCost: runeV2Config.maxManaCost,
+        cooldownReady: false, cooldownRemainingMs: runeV2Config.cooldownMs, monsterSafe,
+        nearbyMonsterCount: nearbyMonsters.length, canActivate: false };
     }
-
-    const enoughMana = mana.current >= runeV2Config.manaCost;
+    const enoughMana = mana.current >= runeV2State.nextManaThreshold;
     const elapsedMs = now - runeV2State.lastActivationAt;
     const cooldownRemainingMs = Math.max(0, runeV2Config.cooldownMs - elapsedMs);
     const cooldownReady = cooldownRemainingMs === 0;
@@ -102,6 +101,9 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
       hasStats: true,
       enoughHp: true,
       enoughMana,
+      manaThreshold: runeV2State.nextManaThreshold,
+      minManaCost: runeV2Config.minManaCost,
+      maxManaCost: runeV2Config.maxManaCost,
       cooldownReady,
       cooldownRemainingMs,
       monsterSafe,
@@ -119,11 +121,10 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
     const clicked = bot.clickHotbar?.(slot - 1) === true;
     if (!clicked) return false;
 
+    const usedManaThreshold = runeV2State.nextManaThreshold;
     runeV2State.lastActivationAt = Date.now();
-    bot.log("rune spell 2.0 hotkey activated", {
-      manaCost: runeV2Config.manaCost,
-      hotkey: slot,
-    });
+    const nextManaThreshold = chooseNextRuneV2ManaThreshold();
+    bot.log("rune spell 2.0 hotkey activated", { manaThreshold: usedManaThreshold, nextManaThreshold, hotkey: slot });
     return true;
   }
 
@@ -169,8 +170,14 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
   function updateRuneV2Config(nextConfig = {}) {
     const normalized = { ...nextConfig };
     delete normalized.spellName;
-    if (Object.prototype.hasOwnProperty.call(normalized, "manaCost")) {
-      normalized.manaCost = clampManaCost(normalized.manaCost, runeV2Config.manaCost ?? 600);
+    delete normalized.manaCost;
+    const hasMinMana = Object.prototype.hasOwnProperty.call(normalized, "minManaCost");
+    const hasMaxMana = Object.prototype.hasOwnProperty.call(normalized, "maxManaCost");
+    if (hasMinMana || hasMaxMana) {
+      const range = normalizeRuneV2ManaRange(hasMinMana ? normalized.minManaCost : runeV2Config.minManaCost,
+        hasMaxMana ? normalized.maxManaCost : runeV2Config.maxManaCost);
+      normalized.minManaCost = range.minManaCost;
+      normalized.maxManaCost = range.maxManaCost;
     }
     if (Object.prototype.hasOwnProperty.call(normalized, "hotkey")) {
       normalized.hotkey = normalizeRuneV2Hotkey(normalized.hotkey, runeV2Config.hotkey ?? "1");
@@ -180,6 +187,8 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
     }
     Object.assign(runeV2Config, normalized);
     delete runeV2Config.spellName;
+    delete runeV2Config.manaCost;
+    if (hasMinMana || hasMaxMana) chooseNextRuneV2ManaThreshold();
     persistRuneV2Config();
     return { ...runeV2Config };
   }
@@ -233,17 +242,21 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
       toggleText.textContent = "Enable Rune Spell 2.0";
       toggleLabel.append(toggleInput, toggleText);
 
-      const manaInput = document.createElement("input");
-      manaInput.type = "number";
-      manaInput.id = "minibia-bot-rune-v2-mana-cost";
-      manaInput.min = "0";
-      manaInput.step = "1";
-      manaInput.value = String(clampManaCost(runeV2Config.manaCost, 600));
-      manaInput.addEventListener("change", () => {
-        const manaCost = clampManaCost(manaInput.value, runeV2Config.manaCost ?? 600);
-        manaInput.value = String(manaCost);
-        updateRuneV2Config({ manaCost });
-      });
+      const minManaInput = document.createElement("input");
+      minManaInput.type = "number"; minManaInput.id = "minibia-bot-rune-v2-min-mana-cost";
+      minManaInput.min = "0"; minManaInput.step = "1";
+      minManaInput.value = String(clampManaCost(runeV2Config.minManaCost, 600));
+      const maxManaInput = document.createElement("input");
+      maxManaInput.type = "number"; maxManaInput.id = "minibia-bot-rune-v2-max-mana-cost";
+      maxManaInput.min = "0"; maxManaInput.step = "1";
+      maxManaInput.value = String(clampManaCost(runeV2Config.maxManaCost, 600));
+      function updateManaRangeFromInputs() {
+        const range = normalizeRuneV2ManaRange(minManaInput.value, maxManaInput.value);
+        minManaInput.value = String(range.minManaCost); maxManaInput.value = String(range.maxManaCost);
+        updateRuneV2Config(range);
+      }
+      minManaInput.addEventListener("change", updateManaRangeFromInputs);
+      maxManaInput.addEventListener("change", updateManaRangeFromInputs);
 
       const hotkeyInput = document.createElement("input");
       hotkeyInput.type = "text";
@@ -264,7 +277,8 @@ window.__minibiaBotBundle.installQuickControlsSettingsModule = function installQ
 
       runeV2Settings.append(
         toggleLabel,
-        makeField("Rune 2.0 Mana Cost", manaInput),
+        makeField("Rune 2.0 Minimum Mana", minManaInput),
+        makeField("Rune 2.0 Maximum Mana", maxManaInput),
         makeField("Rune 2.0 Hotkey", hotkeyInput)
       );
       stack.prepend(runeV2Settings);
