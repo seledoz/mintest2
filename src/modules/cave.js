@@ -295,6 +295,16 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     return null;
   }
 
+  function isDamageFieldTile(tile) {
+    return getTileThings(tile).some((thing) => {
+      // Match fields by their item definitions rather than hard-coded IDs.
+      const properties = getThingDefinition(thing?.id)?.properties || {};
+      const fieldType = String(properties.field || properties.name || "").trim().toLowerCase();
+      return String(properties.type || "").trim().toLowerCase() === "magicfield" &&
+        ["poison", "fire", "energy", "poison field", "fire field", "energy field"].includes(fieldType);
+    });
+  }
+
   function getAStarWalkabilityMatrix(position, z) {
     const cacheKey = `matrix_${z}`;
     const cached = matrixCache.get(cacheKey);
@@ -310,7 +320,9 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
         for (const tile of chunk.tiles) {
           if (!tile?.__position || tile.__position.z !== z) continue;
           const key = `${tile.__position.x},${tile.__position.y}`;
-          matrix.set(key, tile.isWalkable ? tile.isWalkable() : false);
+          const damageField = isDamageFieldTile(tile) && !isFloorChangeTile(tile) && !tile.isOccupied?.();
+          const walkable = tile.isWalkable ? tile.isWalkable() : false;
+          matrix.set(key, damageField || walkable);
         }
       }
     } catch (e) {
@@ -856,6 +868,40 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     const from = bot.getPlayerPosition();
     if (!from || !waypoint) return false;
     const now = Date.now();
+
+    // Use the same AutoWalkPacket movement that fixed damage-field crossing in MinTest3.
+    // Only use it for same-floor routes that actually cross a recognized damage field.
+    const fieldFrom = normalizePosition(from), fieldGoal = normalizePosition(waypoint);
+    if (fieldFrom && fieldGoal && fieldFrom.z === fieldGoal.z) {
+      const fieldPath = findPathAStar(fieldFrom, fieldGoal);
+      const crossesDamageField = Array.isArray(fieldPath) && fieldPath.some((position) => {
+        const tile = getTileAt(position);
+        return !!tile && isDamageFieldTile(tile) && !isFloorChangeTile(tile);
+      });
+      if (crossesDamageField && fieldPath.length > 1 && typeof AutoWalkPacket === "function" && typeof Position === "function") {
+        try {
+          const directions = [];
+          for (let index = 1; index < fieldPath.length; index += 1) {
+            const previous = fieldPath[index - 1], next = fieldPath[index];
+            const direction = new Position(previous.x, previous.y, previous.z).getLookDirection?.(
+              new Position(next.x, next.y, next.z)
+            );
+            if (!Number.isFinite(Number(direction))) throw new Error("Unable to encode field route direction");
+            directions.push(Number(direction));
+          }
+          if (directions.length) {
+            window.gameClient?.send?.(new AutoWalkPacket(directions));
+            state.lastPathAt = now;
+            bot.log("cave following damage-field AutoWalkPacket route", {
+              from: fieldFrom, to: fieldGoal, steps: directions.length
+            });
+            return true;
+          }
+        } catch (error) {
+          bot.logDebug("cave damage-field AutoWalkPacket failed", { error: error?.message || String(error) });
+        }
+      }
+    }
     if (config.pathfinderMode === 'astar') {
       const fromPos = normalizePosition(from);
       const waypointPos = normalizePosition(waypoint);
