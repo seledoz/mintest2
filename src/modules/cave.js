@@ -376,6 +376,60 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     return path;
   }
 
+  function findLoadedSegmentPath(from, goal) {
+    from = normalizePosition(from);
+    goal = normalizePosition(goal);
+    if (!from || !goal || from.z !== goal.z) return null;
+
+    const matrix = getAStarWalkabilityMatrix(from, from.z);
+    const startDistance = Math.max(Math.abs(goal.x - from.x), Math.abs(goal.y - from.y));
+    const candidates = [];
+    for (const key of matrix.keys()) {
+      const parts = key.split(",");
+      const x = Number(parts[0]), y = Number(parts[1]);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const dx = Math.abs(x - from.x), dy = Math.abs(y - from.y);
+      if (dx > VIEWPORT_DX || dy > VIEWPORT_DY || matrix.get(key) !== true) continue;
+      const remaining = Math.max(Math.abs(goal.x - x), Math.abs(goal.y - y));
+      if (remaining >= startDistance || (x === from.x && y === from.y)) continue;
+      candidates.push({ x, y, z: from.z, remaining, distance: dx + dy });
+    }
+    candidates.sort((a, b) => a.remaining - b.remaining || a.distance - b.distance);
+
+    // Bound fallback work: try only a few promising loaded tiles per repath.
+    for (const candidate of candidates.slice(0, 5)) {
+      const path = findPathAStar(from, candidate);
+      if (path && path.length > 1) return { path, target: candidate };
+    }
+    return null;
+  }
+
+  function sendDamageFieldAutoWalk(path, from, goal, now = Date.now()) {
+    if (!Array.isArray(path) || path.length < 2 ||
+        typeof AutoWalkPacket !== "function" || typeof Position !== "function") return false;
+    try {
+      const directions = [];
+      for (let index = 1; index < path.length; index += 1) {
+        const previous = path[index - 1], next = path[index];
+        const direction = new Position(previous.x, previous.y, previous.z).getLookDirection?.(
+          new Position(next.x, next.y, next.z)
+        );
+        if (!Number.isFinite(Number(direction))) throw new Error("Unable to encode field route direction");
+        directions.push(Number(direction));
+      }
+      if (!directions.length) return false;
+      window.gameClient?.send?.(new AutoWalkPacket(directions));
+      state.lastPathAt = now;
+      bot.log("cave following damage-field AutoWalkPacket route", {
+        from, to: goal, steps: directions.length, segmented: true
+      });
+      return true;
+    } catch (error) {
+      bot.logDebug("cave damage-field AutoWalkPacket failed", { error: error?.message || String(error) });
+      return false;
+    }
+  }
+
   function cleanupPathCache() {
     const now = Date.now();
     for (const [key, entry] of pathCache) {
@@ -873,32 +927,36 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     // Only use it for same-floor routes that actually cross a recognized damage field.
     const fieldFrom = normalizePosition(from), fieldGoal = normalizePosition(waypoint);
     if (fieldFrom && fieldGoal && fieldFrom.z === fieldGoal.z) {
-      const fieldPath = findPathAStar(fieldFrom, fieldGoal);
+      let fieldPath = findPathAStar(fieldFrom, fieldGoal);
+      let segmentTarget = fieldGoal;
+      if (!fieldPath && !isOnScreen(fieldGoal, fieldFrom)) {
+        // The destination may not be present in the loaded tile matrix yet.
+        // Advance to a reachable on-screen segment and recalculate after movement.
+        const segment = findLoadedSegmentPath(fieldFrom, fieldGoal);
+        if (segment) {
+          fieldPath = segment.path;
+          segmentTarget = segment.target;
+        }
+      }
       const crossesDamageField = Array.isArray(fieldPath) && fieldPath.some((position) => {
         const tile = getTileAt(position);
         return !!tile && isDamageFieldTile(tile) && !isFloorChangeTile(tile);
       });
-      if (crossesDamageField && fieldPath.length > 1 && typeof AutoWalkPacket === "function" && typeof Position === "function") {
+      if (crossesDamageField && sendDamageFieldAutoWalk(fieldPath, fieldFrom, segmentTarget, now)) return true;
+      if (fieldPath && segmentTarget !== fieldGoal && fieldPath.length > 1) {
         try {
-          const directions = [];
-          for (let index = 1; index < fieldPath.length; index += 1) {
-            const previous = fieldPath[index - 1], next = fieldPath[index];
-            const direction = new Position(previous.x, previous.y, previous.z).getLookDirection?.(
-              new Position(next.x, next.y, next.z)
-            );
-            if (!Number.isFinite(Number(direction))) throw new Error("Unable to encode field route direction");
-            directions.push(Number(direction));
-          }
-          if (directions.length) {
-            window.gameClient?.send?.(new AutoWalkPacket(directions));
-            state.lastPathAt = now;
-            bot.log("cave following damage-field AutoWalkPacket route", {
-              from: fieldFrom, to: fieldGoal, steps: directions.length
-            });
-            return true;
-          }
+          window.gameClient?.world?.pathfinder?.findPath?.(
+            from,
+            new Position(segmentTarget.x, segmentTarget.y, segmentTarget.z)
+          );
+          state.lastPathAt = now;
+          bot.log("cave pathing to loaded segment of off-screen waypoint", {
+            from: fieldFrom, waypoint: fieldGoal, targetTile: segmentTarget,
+            pathLength: fieldPath.length
+          });
+          return true;
         } catch (error) {
-          bot.logDebug("cave damage-field AutoWalkPacket failed", { error: error?.message || String(error) });
+          bot.logDebug("cave loaded-segment pathing failed", { targetTile: segmentTarget, error: error?.message || String(error) });
         }
       }
     }
