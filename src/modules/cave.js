@@ -929,9 +929,9 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     if (fieldFrom && fieldGoal && fieldFrom.z === fieldGoal.z) {
       let fieldPath = findPathAStar(fieldFrom, fieldGoal);
       let segmentTarget = fieldGoal;
-      if (!fieldPath && !isOnScreen(fieldGoal, fieldFrom)) {
-        // The destination may not be present in the loaded tile matrix yet.
-        // Advance to a reachable on-screen segment and recalculate after movement.
+      if (!isOnScreen(fieldGoal, fieldFrom) || !getTileAt(fieldGoal)) {
+        // Repath through a reachable loaded segment even when A* returns a partial
+        // path toward an off-screen goal. Recalculate as the player advances.
         const segment = findLoadedSegmentPath(fieldFrom, fieldGoal);
         if (segment) {
           fieldPath = segment.path;
@@ -963,13 +963,22 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     if (config.pathfinderMode === 'astar') {
       const fromPos = normalizePosition(from);
       const waypointPos = normalizePosition(waypoint);
-      const path = findPathAStar(fromPos, waypointPos);
+      let path = findPathAStar(fromPos, waypointPos);
+      const playerPos = fromPos;
+      const waypointOnScreen = waypointPos && isOnScreen(waypointPos, playerPos);
+      let targetTile = null;
+      if (!waypointOnScreen || !getTileAt(waypointPos)) {
+        // A* can return a partial route toward an off-screen/unloaded waypoint.
+        // Prefer a verified reachable segment and recompute after movement.
+        const segment = findLoadedSegmentPath(fromPos, waypointPos);
+        if (segment) {
+          path = segment.path;
+          targetTile = segment.target;
+        }
+      }
       if (path && path.length > 0) {
-        const playerPos = fromPos;
-        const waypointOnScreen = waypointPos && isOnScreen(waypointPos, playerPos);
-        let targetTile = null;
-        if (waypointOnScreen) targetTile = waypointPos;
-        else {
+        if (!targetTile && waypointOnScreen) targetTile = waypointPos;
+        else if (!targetTile) {
           const visiblePath = filterPathToViewport(path, playerPos);
           if (visiblePath && visiblePath.length > 1) targetTile = visiblePath[visiblePath.length - 1];
           else if (visiblePath && visiblePath.length === 1) targetTile = visiblePath[0];
