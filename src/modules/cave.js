@@ -235,6 +235,10 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
   const pathCache = new Map();
   const matrixCache = new Map();
 
+  function isAStarPathfinderMode() {
+    return ["astar", "smartA", "smartAField"].includes(String(config.pathfinderMode || ""));
+  }
+
   function findBestIndex(openSet) {
     let bestIndex = 0;
     let bestF = openSet[0].f;
@@ -278,7 +282,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
         if (!getWalkable(neighbor.x, neighbor.y)) continue;
 
         const g = current.g + 1;
-        const h = Math.abs(neighbor.x - goal.x) + Math.abs(neighbor.y - goal.y);
+        const h = Math.max(Math.abs(neighbor.x - goal.x), Math.abs(neighbor.y - goal.y));
         const f = g + h;
         const existing = openSet.find(n => n.x === neighbor.x && n.y === neighbor.y);
         if (existing) {
@@ -338,8 +342,18 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
       { x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 },
       { x: -1, y: -1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: 1, y: 1 },
     ];
-    return dirs.map(d => ({ x: current.x + d.x, y: current.y + d.y }))
-      .filter(n => matrix.get(`${n.x},${n.y}`) === true);
+    return dirs.map(d => ({ x: current.x + d.x, y: current.y + d.y, dx: d.x, dy: d.y }))
+      .filter((n) => {
+        if (matrix.get(`${n.x},${n.y}`) !== true) return false;
+        // A diagonal is legal only when both side tiles are passable. This prevents
+        // A* from cutting around solid corners that the game movement cannot cross.
+        if (n.dx !== 0 && n.dy !== 0) {
+          return matrix.get(`${current.x + n.dx},${current.y}`) === true &&
+            matrix.get(`${current.x},${current.y + n.dy}`) === true;
+        }
+        return true;
+      })
+      .map(({ x, y }) => ({ x, y }));
   }
 
   function getCachedPath(from, to) {
@@ -406,7 +420,8 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
 
   function sendDamageFieldAutoWalk(path, from, goal, now = Date.now()) {
     if (!Array.isArray(path) || path.length < 2 ||
-        typeof AutoWalkPacket !== "function" || typeof Position !== "function") return false;
+        typeof AutoWalkPacket !== "function" || typeof Position !== "function" ||
+        typeof window.gameClient?.send !== "function") return false;
     try {
       const directions = [];
       for (let index = 1; index < path.length; index += 1) {
@@ -960,7 +975,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
         }
       }
     }
-    if (config.pathfinderMode === 'astar') {
+    if (isAStarPathfinderMode()) {
       const fromPos = normalizePosition(from);
       const waypointPos = normalizePosition(waypoint);
       let path = findPathAStar(fromPos, waypointPos);
@@ -1203,7 +1218,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
           resetStuckCounts();
           bot.log("cave paused for auto attack", { combatDurationMs: Number(attackStatus?.combatDurationMs || 0), targetCount: Number(attackStatus?.targetCount || 0) });
         }
-        if (config.pathfinderMode === 'astar') {
+        if (isAStarPathfinderMode()) {
           const target = bot.attack?.getCurrentTarget?.() || null;
           if (target) {
             const chaseResult = chaseTarget(target);
@@ -1250,7 +1265,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
       }
       const timeSinceProgress = now - (state.lastProgressAt || now);
       const isStuck = timeSinceProgress >= 5000 && state.lastPositionKey === positionKey && positionKey != null;
-      if (isStuck && config.pathfinderMode === 'astar') {
+      if (isStuck && isAStarPathfinderMode()) {
         const fallback = antiStuckFallback(waypoint);
         bot.log("cave anti-stuck triggered", { action: fallback.action, waypoint, stuckForMs: timeSinceProgress, attempt: (stuckCounts.get(`${waypoint.x},${waypoint.y}`) || 0) });
         if (fallback.action === 'skip_waypoint') {
