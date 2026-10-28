@@ -1,6 +1,6 @@
 (() => {
   const repository = "seledoz/mintest2";
-  const ref = "feature/spardue-pathing-checkbox";
+  const ref = "main";
   const rawBaseUrl = `https://raw.githubusercontent.com/${repository}/${ref}`;
   const sourceFiles = [
     "src/version.js",
