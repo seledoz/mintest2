@@ -325,9 +325,25 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
         for (const tile of chunk.tiles) {
           if (!tile?.__position || tile.__position.z !== z) continue;
           const key = `${tile.__position.x},${tile.__position.y}`;
-          const damageField = isDamageFieldTile(tile) && !isFloorChangeTile(tile) && !tile.isOccupied?.();
-          const walkable = tile.isWalkable ? tile.isWalkable() : false;
-          matrix.set(key, damageField || walkable);
+          const damageField = isDamageFieldTile(tile) && !isFloorChangeTile(tile);
+          // Tile.isWalkable() checks the ground's flags, but does not account
+          // for blocking items or creatures. Never let a poison/fire field
+          // override those separate blockers when building the route matrix.
+          const hasBlockingItem = typeof tile.isItemBlocked === "function"
+            ? tile.isItemBlocked()
+            : false;
+          const hasOtherCreature = tile.monsters
+            ? Array.from(tile.monsters).some((creature) =>
+                creature !== window.gameClient?.player && !creature?.isMoving?.()
+              )
+            : false;
+          const hasWalkableGround = tile.id !== 0 && !isFloorChangeTile(tile);
+          const walkable = hasWalkableGround &&
+            (tile.isWalkable ? tile.isWalkable() : false) &&
+            !hasBlockingItem && !hasOtherCreature;
+          const fieldTraversable = damageField && hasWalkableGround &&
+            !hasBlockingItem && !hasOtherCreature;
+          matrix.set(key, fieldTraversable || walkable);
         }
       }
     } catch (e) {
