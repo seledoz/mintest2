@@ -326,23 +326,17 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
           if (!tile?.__position || tile.__position.z !== z) continue;
           const key = `${tile.__position.x},${tile.__position.y}`;
           const damageField = isDamageFieldTile(tile) && !isFloorChangeTile(tile);
-          // Tile.isWalkable() checks the ground's flags, but does not account
-          // for blocking items or creatures. Never let a poison/fire field
-          // override those separate blockers when building the route matrix.
+          // Let damage fields remain traversable, but never let them override
+          // blocking map objects such as walls or other impassable items.
           const hasBlockingItem = typeof tile.isItemBlocked === "function"
             ? tile.isItemBlocked()
-            : false;
-          const hasOtherCreature = tile.monsters
-            ? Array.from(tile.monsters).some((creature) =>
-                creature !== window.gameClient?.player && !creature?.isMoving?.()
-              )
             : false;
           const hasWalkableGround = tile.id !== 0 && !isFloorChangeTile(tile);
           const walkable = hasWalkableGround &&
             (tile.isWalkable ? tile.isWalkable() : false) &&
-            !hasBlockingItem && !hasOtherCreature;
+            !hasBlockingItem;
           const fieldTraversable = damageField && hasWalkableGround &&
-            !hasBlockingItem && !hasOtherCreature;
+            !hasBlockingItem;
           matrix.set(key, fieldTraversable || walkable);
         }
       }
