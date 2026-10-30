@@ -3,7 +3,7 @@
 Run this in the Minibia game page's browser console:
 
 ```js
-fetch("https://raw.githubusercontent.com/seledoz/mintest2/feature/client-adaptive-compat/pz-bot.js?t=" + Date.now(), {
+fetch("https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js?t=" + Date.now(), {
   cache: "no-store"
 })
   .then((response) => {
@@ -27,7 +27,7 @@ Use a fine-grained GitHub token with read and write access to the repository con
 
   const repository = "seledoz/mintest2";
   const legacyRepository = "seledoz/Min-new";
-  const ref = "feature/client-adaptive-compat";
+  const ref = "main";
   const rawPrefix = `https://raw.githubusercontent.com/${repository}/${ref}/`;
   const legacyRawPrefix = `https://raw.githubusercontent.com/${legacyRepository}/${ref}/`;
   const apiPrefix = `https://api.github.com/repos/${repository}/contents`;
