@@ -12,7 +12,8 @@
     // The 2026-10-30 client creates its live instance in index.js as
     // YPXHlIjOD = new AnkOPljisHyL(). The old obfuscated binding
     // vfdOywKJESRq no longer exists in this build.
-    nativeClient = eval("typeof YPXHlIjOD !== 'undefined' ? YPXHlIjOD : null")
+    nativeClient = window.__minibiaBotAdaptive?.resolveClient?.()
+      || eval("typeof YPXHlIjOD !== 'undefined' ? YPXHlIjOD : null")
       || eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null");
     NativePosition = eval("typeof zeOvojmNkQxY === 'function' ? zeOvojmNkQxY : null") || nativeClient?.player?.__position?.constructor || null;
     NativeAutoWalkPacket = eval("typeof twTOLoGSHp === 'function' ? twTOLoGSHp : null");
@@ -71,10 +72,10 @@
     const world = resolveWorld();
     if (!world) return null;
     try {
-      // Fast path for the currently observed build; the shape check prevents
-      // accidentally binding an unrelated object if the name is reused.
       if (isNativePathfinder(world.hNccDTwTki)) return world.hNccDTwTki;
     } catch (_) {}
+    const adaptivePathfinder = window.__minibiaBotAdaptive?.resolvePathfinder?.(nativeClient);
+    if (isNativePathfinder(adaptivePathfinder)) return adaptivePathfinder;
     return getPropertyValues(world).find(isNativePathfinder) || null;
   };
 
@@ -344,7 +345,12 @@
     return true;
   }
 
-  const nativeSend = nativeClient.aWSxdABvSpX;
+  const adaptivePacketDispatch = window.__minibiaBotAdaptive?.resolvePacketDispatch?.(nativeClient) || null;
+  // Keep the existing call sites stable while routing through the verified
+  // native client -> network-manager packet dispatch method.
+  const nativeSend = adaptivePacketDispatch
+    ? function verifiedNativePacketDispatch(packet) { return adaptivePacketDispatch.call(packet); }
+    : null;
   window.__minibiaBotClientCompat = {
     installed: true,
     build: "2026-10-30-1003",
@@ -355,6 +361,8 @@
     get worldAvailable() { return !!resolveWorld(); },
     get pathfinderAvailable() { return !!resolvePathfinder(); },
     itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
+    adaptiveDiscovery: window.__minibiaBotAdaptive?.inspect?.(nativeClient) || null,
+    packetDispatchMethod: adaptivePacketDispatch?.key || null,
     autoWalkAvailable: !!NativeAutoWalkPacket && typeof nativeSend === "function",
     supportedPackets: ["AutoWalkPacket", "ItemMovePacket"],
     itemMoveAvailable: typeof nativeSend === "function" && Number.isInteger(thingMoveOpcode),
