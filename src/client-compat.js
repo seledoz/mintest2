@@ -183,9 +183,58 @@
     }
   });
 
-  const nativeUi = nativeClient.kYgIgXceQLD;
-  const nativeChatManager = nativeUi?.uVvWDBBxDT;
-  const nativeHotbarManager = nativeUi?.RocGUBNConYq;
+  // Resolve UI/input managers by their runtime shape instead of stale scrambled keys.
+  const findNestedObject = (root, predicate, maxDepth = 6) => {
+    const queue = [{ value: root, depth: 0 }];
+    const seen = new Set();
+    let inspected = 0;
+    while (queue.length && inspected < 2500) {
+      const entry = queue.shift();
+      const value = entry?.value;
+      if (!value || (typeof value !== "object" && typeof value !== "function") || seen.has(value)) continue;
+      seen.add(value);
+      inspected += 1;
+      try { if (predicate(value)) return value; } catch (_) {}
+      if (entry.depth >= maxDepth || value === window || value === document ||
+          value instanceof Element || value instanceof Node) continue;
+      let names = [];
+      try { names = Object.getOwnPropertyNames(value); } catch (_) { continue; }
+      for (const key of names) {
+        if (key === "constructor" || key === "prototype" || key === "caller" || key === "callee") continue;
+        try {
+          const descriptor = Object.getOwnPropertyDescriptor(value, key);
+          if (descriptor && Object.prototype.hasOwnProperty.call(descriptor, "value")) {
+            const child = descriptor.value;
+            if (child && (typeof child === "object" || typeof child === "function")) {
+              queue.push({ value: child, depth: entry.depth + 1 });
+            }
+          }
+        } catch (_) {}
+      }
+    }
+    return null;
+  };
+
+  const nativeUi = (() => { try { return nativeClient.kYgIgXceQLD || null; } catch (_) { return null; } })();
+  const nativeChatManager =
+    findNestedObject(nativeClient, candidate =>
+      typeof candidate.HVtvgeiqmk === "function" ||
+      (Array.isArray(candidate.channels) && candidate.channels.some(channel => Array.isArray(channel?.__contents)))
+    ) || nativeUi?.uVvWDBBxDT || null;
+  const nativeHotbarManager =
+    findNestedObject(nativeClient, candidate =>
+      Array.isArray(candidate.slots) &&
+      candidate.slots.some(slot => !!slot?.canvas?.canvas && typeof slot.canvas.canvas.click === "function")
+    ) || nativeUi?.RocGUBNConYq || null;
+  const nativeMouse = (() => {
+    try {
+      return nativeClient.mouse ||
+        findNestedObject(nativeClient, candidate =>
+          typeof candidate.__handleItemUseWith === "function" &&
+          (typeof candidate.use === "function" || typeof candidate.move === "function")
+        );
+    } catch (_) { return null; }
+  })();
 
   // Keep native chat handling intact (commands, channel selection, PMs, etc.).
   const channelManager = nativeChatManager ? new Proxy(nativeChatManager, {
@@ -211,6 +260,7 @@
   const clientBridge = new Proxy(nativeClient, {
     get(target, property) {
       if (property === "world") return world;
+      if (property === "mouse") return nativeMouse || bindMethod(target, Reflect.get(target, property, target));
       if (property === "interface") return interfaceBridge;
       if (property === "itemDefinitionsByCid" || property === "itemDefinitions") {
         return target.TPWhmLyqyrg || null;
@@ -260,9 +310,14 @@
       });
     }
   }
-  if (NativeAutoWalkPacket && typeof window.AutoWalkPacket !== "function") {
+  // The current client keeps AutoWalk's constructor module-scoped. The adaptive
+  // observer learns it from a genuine packet emitted by native client pathing.
+  if (typeof window.AutoWalkPacket !== "function") {
     window.AutoWalkPacket = function AutoWalkPacket(directions) {
-      return new NativeAutoWalkPacket(directions);
+      const adaptivePacket = window.__minibiaBotAdaptive?.createAutoWalkPacket?.(directions);
+      if (adaptivePacket) return adaptivePacket;
+      if (typeof NativeAutoWalkPacket === "function") return new NativeAutoWalkPacket(directions);
+      throw new Error("Native AutoWalk packet has not been observed yet. Use the game's normal click-to-walk once, then retry.");
     };
   }
 
@@ -363,13 +418,21 @@
     itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
     adaptiveDiscovery: window.__minibiaBotAdaptive?.inspect?.(nativeClient) || null,
     packetDispatchMethod: adaptivePacketDispatch?.key || null,
-    autoWalkAvailable: !!NativeAutoWalkPacket && typeof nativeSend === "function",
-    supportedPackets: ["AutoWalkPacket", "ItemMovePacket"],
-    itemMoveAvailable: typeof nativeSend === "function" && Number.isInteger(thingMoveOpcode),
+    get autoWalkAvailable() {
+      return typeof nativeSend === "function" &&
+        (typeof window.__minibiaBotAdaptive?.getAutoWalkConstructor?.() === "function" ||
+         typeof NativeAutoWalkPacket === "function");
+    },
+    supportedPackets: ["AutoWalkPacket"],
+    itemMoveAvailable: false,
+    chatManagerAvailable: !!nativeChatManager,
+    hotbarManagerAvailable: !!nativeHotbarManager,
+    mouseAvailable: !!nativeMouse,
     sendItemMove,
     sendAutoWalk(packet) {
-      if (!NativeAutoWalkPacket || typeof nativeSend !== "function" ||
-          !(packet instanceof NativeAutoWalkPacket)) return false;
+      const adaptiveMatch = window.__minibiaBotAdaptive?.isAutoWalkPacket?.(packet) === true;
+      const legacyMatch = typeof NativeAutoWalkPacket === "function" && packet instanceof NativeAutoWalkPacket;
+      if ((!adaptiveMatch && !legacyMatch) || typeof nativeSend !== "function") return false;
       nativeSend.call(nativeClient, packet);
       return true;
     }
