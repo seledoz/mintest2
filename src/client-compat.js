@@ -184,6 +184,22 @@
   });
 
   // Resolve UI/input managers by their runtime shape instead of stale scrambled keys.
+  const getDataProperty = (object, property) => {
+    let current = object;
+    for (let depth = 0; current && depth < 4; depth += 1) {
+      try {
+        const descriptor = Object.getOwnPropertyDescriptor(current, property);
+        if (descriptor) {
+          return Object.prototype.hasOwnProperty.call(descriptor, "value")
+            ? descriptor.value
+            : undefined;
+        }
+        current = Object.getPrototypeOf(current);
+      } catch (_) { return undefined; }
+    }
+    return undefined;
+  };
+
   const findNestedObject = (root, predicate, maxDepth = 6) => {
     const queue = [{ value: root, depth: 0 }];
     const seen = new Set();
@@ -217,15 +233,23 @@
 
   const nativeUi = (() => { try { return nativeClient.kYgIgXceQLD || null; } catch (_) { return null; } })();
   const nativeChatManager =
-    findNestedObject(nativeClient, candidate =>
-      typeof candidate.HVtvgeiqmk === "function" ||
-      (Array.isArray(candidate.channels) && candidate.channels.some(channel => Array.isArray(channel?.__contents)))
-    ) || nativeUi?.uVvWDBBxDT || null;
+    findNestedObject(nativeClient, candidate => {
+      const sendText = getDataProperty(candidate, "HVtvgeiqmk");
+      const channels = getDataProperty(candidate, "channels");
+      return typeof sendText === "function" ||
+        (Array.isArray(channels) && channels.some(channel =>
+          Array.isArray(getDataProperty(channel, "__contents"))
+        ));
+    }) || nativeUi?.uVvWDBBxDT || null;
   const nativeHotbarManager =
-    findNestedObject(nativeClient, candidate =>
-      Array.isArray(candidate.slots) &&
-      candidate.slots.some(slot => !!slot?.canvas?.canvas && typeof slot.canvas.canvas.click === "function")
-    ) || nativeUi?.RocGUBNConYq || null;
+    findNestedObject(nativeClient, candidate => {
+      const slots = getDataProperty(candidate, "slots");
+      return Array.isArray(slots) && slots.some(slot => {
+        const canvas = getDataProperty(slot, "canvas");
+        const element = getDataProperty(canvas, "canvas");
+        return !!element && typeof element.click === "function";
+      });
+    }) || nativeUi?.RocGUBNConYq || null;
   const nativeMouse = (() => {
     try {
       return nativeClient.mouse ||
