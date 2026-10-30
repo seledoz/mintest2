@@ -106,7 +106,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
   function isMonsterReachable(monster) {
     if (!monster) return false;
     const playerPosition = normalizePosition(bot.getPlayerPosition?.());
-    const targetPosition = normalizePosition(monster?.getPosition?.() || monster?.__position);
+    const targetPosition = normalizePosition(monster?.__position || monster?.getPosition?.());
 
     // The native pathfinder does not reliably expose route results to this
     // module. An empty path can mean "unknown", not "unreachable". Do not
