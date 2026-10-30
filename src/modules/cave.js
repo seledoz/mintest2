@@ -300,8 +300,14 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     return null;
   }
 
+  // Known Minibia damage-field item IDs. Keep these as a fallback because
+  // the current client may expose server IDs on tile things while its
+  // compatibility bridge only indexes item definitions by client ID.
+  const DAMAGE_FIELD_ITEM_IDS = new Set([2123, 2124, 2125, 2127]);
+
   function isDamageFieldTile(tile) {
     return getTileThings(tile).some((thing) => {
+      if (DAMAGE_FIELD_ITEM_IDS.has(Number(thing?.id))) return true;
       // Match fields by their item definitions rather than hard-coded IDs.
       const properties = getThingDefinition(thing?.id)?.properties || {};
       const fieldType = String(properties.field || properties.name || "").trim().toLowerCase();
