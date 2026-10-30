@@ -13,6 +13,7 @@ window.__minibiaBotBundle.installEquipRingModule = function installEquipRingModu
     timerId: null,
     lastEquipAt: 0,
     lastUnequipAt: 0,
+    lastCompatWarningAt: 0,
   };
   let resumeListenersAttached = false;
 
@@ -31,6 +32,20 @@ window.__minibiaBotBundle.installEquipRingModule = function installEquipRingModu
 
   function persistConfig() {
     bot.storage.set(configStorageKey, { ...config });
+  }
+
+  function sendItemMove(from, to, count) {
+    const compat = window.__minibiaBotClientCompat;
+    if (typeof compat?.sendItemMove === "function" && compat.sendItemMove(from, to, count)) {
+      return true;
+    }
+
+    const now = Date.now();
+    if (now - state.lastCompatWarningAt >= 15000) {
+      state.lastCompatWarningAt = now;
+      bot.log("equip ring: native item-move adapter unavailable or rejected the move");
+    }
+    return false;
   }
 
   function getEquipment() {
@@ -176,7 +191,7 @@ window.__minibiaBotBundle.installEquipRingModule = function installEquipRingModu
     const to = { which: destination.container, index: destination.slotIndex };
     const count = (typeof equippedRing.getCount === "function" ? equippedRing.getCount() : equippedRing.count) || 1;
 
-    window.gameClient.send(new ItemMovePacket(from, to, count));
+    if (!sendItemMove(from, to, count)) return false;
     state.lastUnequipAt = now;
     bot.log("unequipped ring in protection zone", {
       name: getItemName(equippedRing),
@@ -232,7 +247,7 @@ window.__minibiaBotBundle.installEquipRingModule = function installEquipRingModu
     };
     const count = source.count || 1;
 
-    window.gameClient.send(new ItemMovePacket(from, to, count));
+    if (!sendItemMove(from, to, count)) return false;
     state.lastEquipAt = now;
     bot.log("equipped ring", {
       name: source.name,
