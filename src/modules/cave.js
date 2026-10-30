@@ -432,7 +432,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
   function sendDamageFieldAutoWalk(path, from, goal, now = Date.now()) {
     if (!Array.isArray(path) || path.length < 2 ||
         typeof AutoWalkPacket !== "function" || typeof Position !== "function" ||
-        typeof window.gameClient?.send !== "function") return false;
+        typeof window.__minibiaBotClientCompat?.sendAutoWalk !== "function") return false;
     try {
       const directions = [];
       for (let index = 1; index < path.length; index += 1) {
@@ -444,7 +444,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
         directions.push(Number(direction));
       }
       if (!directions.length) return false;
-      window.gameClient?.send?.(new AutoWalkPacket(directions));
+      if (!window.__minibiaBotClientCompat.sendAutoWalk(new AutoWalkPacket(directions))) return false;
       state.lastPathAt = now;
       bot.log("cave following damage-field AutoWalkPacket route", {
         from, to: goal, steps: directions.length, segmented: true
