@@ -1,8 +1,8 @@
 // Adaptive Minibia client compatibility discovery.
-// This module only inspects client objects and function source. It never invokes
-// unknown methods or sends probe packets.
+// Uses passive structural inspection and observes only packets the native game sends.
+// It never calls unknown methods or injects probe packets.
 (() => {
-  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 2) return;
+  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 3) return;
 
   const ownDataValues = (object, maxDepth = 3) => {
     const values = [];
@@ -45,7 +45,6 @@
 
   const resolveClient = (seed) => {
     if (isClientLike(seed)) return seed;
-    // Global data descriptors only: do not invoke getters during discovery.
     let keys = [];
     try { keys = Object.getOwnPropertyNames(window); } catch (_) {}
     for (const key of keys) {
@@ -76,9 +75,7 @@
     if (!world) return null;
     const direct = ownDataValues(world, 3).find(x => isPathfinderLike(x.value));
     if (direct) return direct.value;
-    // A world accessor may expose the world object without a data property.
-    const worldValues = ownDataValues(client, 3).map(x => x.value);
-    for (const candidateWorld of worldValues) {
+    for (const candidateWorld of ownDataValues(client, 3).map(x => x.value)) {
       if (!candidateWorld || typeof candidateWorld !== "object") continue;
       const found = ownDataValues(candidateWorld, 3).find(x => isPathfinderLike(x.value));
       if (found) return found.value;
@@ -86,14 +83,26 @@
     return null;
   };
 
+  let cachedClient = null;
+  let cachedDispatch = null;
+  const unwrapDispatch = (fn) => {
+    let current = fn;
+    for (let i = 0; i < 3 && typeof current === "function"; i += 1) {
+      let original;
+      try { original = Object.getOwnPropertyDescriptor(current, "__minibiaAdaptiveOriginal")?.value; } catch (_) {}
+      if (typeof original !== "function") break;
+      current = original;
+    }
+    return current;
+  };
+
   const resolvePacketDispatch = (client) => {
     if (!client) return null;
+    if (cachedClient === client && cachedDispatch) return cachedDispatch;
     const methods = ownDataValues(client, 4).filter(x => typeof x.value === "function");
     for (const candidate of methods) {
-      const source = safeSource(candidate.value);
-      // Find a thin client method that forwards its packet argument into a
-      // nested network-manager method. Then verify the nested method looks
-      // like the actual serializer/socket sender.
+      const callable = unwrapDispatch(candidate.value);
+      const source = safeSource(callable);
       const match = source.match(/this\[['"]([^'"]+)['"]\]\[['"]([^'"]+)['"]\]\(/);
       if (!match) continue;
       let manager;
@@ -106,14 +115,17 @@
           /getBuffer/.test(senderSource) &&
           /socket/.test(senderSource) &&
           /send/.test(senderSource)) {
-        return {
+        cachedClient = client;
+        cachedDispatch = {
           key: candidate.key,
+          verifiedBy: "client-forwarder-to-network-serializer",
           call: (packet) => {
             const activeMethod = client[candidate.key];
-            return (typeof activeMethod === "function" ? activeMethod : candidate.value).call(client, packet);
-          },
-          verifiedBy: "client-forwarder-to-network-serializer"
+            const callableNow = typeof activeMethod === "function" ? activeMethod : candidate.value;
+            return callableNow.call(client, packet);
+          }
         };
+        return cachedDispatch;
       }
     }
     return null;
@@ -123,6 +135,7 @@
   let observedAutoWalkConstructorName = null;
   let packetObserverInstalled = false;
   let packetObserverError = null;
+  const observedPacketTypes = [];
 
   const resolveAutoWalkConstructorName = (pathfinder) => {
     if (!pathfinder) return null;
@@ -130,32 +143,52 @@
       if (typeof entry.value !== "function") continue;
       const source = safeSource(entry.value);
       if (!source.includes("DMHavyabcUhA")) continue;
+      const direct = source.match(/DMHavyabcUhA\s*\(\s*new\s+([A-Za-z_$][\w$]*)\s*\(/);
+      if (direct) return direct[1];
       const matches = [...source.matchAll(/new\s+([A-Za-z_$][\w$]*)\s*\(/g)];
       if (matches.length) return matches[matches.length - 1][1];
     }
     return null;
   };
 
-  const installPacketObserver = (client, dispatch, pathfinder) => {
+  const installPacketObserver = (client, dispatch) => {
     if (!client || !dispatch) return false;
-    const constructorName = resolveAutoWalkConstructorName(pathfinder || resolvePathfinder(client));
-    observedAutoWalkConstructorName = constructorName || observedAutoWalkConstructorName;
-    if (packetObserverInstalled) return true;
+    if (packetObserverInstalled && cachedClient === client) return true;
     try {
       const key = dispatch.key;
-      const original = client[key];
-      if (typeof original !== "function") throw new Error("Native packet dispatcher is no longer callable");
+      const current = client[key];
+      if (typeof current !== "function") throw new Error("Native packet dispatcher is not callable");
+      if (current.__minibiaAdaptiveObserver === true) {
+        packetObserverInstalled = true;
+        return true;
+      }
+      const original = unwrapDispatch(current);
       const wrapper = function minibiaAdaptivePacketObserver(packet) {
         try {
+          if (!observedAutoWalkConstructorName) {
+            observedAutoWalkConstructorName = resolveAutoWalkConstructorName(resolvePathfinder(client));
+          }
           const ctor = packet && packet.constructor;
-          if (ctor && typeof ctor === "function" &&
-              observedAutoWalkConstructorName &&
-              ctor.name === observedAutoWalkConstructorName) {
-            observedAutoWalkConstructor = ctor;
+          if (ctor && typeof ctor === "function") {
+            if (observedAutoWalkConstructorName && ctor.name === observedAutoWalkConstructorName) {
+              observedAutoWalkConstructor = ctor;
+            }
+            const packetName = ctor.name || "(anonymous)";
+            if (!observedPacketTypes.some(x => x.name === packetName)) {
+              observedPacketTypes.push({
+                name: packetName,
+                ownFields: ownDataValues(packet, 1).map(x => x.key).slice(0, 16)
+              });
+              if (observedPacketTypes.length > 30) observedPacketTypes.shift();
+            }
           }
         } catch (_) {}
         return original.apply(this, arguments);
       };
+      Object.defineProperties(wrapper, {
+        __minibiaAdaptiveObserver: { value: true },
+        __minibiaAdaptiveOriginal: { value: original }
+      });
       Object.defineProperty(client, key, {
         configurable: true,
         enumerable: false,
@@ -176,18 +209,21 @@
     return new observedAutoWalkConstructor(directions);
   };
 
-  const isAutoWalkPacket = (packet) => {
-    return !!packet && typeof observedAutoWalkConstructor === "function" &&
-      packet.constructor === observedAutoWalkConstructor;
-  };
+  const isAutoWalkPacket = (packet) => !!packet &&
+    typeof observedAutoWalkConstructor === "function" &&
+    packet.constructor === observedAutoWalkConstructor;
 
   const inspect = (seed) => {
     const client = resolveClient(seed);
     const world = (() => { try { return client?.world || null; } catch (_) { return null; } })();
     const pathfinder = resolvePathfinder(client);
     const packetDispatch = resolvePacketDispatch(client);
-    const observerInstalled = installPacketObserver(client, packetDispatch, pathfinder);
+    const observerInstalled = installPacketObserver(client, packetDispatch);
+    if (!observedAutoWalkConstructorName) {
+      observedAutoWalkConstructorName = resolveAutoWalkConstructorName(pathfinder);
+    }
     return {
+      version: 3,
       clientFound: !!client,
       worldFound: !!world,
       pathfinderFound: !!pathfinder,
@@ -197,6 +233,7 @@
       packetObserverError,
       autoWalkConstructorName: observedAutoWalkConstructorName,
       autoWalkConstructorCaptured: typeof observedAutoWalkConstructor === "function",
+      observedPacketTypes: observedPacketTypes.slice(),
       capabilities: {
         player: !!client?.player,
         world: !!world,
@@ -207,17 +244,23 @@
     };
   };
 
-  window.__minibiaBotAdaptive = {
+  const api = {
     installed: true,
-    version: 2,
+    version: 3,
     resolveClient,
     resolvePathfinder,
     resolvePacketDispatch,
     createAutoWalkPacket,
     isAutoWalkPacket,
     getAutoWalkConstructor: () => observedAutoWalkConstructor,
+    getObservedPacketTypes: () => observedPacketTypes.slice(),
     inspect,
+    refresh: inspect,
     safeSource
   };
-  console.info("[minibia-bot] adaptive client discovery installed");
+  window.__minibiaBotAdaptive = api;
+  // Install the observer as early as possible. If the world/pathfinder is not
+  // ready yet, the wrapper resolves its pathfinder lazily on the first packet.
+  try { inspect(); } catch (_) {}
+  console.info("[minibia-bot] adaptive client discovery v3 installed");
 })();
