@@ -130,7 +130,6 @@
       if (typeof entry.value !== "function") continue;
       const source = safeSource(entry.value);
       if (!source.includes("DMHavyabcUhA")) continue;
-      if (!source.includes("__isAutoWalking") && !source.includes("__pathfindCache")) continue;
       const matches = [...source.matchAll(/new\s+([A-Za-z_$][\w$]*)\s*\(/g)];
       if (matches.length) return matches[matches.length - 1][1];
     }
