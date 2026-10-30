@@ -3,6 +3,7 @@
   const ref = "main";
   const rawBaseUrl = `https://raw.githubusercontent.com/${repository}/${ref}`;
   const sourceFiles = [
+    "src/client-compat.js",
     "src/version.js",
     "src/core.js",
     "src/modules/pz.js",
