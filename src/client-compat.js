@@ -395,6 +395,6 @@
     worldAvailable: !!resolveWorld(),
     pathfinderAvailable: !!resolvePathfinder(),
     itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
-    autoWalkAvailable: !!NativeAutoWalkPacket && typeof nativeSend === "function"
+    autoWalkAvailable: typeof nativeSend === "function" && (typeof window.__minibiaBotAdaptive?.getAutoWalkConstructor?.() === "function" || typeof NativeAutoWalkPacket === "function")
   });
 })();
