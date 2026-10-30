@@ -305,15 +305,18 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
   // compatibility bridge only indexes item definitions by client ID.
   const DAMAGE_FIELD_ITEM_IDS = new Set([2123, 2124, 2125, 2127]);
 
+  function isDamageFieldThing(thing) {
+    if (!thing) return false;
+    if (DAMAGE_FIELD_ITEM_IDS.has(Number(thing.id))) return true;
+    // Match fields by their item definitions rather than hard-coded IDs.
+    const properties = getThingDefinition(thing.id)?.properties || {};
+    const fieldType = String(properties.field || properties.name || "").trim().toLowerCase();
+    return String(properties.type || "").trim().toLowerCase() === "magicfield" &&
+      ["poison", "fire", "energy", "poison field", "fire field", "energy field"].includes(fieldType);
+  }
+
   function isDamageFieldTile(tile) {
-    return getTileThings(tile).some((thing) => {
-      if (DAMAGE_FIELD_ITEM_IDS.has(Number(thing?.id))) return true;
-      // Match fields by their item definitions rather than hard-coded IDs.
-      const properties = getThingDefinition(thing?.id)?.properties || {};
-      const fieldType = String(properties.field || properties.name || "").trim().toLowerCase();
-      return String(properties.type || "").trim().toLowerCase() === "magicfield" &&
-        ["poison", "fire", "energy", "poison field", "fire field", "energy field"].includes(fieldType);
-    });
+    return getTileThings(tile).some(isDamageFieldThing);
   }
 
   function getAStarWalkabilityMatrix(position, z) {
@@ -332,17 +335,21 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
           if (!tile?.__position || tile.__position.z !== z) continue;
           const key = `${tile.__position.x},${tile.__position.y}`;
           const damageField = isDamageFieldTile(tile) && !isFloorChangeTile(tile);
-          // Let damage fields remain traversable, but never let them override
-          // blocking map objects such as walls or other impassable items.
+          const hasWalkableGround = tile.id !== 0 && !isFloorChangeTile(tile);
           const hasBlockingItem = typeof tile.isItemBlocked === "function"
             ? tile.isItemBlocked()
             : false;
-          const hasWalkableGround = tile.id !== 0 && !isFloorChangeTile(tile);
           const walkable = hasWalkableGround &&
             (tile.isWalkable ? tile.isWalkable() : false) &&
             !hasBlockingItem;
-          const fieldTraversable = damageField && hasWalkableGround &&
-            !hasBlockingItem;
+
+          // The native tile-level blocker includes magic fields themselves.
+          // For a field tile, ignore that aggregate blocker only when every
+          // item on the tile is a recognized damage field. Any other item
+          // keeps the tile blocked, so walls/objects are still routed around.
+          const tileItems = Array.isArray(tile.items) ? tile.items.filter(Boolean) : [];
+          const hasNonFieldItem = tileItems.some((item) => !isDamageFieldThing(item));
+          const fieldTraversable = damageField && hasWalkableGround && !hasNonFieldItem;
           matrix.set(key, fieldTraversable || walkable);
         }
       }
