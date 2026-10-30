@@ -116,22 +116,91 @@
     return null;
   };
 
+  let observedAutoWalkConstructor = null;
+  let observedAutoWalkConstructorName = null;
+  let packetObserverInstalled = false;
+  let packetObserverError = null;
+
+  const resolveAutoWalkConstructorName = (pathfinder) => {
+    if (!pathfinder) return null;
+    for (const entry of ownDataValues(pathfinder, 3)) {
+      if (typeof entry.value !== "function") continue;
+      const source = safeSource(entry.value);
+      if (!source.includes("DMHavyabcUhA")) continue;
+      if (!source.includes("__isAutoWalking") && !source.includes("__pathfindCache")) continue;
+      const matches = [...source.matchAll(/new\\s+([A-Za-z_$][\\w$]*)\\s*\\(/g)];
+      if (matches.length) return matches[matches.length - 1][1];
+    }
+    return null;
+  };
+
+  const installPacketObserver = (client, dispatch, pathfinder) => {
+    if (!client || !dispatch) return false;
+    const constructorName = resolveAutoWalkConstructorName(pathfinder || resolvePathfinder(client));
+    observedAutoWalkConstructorName = constructorName || observedAutoWalkConstructorName;
+    if (packetObserverInstalled) return true;
+    try {
+      const key = dispatch.key;
+      const original = client[key];
+      if (typeof original !== "function") throw new Error("Native packet dispatcher is no longer callable");
+      const wrapper = function minibiaAdaptivePacketObserver(packet) {
+        try {
+          const ctor = packet && packet.constructor;
+          if (ctor && typeof ctor === "function" &&
+              observedAutoWalkConstructorName &&
+              ctor.name === observedAutoWalkConstructorName) {
+            observedAutoWalkConstructor = ctor;
+          }
+        } catch (_) {}
+        return original.apply(this, arguments);
+      };
+      Object.defineProperty(client, key, {
+        configurable: true,
+        enumerable: false,
+        writable: true,
+        value: wrapper
+      });
+      packetObserverInstalled = client[key] === wrapper;
+      if (!packetObserverInstalled) throw new Error("Could not install passive packet observer");
+      return true;
+    } catch (error) {
+      packetObserverError = String(error?.message || error);
+      return false;
+    }
+  };
+
+  const createAutoWalkPacket = (directions) => {
+    if (typeof observedAutoWalkConstructor !== "function") return null;
+    return new observedAutoWalkConstructor(directions);
+  };
+
+  const isAutoWalkPacket = (packet) => {
+    return !!packet && typeof observedAutoWalkConstructor === "function" &&
+      packet.constructor === observedAutoWalkConstructor;
+  };
+
   const inspect = (seed) => {
     const client = resolveClient(seed);
     const world = (() => { try { return client?.world || null; } catch (_) { return null; } })();
     const pathfinder = resolvePathfinder(client);
     const packetDispatch = resolvePacketDispatch(client);
+    const observerInstalled = installPacketObserver(client, packetDispatch, pathfinder);
     return {
       clientFound: !!client,
       worldFound: !!world,
       pathfinderFound: !!pathfinder,
       packetDispatchFound: !!packetDispatch,
       packetDispatchMethod: packetDispatch?.key || null,
+      packetObserverInstalled: observerInstalled,
+      packetObserverError,
+      autoWalkConstructorName: observedAutoWalkConstructorName,
+      autoWalkConstructorCaptured: typeof observedAutoWalkConstructor === "function",
       capabilities: {
         player: !!client?.player,
         world: !!world,
         pathfinding: !!pathfinder,
-        nativePacketDispatch: !!packetDispatch
+        nativePacketDispatch: !!packetDispatch,
+        autoWalkPacketConstruction: typeof observedAutoWalkConstructor === "function"
       }
     };
   };
@@ -142,6 +211,8 @@
     resolveClient,
     resolvePathfinder,
     resolvePacketDispatch,
+    createAutoWalkPacket,
+    isAutoWalkPacket,
     inspect,
     safeSource
   };
