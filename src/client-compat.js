@@ -148,6 +148,85 @@
     };
   }
 
+  // The current client keeps ItemMovePacket inside its module scope, so it
+  // is not available as a window/global constructor. Recreate the verified
+  // THING_MOVE wire layout and pass only its getBuffer() interface to the
+  // native sender. Container moves use: kind=0, reserved uint16=0,
+  // containerId uint32, slot uint8. The packet ends with count uint8 and
+  // the source item's id uint16 (the client includes this for slot checking).
+  let NativeConst = null;
+  try {
+    NativeConst = eval("typeof CONST !== 'undefined' ? CONST : null");
+  } catch (error) {}
+
+  const thingMoveOpcode = Number(NativeConst?.PROTOCOL?.CLIENT?.THING_MOVE);
+
+  function writeUInt16LE(buffer, offset, value) {
+    buffer[offset] = value & 0xff;
+    buffer[offset + 1] = (value >>> 8) & 0xff;
+    return offset + 2;
+  }
+
+  function writeUInt32LE(buffer, offset, value) {
+    buffer[offset] = value & 0xff;
+    buffer[offset + 1] = (value >>> 8) & 0xff;
+    buffer[offset + 2] = (value >>> 16) & 0xff;
+    buffer[offset + 3] = (value >>> 24) & 0xff;
+    return offset + 4;
+  }
+
+  function writeContainerSlot(buffer, offset, reference) {
+    const container = reference?.which;
+    const index = Number(reference?.index);
+    const containerId = Number(container?.__containerId);
+
+    // Equip Ring only moves between equipment and backpack containers.
+    // Reject tiles and unknown location types rather than guessing a format.
+    if (!container || container.constructor?.name === "Tile" ||
+        !Number.isInteger(containerId) || containerId < 0 ||
+        containerId > 0xffffffff || !Number.isInteger(index) ||
+        index < 0 || index > 0xff) {
+      return -1;
+    }
+
+    buffer[offset++] = 0;
+    offset = writeUInt16LE(buffer, offset, 0);
+    offset = writeUInt32LE(buffer, offset, containerId);
+    buffer[offset++] = index;
+    return offset;
+  }
+
+  function sendItemMove(from, to, count) {
+    if (typeof nativeSend !== "function" ||
+        !Number.isInteger(thingMoveOpcode) || thingMoveOpcode < 0 ||
+        thingMoveOpcode > 0xff) return false;
+
+    const amount = Number(count);
+    if (!Number.isInteger(amount) || amount < 1 || amount > 0xff) return false;
+
+    const sourceItem = from?.which?.peekItem?.(from.index) ??
+      from?.which?.getSlotItem?.(from.index) ?? null;
+    const sourceItemId = Number(sourceItem?.id);
+    if (!sourceItem || !Number.isInteger(sourceItemId) ||
+        sourceItemId < 0 || sourceItemId > 0xffff) return false;
+
+    // Opcode + two 8-byte container references + count + source item id.
+    const buffer = new Uint8Array(20);
+    let offset = 0;
+    buffer[offset++] = thingMoveOpcode;
+    offset = writeContainerSlot(buffer, offset, from);
+    if (offset < 0) return false;
+    offset = writeContainerSlot(buffer, offset, to);
+    if (offset < 0) return false;
+    buffer[offset++] = amount;
+    offset = writeUInt16LE(buffer, offset, sourceItemId);
+    if (offset !== buffer.length) return false;
+
+    // Native NetworkManager.send only consumes packet.getBuffer().
+    nativeSend.call(nativeClient, { getBuffer: () => buffer });
+    return true;
+  }
+
   const nativeSend = nativeClient.aWSxdABvSpX;
   window.__minibiaBotClientCompat = {
     installed: true,
@@ -160,7 +239,9 @@
     get pathfinderAvailable() { return !!resolvePathfinder(); },
     itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
     autoWalkAvailable: !!NativeAutoWalkPacket && typeof nativeSend === "function",
-    supportedPackets: ["AutoWalkPacket"],
+    supportedPackets: ["AutoWalkPacket", "ItemMovePacket"],
+    itemMoveAvailable: typeof nativeSend === "function" && Number.isInteger(thingMoveOpcode),
+    sendItemMove,
     sendAutoWalk(packet) {
       if (!NativeAutoWalkPacket || typeof nativeSend !== "function" ||
           !(packet instanceof NativeAutoWalkPacket)) return false;
