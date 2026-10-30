@@ -216,6 +216,7 @@
     resolvePacketDispatch,
     createAutoWalkPacket,
     isAutoWalkPacket,
+    getAutoWalkConstructor: () => observedAutoWalkConstructor,
     inspect,
     safeSource
   };
