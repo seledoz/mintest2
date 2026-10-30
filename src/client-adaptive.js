@@ -2,7 +2,7 @@
 // This module only inspects client objects and function source. It never invokes
 // unknown methods or sends probe packets.
 (() => {
-  if (window.__minibiaBotAdaptive?.installed) return;
+  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 2) return;
 
   const ownDataValues = (object, maxDepth = 3) => {
     const values = [];
@@ -209,7 +209,7 @@
 
   window.__minibiaBotAdaptive = {
     installed: true,
-    version: 1,
+    version: 2,
     resolveClient,
     resolvePathfinder,
     resolvePacketDispatch,
