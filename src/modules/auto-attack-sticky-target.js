@@ -18,10 +18,20 @@ window.__minibiaBotBundle.installAutoAttackStickyTargetModule = function install
     return typeof bot.attackPriority?.getPriorityIndex === "function" ? bot.attackPriority.getPriorityIndex(monster) : -1;
   }
   function selectTarget(target) {
-    if (!target || !window.gameClient?.player || typeof window.gameClient.send !== "function" || typeof TargetPacket !== "function") return false;
-    window.gameClient.player.setTarget(target);
-    window.gameClient.send(new TargetPacket(target.id));
-    return true;
+    const client = window.__minibiaBotClientCompat?.nativeClient || window.gameClient;
+    const nativeAttack = client?.world?.RKjzQVbLLo;
+    if (!target || typeof nativeAttack !== "function") return false;
+    try {
+      // Use the same native attack path as the game's right-click targeting.
+      nativeAttack.call(client.world, new Set([target]));
+      return true;
+    } catch (error) {
+      bot.log?.("sticky target native attack failed", {
+        targetId: target.id,
+        error: error?.message || error,
+      });
+      return false;
+    }
   }
   function rememberCurrentTarget() {
     const current = getCurrentTarget();
