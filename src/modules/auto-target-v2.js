@@ -103,43 +103,16 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     }
   }
 
-  function isMonsterReachable(monster, now = Date.now()) {
+  function isMonsterReachable(monster) {
     if (!monster) return false;
     const playerPosition = normalizePosition(bot.getPlayerPosition?.());
     const targetPosition = normalizePosition(monster?.getPosition?.() || monster?.__position);
-    if (!playerPosition || !targetPosition || playerPosition.z !== targetPosition.z) return false;
 
-    pruneCaches(now);
-
-    const targetKey = getPositionKey(targetPosition);
-    const playerKey = getPositionKey(playerPosition);
-    const id = monster?.id;
-    const skipped = id != null ? state.unreachableTargets.get(id) : null;
-    if (skipped && skipped.positionKey === targetKey && skipped.until > now) return false;
-    if (skipped && skipped.positionKey !== targetKey) state.unreachableTargets.delete(id);
-
-    const cacheKey = `${playerKey}|${id ?? "no-id"}|${targetKey}`;
-    const cached = state.reachabilityCache.get(cacheKey);
-    if (cached && now - cached.at <= Math.max(100, Number(config.reachabilityCacheMs) || 350)) {
-      return cached.reachable;
-    }
-
-    const reachable = !!findReachableAdjacentPosition(targetPosition, playerPosition);
-    state.reachabilityCache.set(cacheKey, { reachable, at: now });
-
-    if (!reachable && id != null) {
-      state.unreachableTargets.set(id, {
-        until: now + Math.max(500, Number(config.unreachableSkipMs) || 4000),
-        positionKey: targetKey,
-      });
-      bot.logDebug?.("auto target v2 filtered unreachable monster", {
-        id,
-        name: monster?.name || "Mob",
-        position: targetPosition,
-      });
-    }
-
-    return reachable;
+    // The native pathfinder does not reliably expose route results to this
+    // module. An empty path can mean "unknown", not "unreachable". Do not
+    // remove visible same-floor monsters from Auto Attack based on that result;
+    // the original combat engine remains responsible for movement and chase.
+    return !!playerPosition && !!targetPosition && playerPosition.z === targetPosition.z;
   }
 
   function getRawVisibleMonsters(options = { sameFloorOnly: true }) {
