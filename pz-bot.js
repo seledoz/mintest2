@@ -1,6 +1,6 @@
 (() => {
   const repository = "seledoz/mintest2";
-  const ref = "main";
+  const ref = "feature/client-adaptive-compat";
   const rawBaseUrl = `https://raw.githubusercontent.com/${repository}/${ref}`;
   const sourceFiles = [
     "src/client-adaptive.js",
