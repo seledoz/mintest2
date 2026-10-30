@@ -308,10 +308,17 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
   function isDamageFieldThing(thing) {
     if (!thing) return false;
     if (DAMAGE_FIELD_ITEM_IDS.has(Number(thing.id))) return true;
-    // Match fields by their item definitions rather than hard-coded IDs.
-    const properties = getThingDefinition(thing.id)?.properties || {};
-    const fieldType = String(properties.field || properties.name || "").trim().toLowerCase();
-    return String(properties.type || "").trim().toLowerCase() === "magicfield" &&
+    // Some updated-client tile things carry their SID while the definition
+    // table is keyed by CID. getThingDefinition resolves both identifiers.
+    const definition = getThingDefinition(thing.id) || thing.definition || thing;
+    const properties = definition?.properties || thing.properties || {};
+    const fieldType = String(
+      properties.field || properties.name || definition?.name || thing.name || ""
+    ).trim().toLowerCase();
+    const thingType = String(properties.type || definition?.type || thing.type || "")
+      .trim().toLowerCase();
+    return (thingType === "magicfield" ||
+      ["poison field", "fire field", "energy field"].includes(fieldType)) &&
       ["poison", "fire", "energy", "poison field", "fire field", "energy field"].includes(fieldType);
   }
 
@@ -716,9 +723,53 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     return window.gameClient?.world?.getTileFromWorldPosition?.(new Position(position.x, position.y, position.z)) || null;
   }
   function getTilePosition(tile) { return normalizePosition(tile?.__position); }
+  let thingDefinitionTableRef = null;
+  let thingDefinitionByAnyId = null;
+
   function getThingDefinition(itemId) {
-    if (!itemId) return null;
-    return window.gameClient?.itemDefinitionsByCid?.[itemId] || window.gameClient?.itemDefinitionsBySid?.[itemId] || window.gameClient?.itemDefinitions?.[itemId] || null;
+    if (itemId == null || itemId === "") return null;
+    const id = Number(itemId);
+    const byCid = window.gameClient?.itemDefinitionsByCid || null;
+    const bySid = window.gameClient?.itemDefinitionsBySid || null;
+    const definitions = window.gameClient?.itemDefinitions || null;
+
+    // Prefer the client's direct CID/SID indexes.
+    const direct = byCid?.[itemId] || bySid?.[itemId] || definitions?.[itemId];
+    if (direct) return direct;
+
+    // Newer Minibia builds can expose a tile thing's server ID while the
+    // definition table is indexed by client ID. Build a one-time reverse
+    // index so a SID can still resolve to its definition without scanning
+    // the whole table on every cavebot tick.
+    const table = byCid || definitions || bySid;
+    if (!table || typeof table !== "object" || !Number.isFinite(id)) return null;
+    if (thingDefinitionTableRef !== table || !thingDefinitionByAnyId) {
+      const lookup = new Map();
+      for (const [key, definition] of Object.entries(table)) {
+        if (!definition || typeof definition !== "object") continue;
+        const properties = definition.properties || {};
+        const fieldType = String(properties.field || properties.name || definition.name || "").trim().toLowerCase();
+        const isFieldDefinition = String(properties.type || definition.type || "").trim().toLowerCase() === "magicfield" ||
+          ["poison field", "fire field", "energy field"].includes(fieldType);
+        const ids = [key, definition.id, definition.cid, definition.clientId, definition.sid, definition.serverId];
+        for (const value of ids) {
+          if (value == null || value === "") continue;
+          const numericId = Number(value);
+          if (Number.isFinite(numericId)) lookup.set(numericId, definition);
+        }
+        // Keep a marker on the definition so field detection can also use
+        // the reverse SID/CID association when a tile exposes either ID.
+        if (isFieldDefinition) {
+          for (const value of ids) {
+            const numericId = Number(value);
+            if (Number.isFinite(numericId)) lookup.set(numericId, definition);
+          }
+        }
+      }
+      thingDefinitionTableRef = table;
+      thingDefinitionByAnyId = lookup;
+    }
+    return thingDefinitionByAnyId.get(id) || null;
   }
   function getThingName(thing) {
     const definition = getThingDefinition(thing?.id);
