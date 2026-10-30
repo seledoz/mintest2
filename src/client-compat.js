@@ -21,6 +21,9 @@
   const nativePathfinder = nativeWorld?.JRdXiDhlI;
   const nativeItemDefinitions = nativeClient?.TPWhmLyqyrg;
   const nativeSend = nativeClient?.aWSxdABvSpX;
+  const nativeUi = nativeClient?.kYgIgXceQLD;
+  const nativeChatManager = nativeUi?.uVvWDBBxDT;
+  const nativeHotbarManager = nativeUi?.RocGUBNConYq;
 
   if (!nativeClient || !nativeWorld || !nativePathfinder) {
     console.warn("[minibia-bot] client compatibility unavailable: required client/world/pathfinder bindings were not found");
@@ -62,9 +65,32 @@
     }
   });
 
+  // The public UI manager getters are gated in this client build. These
+  // backing instances were verified from the UI manager's own properties.
+  // Keep native chat handling intact (commands, channel selection, PMs, etc.).
+  const channelManager = nativeChatManager ? new Proxy(nativeChatManager, {
+    get(target, property) {
+      if (property === "sendMessageText") {
+        return (message) => {
+          if (typeof target.HVtvgeiqmk !== "function") return false;
+          const text = String(message ?? "").trim();
+          if (!text) return false;
+          target.HVtvgeiqmk(text, undefined, true);
+          return true;
+        };
+      }
+      return bindMethod(target, Reflect.get(target, property, target));
+    }
+  }) : null;
+  const interfaceBridge = {
+    channelManager,
+    hotbarManager: nativeHotbarManager || null
+  };
+
   const clientBridge = new Proxy(nativeClient, {
     get(target, property) {
       if (property === "world") return world;
+      if (property === "interface") return interfaceBridge;
       if (property === "itemDefinitionsByCid" || property === "itemDefinitions") {
         return nativeItemDefinitions || null;
       }
