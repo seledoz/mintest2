@@ -1,5 +1,6 @@
 // Minibia client compatibility bridge for client build 2026-10-30-1003.
-// Keep this file before core.js and all modules in pz-bot.js.
+// Install before core.js and all modules. The native World is created only
+// after server data arrives, so world/pathfinder access must remain lazy.
 (() => {
   if (window.__minibiaBotClientCompat?.installed) return;
 
@@ -8,8 +9,6 @@
   let NativeAutoWalkPacket = null;
 
   try {
-    // The current client exposes these bindings in the global lexical scope,
-    // while its public window.gameClient getter is intentionally gated.
     nativeClient = eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null");
     NativePosition = eval("typeof zeOvojmNkQxY === 'function' ? zeOvojmNkQxY : null");
     NativeAutoWalkPacket = eval("typeof twTOLoGSHp === 'function' ? twTOLoGSHp : null");
@@ -17,56 +16,81 @@
     console.warn("[minibia-bot] client compatibility probe failed", error);
   }
 
-  const nativeWorld = nativeClient?.world;
-  const nativePathfinder = nativeWorld?.JRdXiDhlI;
-  const nativeItemDefinitions = nativeClient?.TPWhmLyqyrg;
-  const nativeSend = nativeClient?.aWSxdABvSpX;
-  const nativeUi = nativeClient?.kYgIgXceQLD;
-  const nativeChatManager = nativeUi?.uVvWDBBxDT;
-  const nativeHotbarManager = nativeUi?.RocGUBNConYq;
-
-  if (!nativeClient || !nativeWorld || !nativePathfinder) {
-    console.warn("[minibia-bot] client compatibility unavailable: required client/world/pathfinder bindings were not found");
-    window.__minibiaBotClientCompat = { installed: false, reason: "missing-client-bindings" };
+  if (!nativeClient) {
+    console.warn("[minibia-bot] client compatibility unavailable: native client binding not found");
+    window.__minibiaBotClientCompat = { installed: false, reason: "missing-client-binding" };
     return;
   }
 
   const bindMethod = (target, value) =>
     typeof value === "function" ? value.bind(target) : value;
 
-  const pathfinder = new Proxy(nativePathfinder, {
-    get(target, property) {
+  const resolveWorld = () => nativeClient.world || null;
+  const resolvePathfinder = () => resolveWorld()?.JRdXiDhlI || null;
+
+  // These proxies intentionally exist before login/world initialization.
+  // Each access resolves the current native instance, avoiding a stale
+  // undefined world captured during early loader startup.
+  const pathfinder = new Proxy({}, {
+    get(_proxy, property) {
+      const target = resolvePathfinder();
+      if (!target) return undefined;
       if (property === "findPath") {
         return (from, destination) => {
-          if (typeof target.jPGVnvNRwfr !== "function") return false;
-          return target.jPGVnvNRwfr(from, destination, true);
+          const current = resolvePathfinder();
+          if (typeof current?.jPGVnvNRwfr !== "function") return false;
+          return current.jPGVnvNRwfr(from, destination, true);
         };
       }
       if (property === "setPathfindCache") {
         return (...args) => {
-          if (typeof target.dHXHTcuFKROf !== "function") return false;
-          return target.dHXHTcuFKROf(...args);
+          const current = resolvePathfinder();
+          if (typeof current?.dHXHTcuFKROf !== "function") return false;
+          return current.dHXHTcuFKROf(...args);
         };
       }
       if (property === "stop") {
         return () => {
-          if (typeof target.dHXHTcuFKROf !== "function") return false;
-          return target.dHXHTcuFKROf(null);
+          const current = resolvePathfinder();
+          if (typeof current?.dHXHTcuFKROf !== "function") return false;
+          return current.dHXHTcuFKROf(null);
         };
       }
       return bindMethod(target, Reflect.get(target, property, target));
+    },
+    set(_proxy, property, value) {
+      const target = resolvePathfinder();
+      if (!target) return false;
+      return Reflect.set(target, property, value, target);
+    },
+    has(_proxy, property) {
+      const target = resolvePathfinder();
+      return !!target && property in target;
     }
   });
 
-  const world = new Proxy(nativeWorld, {
-    get(target, property) {
+  const world = new Proxy({}, {
+    get(_proxy, property) {
       if (property === "pathfinder") return pathfinder;
+      const target = resolveWorld();
+      if (!target) return undefined;
       return bindMethod(target, Reflect.get(target, property, target));
+    },
+    set(_proxy, property, value) {
+      const target = resolveWorld();
+      if (!target) return false;
+      return Reflect.set(target, property, value, target);
+    },
+    has(_proxy, property) {
+      const target = resolveWorld();
+      return !!target && property in target;
     }
   });
 
-  // The public UI manager getters are gated in this client build. These
-  // backing instances were verified from the UI manager's own properties.
+  const nativeUi = nativeClient.kYgIgXceQLD;
+  const nativeChatManager = nativeUi?.uVvWDBBxDT;
+  const nativeHotbarManager = nativeUi?.RocGUBNConYq;
+
   // Keep native chat handling intact (commands, channel selection, PMs, etc.).
   const channelManager = nativeChatManager ? new Proxy(nativeChatManager, {
     get(target, property) {
@@ -82,6 +106,7 @@
       return bindMethod(target, Reflect.get(target, property, target));
     }
   }) : null;
+
   const interfaceBridge = {
     channelManager,
     hotbarManager: nativeHotbarManager || null
@@ -92,20 +117,14 @@
       if (property === "world") return world;
       if (property === "interface") return interfaceBridge;
       if (property === "itemDefinitionsByCid" || property === "itemDefinitions") {
-        return nativeItemDefinitions || null;
+        return target.TPWhmLyqyrg || null;
       }
       if (property === "itemDefinitionsBySid") return null;
-      if (property === "send") {
-        // Do not expose the gated legacy sender. Only sendAutoWalk below is
-        // enabled until each other packet type has been independently verified.
-        return undefined;
-      }
+      if (property === "send") return undefined;
       return bindMethod(target, Reflect.get(target, property, target));
     }
   });
 
-  // Preserve the existing descriptor's configurability/enumerability while
-  // replacing the gated getter with the verified compatibility facade.
   const descriptor = Object.getOwnPropertyDescriptor(window, "gameClient");
   if (!descriptor || descriptor.configurable) {
     Object.defineProperty(window, "gameClient", {
@@ -129,6 +148,7 @@
     };
   }
 
+  const nativeSend = nativeClient.aWSxdABvSpX;
   window.__minibiaBotClientCompat = {
     installed: true,
     build: "2026-10-30-1003",
@@ -136,7 +156,9 @@
     nativeClient,
     world,
     pathfinder,
-    itemDefinitionsAvailable: !!nativeItemDefinitions,
+    get worldAvailable() { return !!resolveWorld(); },
+    get pathfinderAvailable() { return !!resolvePathfinder(); },
+    itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
     autoWalkAvailable: !!NativeAutoWalkPacket && typeof nativeSend === "function",
     supportedPackets: ["AutoWalkPacket"],
     sendAutoWalk(packet) {
@@ -149,7 +171,9 @@
 
   console.info("[minibia-bot] client compatibility bridge installed", {
     build: "2026-10-30-1003",
-    itemDefinitionsAvailable: !!nativeItemDefinitions,
+    worldAvailable: !!resolveWorld(),
+    pathfinderAvailable: !!resolvePathfinder(),
+    itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
     autoWalkAvailable: !!NativeAutoWalkPacket && typeof nativeSend === "function"
   });
 })();
