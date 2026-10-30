@@ -80,12 +80,32 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     return entries.sort(sortHighestHp)[0]?.monster || null;
   }
   function selectTarget(target, reason = "creature priority") {
-    if (!target || !window.gameClient?.player || typeof window.gameClient.send !== "function" || typeof TargetPacket !== "function") return false;
-    window.gameClient.player.setTarget(target);
-    window.gameClient.send(new TargetPacket(target.id));
-    state.lastSelectedTargetId = target.id;
-    bot.log("selected auto attack target", { id: target.id, name: target.name || "Mob", priority: getPriorityIndex(target) >= 0 ? getPriorityIndex(target) + 1 : null, health: Number.isFinite(getCurrentHealth(target)) ? getCurrentHealth(target) : null, reason });
-    return true;
+    // The current client build keeps its attack packet constructor private and
+    // the compatibility bridge intentionally does not expose client.send.
+    // Use the same native attack entry point as Auto Attack and Sticky Target.
+    const client = window.__minibiaBotClientCompat?.nativeClient || window.gameClient;
+    const nativeAttack = client?.world?.RKjzQVbLLo;
+    if (!target || typeof nativeAttack !== "function") return false;
+    try {
+      nativeAttack.call(client.world, new Set([target]));
+      state.lastSelectedTargetId = target.id;
+      bot.log("selected auto attack target", {
+        id: target.id,
+        name: target.name || "Mob",
+        priority: getPriorityIndex(target) >= 0 ? getPriorityIndex(target) + 1 : null,
+        health: Number.isFinite(getCurrentHealth(target)) ? getCurrentHealth(target) : null,
+        reason
+      });
+      return true;
+    } catch (error) {
+      bot.log("creature priority native attack failed", {
+        id: target.id,
+        name: target.name || "Mob",
+        reason,
+        error: error?.message || error
+      });
+      return false;
+    }
   }
   function trySelectPriorityTarget() {
     if (!shouldRun()) return false;
