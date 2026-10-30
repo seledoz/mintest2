@@ -10,7 +10,7 @@
 
   try {
     nativeClient = eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null");
-    NativePosition = eval("typeof zeOvojmNkQxY === 'function' ? zeOvojmNkQxY : null");
+    NativePosition = eval("typeof zeOvojmNkQxY === 'function' ? zeOvojmNkQxY : null") || nativeClient?.player?.__position?.constructor || null;
     NativeAutoWalkPacket = eval("typeof twTOLoGSHp === 'function' ? twTOLoGSHp : null");
   } catch (error) {
     console.warn("[minibia-bot] client compatibility probe failed", error);
@@ -139,8 +139,30 @@
     return;
   }
 
-  if (NativePosition && typeof window.Position !== "function") {
-    window.Position = NativePosition;
+  // Resolve Position from the live player instance as a fallback. In this
+  // client build the class binding is module-scoped and may not be visible
+  // to eval, even though player.__position is an instance of that class.
+  // The getter also handles the bridge loading before the player exists.
+  if (typeof window.Position !== "function") {
+    const positionDescriptor = Object.getOwnPropertyDescriptor(window, "Position");
+    if (!positionDescriptor || positionDescriptor.configurable) {
+      Object.defineProperty(window, "Position", {
+        configurable: true,
+        enumerable: true,
+        get() {
+          if (typeof NativePosition !== "function") {
+            const livePosition = nativeClient?.player?.__position;
+            if (typeof livePosition?.constructor === "function") {
+              NativePosition = livePosition.constructor;
+            }
+          }
+          return NativePosition || undefined;
+        },
+        set(value) {
+          if (typeof value === "function") NativePosition = value;
+        }
+      });
+    }
   }
   if (NativeAutoWalkPacket && typeof window.AutoWalkPacket !== "function") {
     window.AutoWalkPacket = function AutoWalkPacket(directions) {
