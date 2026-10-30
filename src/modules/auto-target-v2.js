@@ -75,7 +75,11 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
 
       try {
         const path = pathfinder.search(startTile, tile);
-        if (Array.isArray(path) && path.length > 0) return candidate;
+        // Some native client builds return a non-array/undefined value when the
+        // pathfinder cannot expose a route result to this module. Treat that as
+        // unknown rather than declaring every visible monster unreachable.
+        if (!Array.isArray(path)) return candidate;
+        if (path.length > 0) return candidate;
       } catch (error) {
         bot.logDebug?.("auto target v2 reachability check failed", {
           targetPosition: target,
