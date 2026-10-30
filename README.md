@@ -10,8 +10,14 @@ fetch("https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js?t=" + D
     if (!response.ok) throw new Error(`MinTest2 loader HTTP ${response.status}`);
     return response.text();
   })
-  .then((code) => (0, eval)(code))
-  .catch((error) => console.error("[minibia-bot] Loader failed", error));
+  .then((code) => {
+    (0, eval)(code);
+    return window.__minibiaBotLoadPromise;
+  })
+  .catch((error) => {
+    console.error("[minibia-bot] Loader failed", error);
+    throw error;
+  });
 ```
 
 This loader installs the adaptive client-discovery layer and compatibility bridge immediately. The bridge can initialize before the world and player are ready, then resolves those objects lazily as the game finishes starting. The browser may display a Promise while the loader fetches the bot; that is normal and is not a load confirmation. A successful load prints a message beginning with [minibia-bot] Loaded source files. After loading, make one ordinary in-game click-to-walk so the passive observer can learn the current client's native AutoWalk packet constructor; it does not send test packets.
