@@ -9,7 +9,11 @@
   let NativeAutoWalkPacket = null;
 
   try {
-    nativeClient = eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null");
+    // The 2026-10-30 client creates its live instance in index.js as
+    // YPXHlIjOD = new AnkOPljisHyL(). The old obfuscated binding
+    // vfdOywKJESRq no longer exists in this build.
+    nativeClient = eval("typeof YPXHlIjOD !== 'undefined' ? YPXHlIjOD : null")
+      || eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null");
     NativePosition = eval("typeof zeOvojmNkQxY === 'function' ? zeOvojmNkQxY : null") || nativeClient?.player?.__position?.constructor || null;
     NativeAutoWalkPacket = eval("typeof twTOLoGSHp === 'function' ? twTOLoGSHp : null");
   } catch (error) {
