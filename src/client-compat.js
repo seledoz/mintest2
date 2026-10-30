@@ -254,8 +254,9 @@
     try {
       return nativeClient.mouse ||
         findNestedObject(nativeClient, candidate =>
-          typeof candidate.__handleItemUseWith === "function" &&
-          (typeof candidate.use === "function" || typeof candidate.move === "function")
+          typeof getDataProperty(candidate, "__handleItemUseWith") === "function" &&
+          (typeof getDataProperty(candidate, "use") === "function" ||
+           typeof getDataProperty(candidate, "move") === "function")
         );
     } catch (_) { return null; }
   })();
