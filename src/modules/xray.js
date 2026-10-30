@@ -103,7 +103,9 @@ window.__minibiaBotBundle.installXrayModule = function installXrayModule(bot) {
     }
 
     return getVisibleCreatures().filter((creature) => {
-      if (creature?.type === 0) {
+      // Only actual monsters (type 1) belong in the monster target list.
+      // NPCs (type 2) must not be offered to Auto Attack.
+      if (creature?.type !== 1) {
         return false;
       }
 
