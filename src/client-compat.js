@@ -10,9 +10,9 @@
   try {
     // The current client exposes these bindings in the global lexical scope,
     // while its public window.gameClient getter is intentionally gated.
-    nativeClient = (0, eval)("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null");
-    NativePosition = (0, eval)("typeof zeOvojmNkQxY === 'function' ? zeOvojmNkQxY : null");
-    NativeAutoWalkPacket = (0, eval)("typeof twTOLoGSHp === 'function' ? twTOLoGSHp : null");
+    nativeClient = eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null");
+    NativePosition = eval("typeof zeOvojmNkQxY === 'function' ? zeOvojmNkQxY : null");
+    NativeAutoWalkPacket = eval("typeof twTOLoGSHp === 'function' ? twTOLoGSHp : null");
   } catch (error) {
     console.warn("[minibia-bot] client compatibility probe failed", error);
   }
