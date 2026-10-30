@@ -30,11 +30,85 @@
     typeof value === "function" ? value.bind(target) : value;
 
   const resolveWorld = () => nativeClient.world || null;
-  const resolvePathfinder = () => resolveWorld()?.JRdXiDhlI || null;
+
+  // The game scrambles public property/method names between client builds.
+  // Identify the native pathfinder by its stable state shape rather than
+  // depending on one obfuscated world property name.
+  const isNativePathfinder = (candidate) => {
+    try {
+      return !!candidate &&
+        Array.isArray(candidate.__pathfindCache) &&
+        typeof candidate.search === "function" &&
+        typeof candidate.getNextMove === "function" &&
+        typeof candidate.__isAutoWalking === "boolean" &&
+        Object.prototype.hasOwnProperty.call(candidate, "__finalDestination");
+    } catch (_) {
+      return false;
+    }
+  };
+
+  const getPropertyValues = (object) => {
+    const values = [];
+    const seen = new Set();
+    let current = object;
+    for (let depth = 0; current && depth < 3; depth += 1, current = Object.getPrototypeOf(current)) {
+      for (const key of Object.getOwnPropertyNames(current)) {
+        if (seen.has(key)) continue;
+        seen.add(key);
+        try {
+          const descriptor = Object.getOwnPropertyDescriptor(current, key);
+          // Do not invoke accessors while probing scrambled client internals.
+          if (descriptor && Object.prototype.hasOwnProperty.call(descriptor, "value")) {
+            values.push(descriptor.value);
+          }
+        } catch (_) {}
+      }
+    }
+    return values;
+  };
+
+  const resolvePathfinder = () => {
+    const world = resolveWorld();
+    if (!world) return null;
+    try {
+      // Fast path for the currently observed build; the shape check prevents
+      // accidentally binding an unrelated object if the name is reused.
+      if (isNativePathfinder(world.hNccDTwTki)) return world.hNccDTwTki;
+    } catch (_) {}
+    return getPropertyValues(world).find(isNativePathfinder) || null;
+  };
+
+  const resolveNativePathfindMethod = (target) => {
+    for (const value of getPropertyValues(target)) {
+      if (typeof value !== "function") continue;
+      let source = "";
+      try { source = Function.prototype.toString.call(value); } catch (_) {}
+      if (source.includes("__isAutoWalking") &&
+          source.includes("__pathfindCache") &&
+          source.includes("getTileFromWorldPosition") &&
+          source.includes("DMHavyabcUhA") &&
+          source.includes("search")) return value;
+    }
+    return null;
+  };
+
+  const resolveNativeClearMethod = (target) => {
+    for (const value of getPropertyValues(target)) {
+      if (typeof value !== "function") continue;
+      let source = "";
+      try { source = Function.prototype.toString.call(value); } catch (_) {}
+      if (source.includes("__finalDestination") &&
+          source.includes("__pathfindCache") &&
+          source.includes("__autoWalkStepsRemaining") &&
+          source.includes("__pendingUseObject") &&
+          source.includes("DMHavyabcUhA")) return value;
+    }
+    return null;
+  };
 
   // These proxies intentionally exist before login/world initialization.
-  // Each access resolves the current native instance, avoiding a stale
-  // undefined world captured during early loader startup.
+  // Each access resolves the current native instance, avoiding stale
+  // scrambled bindings captured during early loader startup.
   const pathfinder = new Proxy({}, {
     get(_proxy, property) {
       const target = resolvePathfinder();
@@ -42,22 +116,39 @@
       if (property === "findPath") {
         return (from, destination) => {
           const current = resolvePathfinder();
-          if (typeof current?.jPGVnvNRwfr !== "function") return false;
-          return current.jPGVnvNRwfr(from, destination, true);
+          const nativeFindPath = current && resolveNativePathfindMethod(current);
+          if (typeof nativeFindPath !== "function") return false;
+          if (!from || !destination ||
+              !Number.isFinite(Number(from.x)) ||
+              !Number.isFinite(Number(from.y)) ||
+              !Number.isFinite(Number(from.z)) ||
+              !Number.isFinite(Number(destination.x)) ||
+              !Number.isFinite(Number(destination.y)) ||
+              !Number.isFinite(Number(destination.z))) return false;
+          return nativeFindPath.call(current, from, destination, true);
         };
       }
       if (property === "setPathfindCache") {
         return (...args) => {
           const current = resolvePathfinder();
-          if (typeof current?.dHXHTcuFKROf !== "function") return false;
-          return current.dHXHTcuFKROf(...args);
+          if (!current) return false;
+          if (args[0] === null) {
+            const nativeClear = resolveNativeClearMethod(current);
+            if (typeof nativeClear !== "function") return false;
+            nativeClear.call(current, null);
+            return true;
+          }
+          current.__pathfindCache = args[0];
+          return true;
         };
       }
       if (property === "stop") {
         return () => {
           const current = resolvePathfinder();
-          if (typeof current?.dHXHTcuFKROf !== "function") return false;
-          return current.dHXHTcuFKROf(null);
+          const nativeClear = current && resolveNativeClearMethod(current);
+          if (typeof nativeClear !== "function") return false;
+          nativeClear.call(current, null);
+          return true;
         };
       }
       return bindMethod(target, Reflect.get(target, property, target));
