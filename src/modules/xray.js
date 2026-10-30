@@ -51,10 +51,13 @@ window.__minibiaBotBundle.installXrayModule = function installXrayModule(bot) {
 
   function getTrackedCreatures() {
     const myState = bot.getPlayerState();
-    const myId = window.gameClient?.player?.id;
+    // The current client build exposes the live client through the compat
+    // bridge; window.gameClient may be undefined even while the game is active.
+    const client = window.__minibiaBotClientCompat?.nativeClient || window.gameClient;
+    const myId = client?.player?.id;
     const myName = normalizeName(myState?.name);
 
-    return Object.values(window.gameClient?.world?.activeCreatures || {}).filter((creature) => {
+    return Object.values(client?.world?.activeCreatures || {}).filter((creature) => {
       if (!creature) return false;
       if (creature.id === myId) return false;
 
