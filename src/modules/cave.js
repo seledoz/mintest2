@@ -720,7 +720,35 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
 
   function getTileAt(position) {
     if (!position) return null;
-    return window.gameClient?.world?.getTileFromWorldPosition?.(new Position(position.x, position.y, position.z)) || null;
+    const normalized = normalizePosition(position);
+    if (!normalized) return null;
+
+    // Prefer the native world lookup, but some updated-client builds do not
+    // return chunk tiles consistently for positions in the loaded viewport.
+    // A* is built from world.chunks, so use that same source as a fallback
+    // when checking whether its route crosses a damage field.
+    try {
+      const nativeTile = window.gameClient?.world?.getTileFromWorldPosition?.(
+        new Position(normalized.x, normalized.y, normalized.z)
+      );
+      if (nativeTile) return nativeTile;
+    } catch (error) {}
+
+    const chunks = window.gameClient?.world?.chunks || [];
+    for (const chunk of chunks) {
+      const tiles = chunk?.tiles;
+      if (!Array.isArray(tiles)) continue;
+      for (const tile of tiles) {
+        const tilePosition = tile?.__position;
+        if (tilePosition &&
+            Number(tilePosition.x) === normalized.x &&
+            Number(tilePosition.y) === normalized.y &&
+            Number(tilePosition.z) === normalized.z) {
+          return tile;
+        }
+      }
+    }
+    return null;
   }
   function getTilePosition(tile) { return normalizePosition(tile?.__position); }
   let thingDefinitionTableRef = null;
