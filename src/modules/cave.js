@@ -804,7 +804,15 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     document.getElementById(minimapOverlayRootId)?.remove();
     document.getElementById(minimapOverlayStyleId)?.remove();
   }
-  function getMinimapCanvas() { return window.gameClient?.renderer?.minimap?.minimap?.canvas || document.getElementById("minimap") || null; }
+  function getNativeMinimap() {
+    const compat = window.__minibiaBotClientCompat;
+    return compat?.nativeClient?.VyJtWeiQZd?.minimap ||
+      window.gameClient?.renderer?.minimap || null;
+  }
+  function getMinimapCanvas() {
+    return getNativeMinimap()?.minimap?.canvas ||
+      document.getElementById("minimap") || null;
+  }
   function getMinimapViewport() {
     const canvas = getMinimapCanvas();
     if (!(canvas instanceof HTMLCanvasElement)) return null;
@@ -825,7 +833,7 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
   }
   function renderMinimapOverlay() {
     const viewport = getMinimapViewport();
-    const minimap = window.gameClient?.renderer?.minimap;
+    const minimap = getNativeMinimap();
     const playerPosition = normalizePosition(bot.getPlayerPosition());
     const root = ensureMinimapOverlayRoot();
     const canvas = root.querySelector("canvas");
