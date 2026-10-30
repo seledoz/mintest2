@@ -2,7 +2,7 @@
 // Install before core.js and all modules. The native World is created only
 // after server data arrives, so world/pathfinder access must remain lazy.
 (() => {
-  if (window.__minibiaBotClientCompat?.installed) return;
+  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 2) return;
 
   let nativeClient = null;
   let NativePosition = null;
@@ -359,6 +359,7 @@
     : null;
   window.__minibiaBotClientCompat = {
     installed: true,
+    version: 2,
     build: "2026-10-30-1003",
     client: clientBridge,
     nativeClient,
@@ -367,7 +368,7 @@
     get worldAvailable() { return !!resolveWorld(); },
     get pathfinderAvailable() { return !!resolvePathfinder(); },
     itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
-    adaptiveDiscovery: window.__minibiaBotAdaptive?.inspect?.(nativeClient) || null,
+    get adaptiveDiscovery() { return window.__minibiaBotAdaptive?.inspect?.(nativeClient) || null; },
     packetDispatchMethod: adaptivePacketDispatch?.key || null,
     get autoWalkAvailable() {
       return typeof nativeSend === "function" &&
