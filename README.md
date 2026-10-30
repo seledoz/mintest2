@@ -1,7 +1,7 @@
 ## Public repository
 
 ```js
-fetch("https://raw.githubusercontent.com/seledoz/mintest2/fix/client-build-2026-10-30-compat/pz-bot.js?t=" + Date.now())
+fetch("https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js?t=" + Date.now())
   .then((r) => r.text())
   .then((code) => eval(code));
 ```
@@ -17,7 +17,7 @@ Use a fine-grained GitHub token with read and write access to the repository con
 
   const repository = "seledoz/mintest2";
   const legacyRepository = "seledoz/Min-new";
-  const ref = "fix/client-build-2026-10-30-compat";
+  const ref = "main";
   const rawPrefix = `https://raw.githubusercontent.com/${repository}/${ref}/`;
   const legacyRawPrefix = `https://raw.githubusercontent.com/${legacyRepository}/${ref}/`;
   const apiPrefix = `https://api.github.com/repos/${repository}/contents`;
