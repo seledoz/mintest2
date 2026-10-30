@@ -175,20 +175,14 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function clearCurrentTarget() {
-    if (!window.gameClient?.player || typeof window.gameClient.send !== "function") {
+    const client = window.__minibiaBotClientCompat?.nativeClient || window.gameClient;
+    if (!client?.player || typeof client.player.setTarget !== "function" || !getCurrentTarget()) {
       return false;
     }
 
-    if (typeof TargetPacket !== "function") {
-      return false;
-    }
-
-    if (!getCurrentTarget()) {
-      return false;
-    }
-
-    window.gameClient.player.setTarget(null);
-    window.gameClient.send(new TargetPacket(0));
+    // The native stop-attack packet constructor is closure-scoped in this client build.
+    // Clear local target state; do not attempt to construct the unavailable global TargetPacket.
+    client.player.setTarget(null);
     return true;
   }
 
@@ -246,18 +240,25 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function setCurrentTarget(target) {
-    if (!target || !window.gameClient?.player || typeof window.gameClient.send !== "function") {
+    const client = window.__minibiaBotClientCompat?.nativeClient || window.gameClient;
+    const nativeAttack = client?.world?.RKjzQVbLLo;
+    if (!target || typeof nativeAttack !== "function") {
       return false;
     }
 
-    if (typeof TargetPacket !== "function") {
+    try {
+      // Reuse the native client attack path; it validates the Creature and sends
+      // the closure-scoped native attack packet itself.
+      nativeAttack.call(client.world, new Set([target]));
+      state.engagedTargetId = target.id;
+      return true;
+    } catch (error) {
+      bot.log("native auto attack failed", {
+        targetId: target.id,
+        error: error?.message || error,
+      });
       return false;
     }
-
-    window.gameClient.player.setTarget(target);
-    window.gameClient.send(new TargetPacket(target.id));
-    state.engagedTargetId = target.id;
-    return true;
   }
 
   function setCurrentFollowTarget(target) {
