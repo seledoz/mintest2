@@ -1,10 +1,20 @@
-## Public repository
+## Public repository (adaptive client build)
+
+Run this in the Minibia game page's browser console:
 
 ```js
-fetch("https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js?t=" + Date.now())
-  .then((r) => r.text())
-  .then((code) => eval(code));
+fetch("https://raw.githubusercontent.com/seledoz/mintest2/feature/client-adaptive-compat/pz-bot.js?t=" + Date.now(), {
+  cache: "no-store"
+})
+  .then((response) => {
+    if (!response.ok) throw new Error(`MinTest2 loader HTTP ${response.status}`);
+    return response.text();
+  })
+  .then((code) => (0, eval)(code))
+  .catch((error) => console.error("[minibia-bot] Loader failed", error));
 ```
+
+This loader installs the adaptive client-discovery layer before the compatibility bridge and bot modules. It checks that both compatibility modules installed successfully and stops with an explicit error if they did not.
 
 ## Private repository
 
@@ -17,7 +27,7 @@ Use a fine-grained GitHub token with read and write access to the repository con
 
   const repository = "seledoz/mintest2";
   const legacyRepository = "seledoz/Min-new";
-  const ref = "main";
+  const ref = "feature/client-adaptive-compat";
   const rawPrefix = `https://raw.githubusercontent.com/${repository}/${ref}/`;
   const legacyRawPrefix = `https://raw.githubusercontent.com/${legacyRepository}/${ref}/`;
   const apiPrefix = `https://api.github.com/repos/${repository}/contents`;
