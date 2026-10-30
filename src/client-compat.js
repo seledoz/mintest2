@@ -45,7 +45,7 @@
           return target.dHXHTcuFKROf(...args);
         };
       }
-      if (property === "stop" || property === "cancel" || property === "clear" || property === "clearPath") {
+      if (property === "stop") {
         return () => {
           if (typeof target.dHXHTcuFKROf !== "function") return false;
           return target.dHXHTcuFKROf(null);
