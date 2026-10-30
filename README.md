@@ -1,6 +1,6 @@
 ## Public repository (adaptive client build)
 
-Run this in the Minibia game page's browser console:
+Open Minibia, wait until your character is fully logged in and the game world is visible, then run this in the game page's browser console:
 
 ```js
 fetch("https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js?t=" + Date.now(), {
@@ -14,7 +14,7 @@ fetch("https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js?t=" + D
   .catch((error) => console.error("[minibia-bot] Loader failed", error));
 ```
 
-This loader installs the adaptive client-discovery layer before the compatibility bridge and bot modules. It checks that both compatibility modules installed successfully and stops with an explicit error if they did not. After loading, make one ordinary in-game click-to-walk so the passive observer can learn the current client's native AutoWalk packet constructor; it does not send test packets.
+This loader installs the adaptive client-discovery layer before the compatibility bridge and bot modules. It waits up to 30 seconds for the logged-in game client before installing the compatibility bridge, then checks that both compatibility modules installed successfully. If the game client is not ready, it reports that clearly instead of silently leaving a half-loaded bot. After loading, make one ordinary in-game click-to-walk so the passive observer can learn the current client's native AutoWalk packet constructor; it does not send test packets.
 
 ## Private repository
 
