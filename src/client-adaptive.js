@@ -108,7 +108,10 @@
           /send/.test(senderSource)) {
         return {
           key: candidate.key,
-          call: (packet) => candidate.value.call(client, packet),
+          call: (packet) => {
+            const activeMethod = client[candidate.key];
+            return (typeof activeMethod === "function" ? activeMethod : candidate.value).call(client, packet);
+          },
           verifiedBy: "client-forwarder-to-network-serializer"
         };
       }
