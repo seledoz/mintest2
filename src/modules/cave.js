@@ -430,9 +430,11 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
   }
 
   function sendDamageFieldAutoWalk(path, from, goal, now = Date.now()) {
+    const compatSendAutoWalk = window.__minibiaBotClientCompat?.sendAutoWalk;
+    const legacySend = window.gameClient?.send;
     if (!Array.isArray(path) || path.length < 2 ||
         typeof AutoWalkPacket !== "function" || typeof Position !== "function" ||
-        typeof window.gameClient?.send !== "function") return false;
+        (typeof compatSendAutoWalk !== "function" && typeof legacySend !== "function")) return false;
     try {
       const directions = [];
       for (let index = 1; index < path.length; index += 1) {
@@ -444,10 +446,15 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
         directions.push(Number(direction));
       }
       if (!directions.length) return false;
-      window.gameClient?.send?.(new AutoWalkPacket(directions));
+      const packet = new AutoWalkPacket(directions);
+      const sent = typeof compatSendAutoWalk === "function"
+        ? compatSendAutoWalk(packet)
+        : (legacySend.call(window.gameClient, packet), true);
+      if (sent === false) throw new Error("Native AutoWalkPacket sender rejected the route");
       state.lastPathAt = now;
       bot.log("cave following damage-field AutoWalkPacket route", {
-        from, to: goal, steps: directions.length, segmented: true
+        from, to: goal, steps: directions.length, segmented: true,
+        sender: typeof compatSendAutoWalk === "function" ? "client-compat" : "legacy"
       });
       return true;
     } catch (error) {
