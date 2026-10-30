@@ -70,14 +70,9 @@
       }
       if (property === "itemDefinitionsBySid") return null;
       if (property === "send") {
-        // Only bridge the packet type whose native constructor and sender have
-        // been verified on this build. Unknown packet types fail closed.
-        return (packet) => {
-          if (!NativeAutoWalkPacket || typeof nativeSend !== "function" ||
-              !(packet instanceof NativeAutoWalkPacket)) return false;
-          nativeSend.call(nativeClient, packet);
-          return true;
-        };
+        // Do not expose the gated legacy sender. Only sendAutoWalk below is
+        // enabled until each other packet type has been independently verified.
+        return undefined;
       }
       return bindMethod(target, Reflect.get(target, property, target));
     }
@@ -117,7 +112,13 @@
     pathfinder,
     itemDefinitionsAvailable: !!nativeItemDefinitions,
     autoWalkAvailable: !!NativeAutoWalkPacket && typeof nativeSend === "function",
-    supportedPackets: ["AutoWalkPacket"]
+    supportedPackets: ["AutoWalkPacket"],
+    sendAutoWalk(packet) {
+      if (!NativeAutoWalkPacket || typeof nativeSend !== "function" ||
+          !(packet instanceof NativeAutoWalkPacket)) return false;
+      nativeSend.call(nativeClient, packet);
+      return true;
+    }
   };
 
   console.info("[minibia-bot] client compatibility bridge installed", {
