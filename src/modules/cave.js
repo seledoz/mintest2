@@ -897,15 +897,15 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     document.getElementById(minimapOverlayStyleId)?.remove();
   }
   function getNativeMinimap() {
-    // The adaptive client resolver is the current source of the native client.
-    // The older compat.nativeClient alias is retained for older loader builds.
-    const nativeClient = window.__minibiaBotAdaptive?.resolveClient?.() ||
+    const adaptive = window.__minibiaBotAdaptive;
+    const nativeClient = adaptive?.resolveClient?.() ||
       window.__minibiaBotClientCompat?.nativeClient || null;
-    return nativeClient?.VyJtWeiQZd?.minimap ||
+    return adaptive?.resolveMinimap?.(nativeClient) ||
       window.gameClient?.renderer?.minimap || null;
   }
   function getMinimapCanvas() {
-    return getNativeMinimap()?.minimap?.canvas ||
+    const nativeMinimap = getNativeMinimap();
+    return nativeMinimap?.minimap?.canvas ||
       document.getElementById("minimap") || null;
   }
   function getMinimapViewport() {
