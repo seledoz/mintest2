@@ -240,16 +240,16 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function setCurrentTarget(target) {
-    const client = window.__minibiaBotClientCompat?.nativeClient || window.gameClient;
-    const nativeAttack = client?.world?.RKjzQVbLLo;
-    if (!target || typeof nativeAttack !== "function") {
+    const compat = window.__minibiaBotClientCompat;
+    const nativeAttackAvailable = typeof compat?.attackCreature === "function";
+    if (!target || !nativeAttackAvailable) {
       return false;
     }
 
     try {
-      // Reuse the native client attack path; it validates the Creature and sends
-      // the closure-scoped native attack packet itself.
-      nativeAttack.call(client.world, new Set([target]));
+      // The compatibility layer discovers the scrambled World attack method
+      // by its native behavior and dispatches the real client attack action.
+      if (!compat.attackCreature(target)) return false;
       state.engagedTargetId = target.id;
       return true;
     } catch (error) {
