@@ -253,13 +253,39 @@ window.__minibiaBotClientCompatReady = (async () => {
 
   const nativeChatManager =
     findNestedObject(nativeClient, candidate => {
-      const sendText = getDataProperty(candidate, "HVtvgeiqmk");
       const channels = getDataProperty(candidate, "channels");
-      return typeof sendText === "function" ||
-        (Array.isArray(channels) && channels.some(channel =>
-          Array.isArray(getDataProperty(channel, "__contents"))
-        ));
+      return Array.isArray(channels) && channels.some(channel =>
+        Array.isArray(getDataProperty(channel, "__contents"))
+      );
     }) || null;
+
+  const resolveNativeChatSendMethod = target => {
+    if (!target) return null;
+    const candidates = [];
+    let current = target;
+    const seen = new Set();
+    for (let depth = 0; current && depth < 4; depth += 1) {
+      let names = [];
+      try { names = Object.getOwnPropertyNames(current); } catch (_) { break; }
+      for (const key of names) {
+        if (seen.has(key) || key === "constructor") continue;
+        seen.add(key);
+        try {
+          const descriptor = Object.getOwnPropertyDescriptor(current, key);
+          const method = descriptor && Object.prototype.hasOwnProperty.call(descriptor, "value")
+            ? descriptor.value : null;
+          if (typeof method !== "function") continue;
+          const source = Function.prototype.toString.call(method);
+          if (!/trim/.test(source) || !/send/i.test(source) || !/message|channel/i.test(source)) continue;
+          candidates.push({ method, score: (source.match(/send/gi) || []).length + (source.match(/message|channel/gi) || []).length });
+        } catch (_) {}
+      }
+      try { current = Object.getPrototypeOf(current); } catch (_) { break; }
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    if (!candidates.length || (candidates.length > 1 && candidates[0].score === candidates[1].score)) return null;
+    return candidates[0].method;
+  };
   const nativeHotbarManager =
     findNestedObject(nativeClient, candidate => {
       const slots = getDataProperty(candidate, "slots");
@@ -285,10 +311,10 @@ window.__minibiaBotClientCompatReady = (async () => {
     get(target, property) {
       if (property === "sendMessageText") {
         return (message) => {
-          if (typeof target.HVtvgeiqmk !== "function") return false;
+          const sendMethod = resolveNativeChatSendMethod(target);
           const text = String(message ?? "").trim();
-          if (!text) return false;
-          target.HVtvgeiqmk(text, undefined, true);
+          if (!text || typeof sendMethod !== "function") return false;
+          sendMethod.call(target, text, undefined, true);
           return true;
         };
       }
