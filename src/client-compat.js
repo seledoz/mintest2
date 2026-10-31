@@ -2,7 +2,7 @@
 // Install before core.js and all modules. The native World is created only
 // after server data arrives, so world/pathfinder access must remain lazy.
 (() => {
-  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 3) return;
+  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 4) return;
 
   let nativeClient = null;
   let NativePosition = null;
@@ -32,23 +32,31 @@
 
   const resolveWorld = () => nativeClient.world || null;
 
-  // Resolve the native attack action by its behavior, not its scrambled name.
-  // Current builds implement it as a World method that accepts a Set<Creature>,
-  // updates Player.setTarget(), and dispatches the native attack packet.
+  // Discover the native attack action by stable behavior, not scrambled helper names.
+  // The action iterates a Set of creatures and updates the Player target.
+  // Candidate methods are inspected only; discovery never invokes them.
   const resolveNativeAttackMethod = (world) => {
     if (!world) return null;
-    return getPropertyValues(world).find((value) => {
-      if (typeof value !== "function") return false;
+    const candidates = [];
+    for (const value of getPropertyValues(world)) {
+      if (typeof value !== "function") continue;
       let source = "";
       try { source = Function.prototype.toString.call(value); } catch (_) {}
-      return source.includes("values") &&
-        source.includes("next") &&
-        source.includes("Creature") &&
-        source.includes("setTarget") &&
-        source.includes("DMHavyabcUhA");
-    }) || null;
+      if (!source.includes("setTarget")) continue;
+      const hasSetIteration = /\.values\s*\(/.test(source) && /\.next\s*\(/.test(source);
+      if (!hasSetIteration) continue;
+      let score = 4;
+      if (/new Set\s*\(/.test(source)) score += 2;
+      if (/Creature/.test(source)) score += 1;
+      if (/\.setTarget\s*\(/.test(source)) score += 1;
+      if (/DMHavyabcUhA/.test(source)) score += 1;
+      candidates.push({ method: value, score });
+    }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.score - a.score);
+    if (candidates.length > 1 && candidates[0].score === candidates[1].score) return null;
+    return candidates[0].method;
   };
-
   // The game scrambles public property/method names between client builds.
   // Identify the native pathfinder by its stable state shape rather than
   // depending on one obfuscated world property name.
@@ -376,7 +384,7 @@
     : null;
   window.__minibiaBotClientCompat = {
     installed: true,
-    version: 3,
+    version: 4,
     build: "2026-10-30-1003",
     client: clientBridge,
     nativeClient,
@@ -385,10 +393,23 @@
     get nativeAttackAvailable() {
       return typeof resolveNativeAttackMethod(resolveWorld()) === "function";
     },
+    get nativeAttackDiagnostics() {
+      const currentWorld = resolveWorld();
+      const method = resolveNativeAttackMethod(currentWorld);
+      return {
+        available: typeof method === "function",
+        worldAvailable: !!currentWorld,
+        playerAvailable: !!nativeClient?.player,
+        playerTargetAvailable: !!nativeClient?.player &&
+          ("__target" in nativeClient.player || typeof nativeClient.player.setTarget === "function"),
+        methodArity: typeof method === "function" ? method.length : null
+      };
+    },
     attackCreature(creature) {
       const currentWorld = resolveWorld();
       const nativeAttack = resolveNativeAttackMethod(currentWorld);
-      if (!creature || typeof nativeAttack !== "function") return false;
+      if (!creature || (typeof creature !== "object" && typeof creature !== "function") ||
+          typeof nativeAttack !== "function") return false;
       try {
         nativeAttack.call(currentWorld, new Set([creature]));
         return true;
