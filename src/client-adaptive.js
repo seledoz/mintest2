@@ -71,6 +71,10 @@
       .then(response => {
         if (!response.ok) throw new Error("Could not read core/index.js: HTTP " + response.status);
         return response.text();
+      })
+      .catch(error => {
+        indexSourcePromise = null;
+        throw error;
       });
     return indexSourcePromise;
   };
