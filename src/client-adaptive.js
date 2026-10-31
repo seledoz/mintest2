@@ -2,7 +2,7 @@
 // Uses passive structural inspection and observes only packets the native game sends.
 // It never calls unknown methods or injects probe packets.
 (() => {
-  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 3) return;
+  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 4) return;
 
   const ownDataValues = (object, maxDepth = 3) => {
     const values = [];
@@ -79,6 +79,69 @@
       if (!candidateWorld || typeof candidateWorld !== "object") continue;
       const found = ownDataValues(candidateWorld, 3).find(x => isPathfinderLike(x.value));
       if (found) return found.value;
+    }
+    return null;
+  };
+
+
+  const getDataProperty = (object, property) => {
+    let current = object;
+    for (let depth = 0; current && depth < 4; depth += 1) {
+      try {
+        const descriptor = Object.getOwnPropertyDescriptor(current, property);
+        if (descriptor) {
+          return Object.prototype.hasOwnProperty.call(descriptor, "value")
+            ? descriptor.value : undefined;
+        }
+        current = Object.getPrototypeOf(current);
+      } catch (_) { return undefined; }
+    }
+    return undefined;
+  };
+
+  // Locate the live minimap by its rendering state, not its scrambled owner key.
+  // The search is bounded and reads data properties only (never invokes getters).
+  let cachedMinimapClient = null;
+  let cachedMinimap = null;
+  const isMinimapLike = (candidate) => {
+    if (!candidate || typeof candidate !== "object") return false;
+    const renderLayer = getDataProperty(candidate, "__renderLayer");
+    const zoomLevel = getDataProperty(candidate, "__zoomLevel");
+    const center = getDataProperty(candidate, "center");
+    const minimapCanvasOwner = getDataProperty(candidate, "minimap");
+    const canvas = getDataProperty(minimapCanvasOwner, "canvas");
+    return Number.isFinite(Number(renderLayer)) &&
+      Number.isFinite(Number(zoomLevel)) &&
+      !!center && Number.isFinite(Number(getDataProperty(center, "x"))) &&
+      Number.isFinite(Number(getDataProperty(center, "y"))) &&
+      !!canvas && typeof canvas.getBoundingClientRect === "function";
+  };
+
+  const resolveMinimap = (client) => {
+    if (!client) return null;
+    if (cachedMinimapClient === client && isMinimapLike(cachedMinimap)) return cachedMinimap;
+    const queue = [{ value: client, depth: 0 }];
+    const seen = new Set();
+    let inspected = 0;
+    while (queue.length && inspected < 2500) {
+      const entry = queue.shift();
+      const value = entry?.value;
+      if (!value || (typeof value !== "object" && typeof value !== "function") ||
+          seen.has(value)) continue;
+      seen.add(value);
+      inspected += 1;
+      if (isMinimapLike(value)) {
+        cachedMinimapClient = client;
+        cachedMinimap = value;
+        return value;
+      }
+      if (entry.depth >= 6 || value === window || value === document ||
+          (typeof Element !== "undefined" && value instanceof Element)) continue;
+      for (const child of ownDataValues(value, 1)) {
+        if (child.value && (typeof child.value === "object" || typeof child.value === "function")) {
+          queue.push({ value: child.value, depth: entry.depth + 1 });
+        }
+      }
     }
     return null;
   };
@@ -223,10 +286,11 @@
       observedAutoWalkConstructorName = resolveAutoWalkConstructorName(pathfinder);
     }
     return {
-      version: 3,
+      version: 4,
       clientFound: !!client,
       worldFound: !!world,
       pathfinderFound: !!pathfinder,
+      minimapFound: !!resolveMinimap(client),
       packetDispatchFound: !!packetDispatch,
       packetDispatchMethod: packetDispatch?.key || null,
       packetObserverInstalled: observerInstalled,
@@ -246,9 +310,10 @@
 
   const api = {
     installed: true,
-    version: 3,
+    version: 4,
     resolveClient,
     resolvePathfinder,
+    resolveMinimap,
     resolvePacketDispatch,
     createAutoWalkPacket,
     isAutoWalkPacket,
