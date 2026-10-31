@@ -1,24 +1,22 @@
 // Minibia client compatibility bridge for client build 2026-10-30-1003.
 // Install before core.js and all modules. The native World is created only
 // after server data arrives, so world/pathfinder access must remain lazy.
-(() => {
-  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 4) return;
+window.__minibiaBotClientCompatReady = (async () => {
+  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 5) return;
 
   let nativeClient = null;
   let NativePosition = null;
   let NativeAutoWalkPacket = null;
 
   try {
-    // The 2026-10-30 client creates its live instance in index.js as
-    // YPXHlIjOD = new AnkOPljisHyL(). The old obfuscated binding
-    // vfdOywKJESRq no longer exists in this build.
-    nativeClient = window.__minibiaBotAdaptive?.resolveClient?.()
-      || eval("typeof YPXHlIjOD !== 'undefined' ? YPXHlIjOD : null")
-      || eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null");
-    NativePosition = eval("typeof zeOvojmNkQxY === 'function' ? zeOvojmNkQxY : null") || nativeClient?.player?.__position?.constructor || null;
-    NativeAutoWalkPacket = eval("typeof twTOLoGSHp === 'function' ? twTOLoGSHp : null");
+    const adaptive = window.__minibiaBotAdaptive;
+    if (!adaptive?.installed || adaptive.version < 5) throw new Error("Adaptive discovery v5 is unavailable");
+    nativeClient = adaptive.resolveClient?.() || await adaptive.waitForClient({ timeoutMs: 20000 });
+    NativePosition = nativeClient?.player?.__position?.constructor || null;
   } catch (error) {
-    console.warn("[minibia-bot] client compatibility probe failed", error);
+    console.error("[minibia-bot] client compatibility discovery failed", error);
+    window.__minibiaBotClientCompat = { installed: false, version: 5, reason: "client-discovery-failed", error: String(error?.message || error) };
+    throw error;
   }
 
   if (!nativeClient) {
@@ -49,7 +47,6 @@
       if (/new Set\s*\(/.test(source)) score += 2;
       if (/Creature/.test(source)) score += 1;
       if (/\.setTarget\s*\(/.test(source)) score += 1;
-      if (/DMHavyabcUhA/.test(source)) score += 1;
       candidates.push({ method: value, score });
     }
     if (!candidates.length) return null;
@@ -97,7 +94,6 @@
     const world = resolveWorld();
     if (!world) return null;
     try {
-      if (isNativePathfinder(world.hNccDTwTki)) return world.hNccDTwTki;
     } catch (_) {}
     const adaptivePathfinder = window.__minibiaBotAdaptive?.resolvePathfinder?.(nativeClient);
     if (isNativePathfinder(adaptivePathfinder)) return adaptivePathfinder;
@@ -112,7 +108,6 @@
       if (source.includes("__isAutoWalking") &&
           source.includes("__pathfindCache") &&
           source.includes("getTileFromWorldPosition") &&
-          source.includes("DMHavyabcUhA") &&
           source.includes("search")) return value;
     }
     return null;
@@ -127,7 +122,7 @@
           source.includes("__pathfindCache") &&
           source.includes("__autoWalkStepsRemaining") &&
           source.includes("__pendingUseObject") &&
-          source.includes("DMHavyabcUhA")) return value;
+          source.includes("__autoWalkStepsRemaining")) return value;
     }
     return null;
   };
@@ -256,7 +251,6 @@
     return null;
   };
 
-  const nativeUi = (() => { try { return nativeClient.kYgIgXceQLD || null; } catch (_) { return null; } })();
   const nativeChatManager =
     findNestedObject(nativeClient, candidate => {
       const sendText = getDataProperty(candidate, "HVtvgeiqmk");
@@ -265,7 +259,7 @@
         (Array.isArray(channels) && channels.some(channel =>
           Array.isArray(getDataProperty(channel, "__contents"))
         ));
-    }) || nativeUi?.uVvWDBBxDT || null;
+    }) || null;
   const nativeHotbarManager =
     findNestedObject(nativeClient, candidate => {
       const slots = getDataProperty(candidate, "slots");
@@ -274,7 +268,7 @@
         const element = getDataProperty(canvas, "canvas");
         return !!element && typeof element.click === "function";
       });
-    }) || nativeUi?.RocGUBNConYq || null;
+    }) || null;
   const nativeMouse = (() => {
     try {
       return nativeClient.mouse ||
@@ -313,7 +307,7 @@
       if (property === "mouse") return nativeMouse || bindMethod(target, Reflect.get(target, property, target));
       if (property === "interface") return interfaceBridge;
       if (property === "itemDefinitionsByCid" || property === "itemDefinitions") {
-        return target.TPWhmLyqyrg || null;
+        return null;
       }
       if (property === "itemDefinitionsBySid") return null;
       if (property === "send") return undefined;
@@ -384,8 +378,8 @@
     : null;
   window.__minibiaBotClientCompat = {
     installed: true,
-    version: 4,
-    build: "2026-10-30-1003",
+    version: 5,
+    build: "adaptive",
     client: clientBridge,
     nativeClient,
     world,
@@ -420,7 +414,7 @@
     },
     get worldAvailable() { return !!resolveWorld(); },
     get pathfinderAvailable() { return !!resolvePathfinder(); },
-    itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
+    itemDefinitionsAvailable: false,
     get adaptiveDiscovery() { return window.__minibiaBotAdaptive?.inspect?.(nativeClient) || null; },
     packetDispatchMethod: adaptivePacketDispatch?.key || null,
     get autoWalkAvailable() {
@@ -444,10 +438,10 @@
   };
 
   console.info("[minibia-bot] client compatibility bridge installed", {
-    build: "2026-10-30-1003",
+    build: "adaptive",
     worldAvailable: !!resolveWorld(),
     pathfinderAvailable: !!resolvePathfinder(),
-    itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
+    itemDefinitionsAvailable: false,
     autoWalkAvailable: typeof nativeSend === "function" && (typeof window.__minibiaBotAdaptive?.getAutoWalkConstructor?.() === "function" || typeof NativeAutoWalkPacket === "function")
   });
 })();
