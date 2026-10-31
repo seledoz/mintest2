@@ -213,7 +213,35 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     if (!config.creatureNames.length) { const empty = document.createElement("div"); empty.className = "mb-small-note"; empty.textContent = "No priority creatures."; list.appendChild(empty); return; }
     config.creatureNames.forEach((name, index) => { const row = document.createElement("div"); row.className = "mb-list-row"; const label = document.createElement("span"); label.textContent = `${index + 1}. ${name}`; const controls = document.createElement("div"); controls.className = "mb-inline"; controls.appendChild(makeButton("↑", `Move ${name} up`, index === 0, () => moveName(name, "up"))); controls.appendChild(makeButton("↓", `Move ${name} down`, index === config.creatureNames.length - 1, () => moveName(name, "down"))); controls.appendChild(makeButton("Delete", `Delete ${name}`, false, () => removeName(name))); row.appendChild(label); row.appendChild(controls); list.appendChild(row); });
   }
-  function status() { const preferred = shouldRun() ? getPreferredTarget() : null; return { config: { ...config, creatureNames: [...config.creatureNames] }, preferredTarget: preferred ? { id: preferred.id, name: preferred.name, health: Number.isFinite(getCurrentHealth(preferred)) ? getCurrentHealth(preferred) : null } : null, lastSelectedTargetId: state.lastSelectedTargetId }; }
+  function status() {
+    const active = shouldRun();
+    const entries = active ? getTargetEntries() : [];
+    const preferred = active ? getPreferredTarget() : null;
+    const current = getCurrentTarget();
+    return {
+      config: { ...config, creatureNames: [...config.creatureNames] },
+      currentTarget: current ? {
+        id: current.id,
+        name: current.name || "Mob",
+        priority: getPriorityIndex(current) >= 0 ? getPriorityIndex(current) + 1 : null,
+        health: Number.isFinite(getCurrentHealth(current)) ? getCurrentHealth(current) : null,
+      } : null,
+      candidates: entries.map((entry) => ({
+        id: entry.monster?.id,
+        name: entry.monster?.name || "Mob",
+        priority: entry.priority >= 0 ? entry.priority + 1 : null,
+        health: Number.isFinite(entry.health) ? entry.health : null,
+        distance: Number.isFinite(entry.distance) ? entry.distance : null,
+      })),
+      preferredTarget: preferred ? {
+        id: preferred.id,
+        name: preferred.name || "Mob",
+        health: Number.isFinite(getCurrentHealth(preferred)) ? getCurrentHealth(preferred) : null,
+        priority: getPriorityIndex(preferred) >= 0 ? getPriorityIndex(preferred) + 1 : null,
+      } : null,
+      lastSelectedTargetId: state.lastSelectedTargetId,
+    };
+  }
   function destroy() { stopTimer(); if (state.uiTimerId != null) window.clearInterval(state.uiTimerId); state.uiTimerId = null; document.getElementById("minibia-bot-auto-attack-priority-section")?.remove(); document.getElementById("minibia-bot-auto-attack-highest-hp-row")?.remove(); }
 
   if (bot.attack && !bot.attack.__priorityTimerSyncWrapped) {
