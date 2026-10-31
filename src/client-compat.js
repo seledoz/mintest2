@@ -291,6 +291,28 @@ window.__minibiaBotClientCompatReady = (async () => {
         return !!element && typeof element.click === "function";
       });
     }) || null;
+  const resolveItemDefinitions = () => {
+    const candidates = [];
+    for (const entry of getPropertyValues(nativeClient)) {
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      try {
+        const keys = Object.keys(entry);
+        const numericKeys = keys.filter(key => /^\d+$/.test(key));
+        if (numericKeys.length < 100 || numericKeys.length / Math.max(1, keys.length) < 0.8) continue;
+        const sampleKey = numericKeys.find(key => {
+          const descriptor = Object.getOwnPropertyDescriptor(entry, key);
+          const item = descriptor && Object.prototype.hasOwnProperty.call(descriptor, "value") ? descriptor.value : null;
+          return !!item && typeof item === "object" &&
+            Object.keys(item).some(name => /^(id|cid|sid|name|clientId|serverId)$/i.test(name));
+        });
+        if (sampleKey) candidates.push({ value: entry, score: numericKeys.length });
+      } catch (_) {}
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0]?.value || null;
+  };
+  const nativeItemDefinitions = resolveItemDefinitions();
+
   const nativeMouse = (() => {
     try {
       return nativeClient.mouse ||
@@ -329,9 +351,9 @@ window.__minibiaBotClientCompatReady = (async () => {
       if (property === "mouse") return nativeMouse || bindMethod(target, Reflect.get(target, property, target));
       if (property === "interface") return interfaceBridge;
       if (property === "itemDefinitionsByCid" || property === "itemDefinitions") {
-        return null;
+        return nativeItemDefinitions;
       }
-      if (property === "itemDefinitionsBySid") return null;
+      if (property === "itemDefinitionsBySid") return nativeItemDefinitions;
       if (property === "send") return undefined;
       return bindMethod(target, Reflect.get(target, property, target));
     }
@@ -436,7 +458,7 @@ window.__minibiaBotClientCompatReady = (async () => {
     },
     get worldAvailable() { return !!resolveWorld(); },
     get pathfinderAvailable() { return !!resolvePathfinder(); },
-    itemDefinitionsAvailable: false,
+    itemDefinitionsAvailable: !!nativeItemDefinitions,
     get adaptiveDiscovery() { return window.__minibiaBotAdaptive?.inspect?.(nativeClient) || null; },
     packetDispatchMethod: adaptivePacketDispatch?.key || null,
     get autoWalkAvailable() {
@@ -463,7 +485,7 @@ window.__minibiaBotClientCompatReady = (async () => {
     build: "adaptive",
     worldAvailable: !!resolveWorld(),
     pathfinderAvailable: !!resolvePathfinder(),
-    itemDefinitionsAvailable: false,
+    itemDefinitionsAvailable: !!nativeItemDefinitions,
     autoWalkAvailable: typeof nativeSend === "function" && (typeof window.__minibiaBotAdaptive?.getAutoWalkConstructor?.() === "function" || typeof NativeAutoWalkPacket === "function")
   });
 })();
