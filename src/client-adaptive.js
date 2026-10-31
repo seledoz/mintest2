@@ -333,5 +333,5 @@
   // Install the observer as early as possible. If the world/pathfinder is not
   // ready yet, the wrapper resolves its pathfinder lazily on the first packet.
   try { inspect(); } catch (_) {}
-  console.info("[minibia-bot] adaptive client discovery v3 installed");
+  console.info("[minibia-bot] adaptive client discovery v4 installed");
 })();
