@@ -32,6 +32,23 @@
 
   const resolveWorld = () => nativeClient.world || null;
 
+  // Resolve the native attack action by its behavior, not its scrambled name.
+  // Current builds implement it as a World method that accepts a Set<Creature>,
+  // updates Player.setTarget(), and dispatches the native attack packet.
+  const resolveNativeAttackMethod = (world) => {
+    if (!world) return null;
+    return getPropertyValues(world).find((value) => {
+      if (typeof value !== "function") return false;
+      let source = "";
+      try { source = Function.prototype.toString.call(value); } catch (_) {}
+      return source.includes("values") &&
+        source.includes("next") &&
+        source.includes("Creature") &&
+        source.includes("setTarget") &&
+        source.includes("DMHavyabcUhA");
+    }) || null;
+  };
+
   // The game scrambles public property/method names between client builds.
   // Identify the native pathfinder by its stable state shape rather than
   // depending on one obfuscated world property name.
@@ -365,6 +382,21 @@
     nativeClient,
     world,
     pathfinder,
+    get nativeAttackAvailable() {
+      return typeof resolveNativeAttackMethod(resolveWorld()) === "function";
+    },
+    attackCreature(creature) {
+      const currentWorld = resolveWorld();
+      const nativeAttack = resolveNativeAttackMethod(currentWorld);
+      if (!creature || typeof nativeAttack !== "function") return false;
+      try {
+        nativeAttack.call(currentWorld, new Set([creature]));
+        return true;
+      } catch (error) {
+        console.warn("[minibia-bot] native attack dispatch failed", error);
+        return false;
+      }
+    },
     get worldAvailable() { return !!resolveWorld(); },
     get pathfinderAvailable() { return !!resolvePathfinder(); },
     itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
