@@ -103,6 +103,7 @@
   // The search is bounded and reads data properties only (never invokes getters).
   let cachedMinimapClient = null;
   let cachedMinimap = null;
+  let lastMinimapScanAt = 0;
   const isMinimapLike = (candidate) => {
     if (!candidate || typeof candidate !== "object") return false;
     const renderLayer = getDataProperty(candidate, "__renderLayer");
@@ -120,6 +121,11 @@
   const resolveMinimap = (client) => {
     if (!client) return null;
     if (cachedMinimapClient === client && isMinimapLike(cachedMinimap)) return cachedMinimap;
+    const now = Date.now();
+    if (cachedMinimapClient === client && now - lastMinimapScanAt < 1000) return null;
+    cachedMinimapClient = client;
+    lastMinimapScanAt = now;
+    cachedMinimap = null;
     const queue = [{ value: client, depth: 0 }];
     const seen = new Set();
     let inspected = 0;
