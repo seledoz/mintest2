@@ -42,7 +42,7 @@
       if (typeof value !== "function") continue;
       let source = "";
       try { source = Function.prototype.toString.call(value); } catch (_) {}
-      if (!/setTarget\s*\(/.test(source)) continue;
+      if (!source.includes("setTarget")) continue;
       const hasSetIteration = /\.values\s*\(/.test(source) && /\.next\s*\(/.test(source);
       if (!hasSetIteration) continue;
       let score = 4;
