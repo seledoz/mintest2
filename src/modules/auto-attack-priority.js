@@ -27,7 +27,12 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     return result;
   }
   function persistConfig() { bot.storage.set(configStorageKey, { ...config, creatureNames: [...config.creatureNames] }); }
-  function getCurrentTarget() { return window.gameClient?.player?.__target || null; }
+  function getCurrentTarget() {
+    return bot.attack?.getCurrentTarget?.() ||
+      window.__minibiaBotClientCompat?.nativeClient?.player?.__target ||
+      window.gameClient?.player?.__target ||
+      null;
+  }
   function normalizePosition(value) {
     if (!value) return null;
     const x = Number(value.x), y = Number(value.y), z = Number(value.z);
@@ -44,10 +49,32 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     return Math.abs(Number(playerPosition.x) - Number(monsterPosition.x)) <= maxX &&
       Math.abs(Number(playerPosition.y) - Number(monsterPosition.y)) <= maxY;
   }
+  function readHealthNumber(value) {
+    if (value == null || (typeof value === "string" && !value.trim())) return null;
+    const normalized = typeof value === "string" ? value.trim().replace(/%$/, "") : value;
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
   function getCurrentHealth(monster) {
     if (!monster) return Number.NEGATIVE_INFINITY;
-    const value = [monster.health, monster.hp, monster.currentHealth, monster.state?.health, monster.healthPercent, monster.hpPercent, monster.healthpercentage, monster.state?.healthPercent].find((entry) => Number.isFinite(Number(entry)));
-    return value == null ? Number.NEGATIVE_INFINITY : Number(value);
+
+    // Prefer the creature's remaining absolute HP. Fall back to a health
+    // percentage only when the client does not expose a current-HP value.
+    const current = [
+      monster.health,
+      monster.hp,
+      monster.currentHealth,
+      monster.state?.health,
+    ].map(readHealthNumber).find((value) => value != null);
+    if (current != null) return current;
+
+    const percent = [
+      monster.healthPercent,
+      monster.hpPercent,
+      monster.healthpercentage,
+      monster.state?.healthPercent,
+    ].map(readHealthNumber).find((value) => value != null);
+    return percent != null ? percent : Number.NEGATIVE_INFINITY;
   }
   function getPriorityIndex(creatureOrName) {
     const name = typeof creatureOrName === "string" ? normalizeName(creatureOrName) : normalizeName(creatureOrName?.name || "");
@@ -80,14 +107,12 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     return entries.sort(sortHighestHp)[0]?.monster || null;
   }
   function selectTarget(target, reason = "creature priority") {
-    // The current client build keeps its attack packet constructor private and
-    // the compatibility bridge intentionally does not expose client.send.
-    // Use the same native attack entry point as Auto Attack and Sticky Target.
-    const client = window.__minibiaBotClientCompat?.nativeClient || window.gameClient;
-    const nativeAttack = client?.world?.RKjzQVbLLo;
-    if (!target || typeof nativeAttack !== "function") return false;
+    const compat = window.__minibiaBotClientCompat;
+    if (!target || typeof compat?.attackCreature !== "function") return false;
     try {
-      nativeAttack.call(client.world, new Set([target]));
+      // Always dispatch through the adaptive bridge. Never call a scrambled
+      // World method by a hard-coded property name from this module.
+      if (!compat.attackCreature(target)) return false;
       state.lastSelectedTargetId = target.id;
       bot.log("selected auto attack target", {
         id: target.id,
@@ -119,19 +144,9 @@ window.__minibiaBotBundle.installAutoAttackPriorityModule = function installAuto
     if (!currentTarget) return selectTarget(preferredTarget, reason);
     if (Number(currentTarget.id) === Number(preferredTarget.id)) return false;
 
-    // When Sticky Target is enabled, do not fight it over another monster
-    // at the same priority rank. Creature Priority may still replace the
-    // current target when the preferred creature has a strictly higher rank.
-    const stickyEnabled = bot.attackStickyTarget?.config?.enabled === true;
-    if (stickyEnabled) {
-      const currentPriority = getPriorityIndex(currentTarget);
-      const preferredPriority = getPriorityIndex(preferredTarget);
-
-      if (preferredPriority >= 0 && currentPriority >= 0 && preferredPriority >= currentPriority) {
-        return false;
-      }
-    }
-
+    // Explicit Creature Priority / Highest HP selection takes precedence
+    // over Sticky Target. Otherwise Sticky Target can pin a lower-ranked or
+    // lower-HP creature and prevent the configured selector from ever winning.
     return selectTarget(preferredTarget, reason);
   }
   function stopTimer() { if (state.timerId != null) window.clearInterval(state.timerId); state.timerId = null; }
