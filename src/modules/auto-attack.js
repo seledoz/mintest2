@@ -662,6 +662,8 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       combatDurationMs: state.combatStartedAt ? Math.max(0, Date.now() - state.combatStartedAt) : 0,
       targetCount: getCombatTargetCount(),
       lastChaseAt: state.lastChaseAt,
+      nativeAttackAvailable: !!window.__minibiaBotClientCompat?.nativeAttackAvailable,
+      nativeAttackDiagnostics: window.__minibiaBotClientCompat?.nativeAttackDiagnostics || null,
       currentTarget: getCurrentTarget()
         ? {
             id: getCurrentTarget().id,
