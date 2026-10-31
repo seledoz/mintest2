@@ -93,8 +93,6 @@ window.__minibiaBotClientCompatReady = (async () => {
   const resolvePathfinder = () => {
     const world = resolveWorld();
     if (!world) return null;
-    try {
-    } catch (_) {}
     const adaptivePathfinder = window.__minibiaBotAdaptive?.resolvePathfinder?.(nativeClient);
     if (isNativePathfinder(adaptivePathfinder)) return adaptivePathfinder;
     return getPropertyValues(world).find(isNativePathfinder) || null;
@@ -120,9 +118,7 @@ window.__minibiaBotClientCompatReady = (async () => {
       try { source = Function.prototype.toString.call(value); } catch (_) {}
       if (source.includes("__finalDestination") &&
           source.includes("__pathfindCache") &&
-          source.includes("__autoWalkStepsRemaining") &&
-          source.includes("__pendingUseObject") &&
-          source.includes("__autoWalkStepsRemaining")) return value;
+          source.includes("__pendingUseObject")) return value;
     }
     return null;
   };
