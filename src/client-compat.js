@@ -32,9 +32,6 @@
 
   const resolveWorld = () => nativeClient.world || null;
 
-  // Resolve the native attack action by its behavior, not its scrambled name.
-  // Current builds implement it as a World method that accepts a Set<Creature>,
-  // updates Player.setTarget(), and dispatches the native attack packet.
   // Discover the native attack action by stable behavior, not scrambled helper names.
   // The action iterates a Set of creatures and updates the Player target.
   // Candidate methods are inspected only; discovery never invokes them.
@@ -45,13 +42,13 @@
       if (typeof value !== "function") continue;
       let source = "";
       try { source = Function.prototype.toString.call(value); } catch (_) {}
-      if (!/setTarget\\s*\\(/.test(source)) continue;
-      const hasSetIteration = /\\.values\\s*\\(/.test(source) && /\\.next\\s*\\(/.test(source);
+      if (!/setTarget\s*\(/.test(source)) continue;
+      const hasSetIteration = /\.values\s*\(/.test(source) && /\.next\s*\(/.test(source);
       if (!hasSetIteration) continue;
       let score = 4;
-      if (/new Set\\s*\\(/.test(source)) score += 2;
+      if (/new Set\s*\(/.test(source)) score += 2;
       if (/Creature/.test(source)) score += 1;
-      if (/\\.setTarget\\s*\\(/.test(source)) score += 1;
+      if (/\.setTarget\s*\(/.test(source)) score += 1;
       if (/DMHavyabcUhA/.test(source)) score += 1;
       candidates.push({ method: value, score });
     }
