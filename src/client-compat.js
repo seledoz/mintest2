@@ -470,6 +470,33 @@
         return false;
       }
     },
+    // Native Minibia follow API. Keep this in the compatibility bridge so
+    // the rest of the bot does not depend on the game's internal object path.
+    followCreature(creature) {
+      const client = refreshNativeClient();
+      const follow = client?.aWSxdABvSpX?.qEOhSUmoEi;
+      const id = Number(creature?.id);
+      if (!Number.isFinite(id) || id <= 0 || typeof follow !== "function") return false;
+      try {
+        follow.call(client.aWSxdABvSpX, id);
+        return true;
+      } catch (error) {
+        console.warn("[minibia-bot] native follow dispatch failed", error);
+        return false;
+      }
+    },
+    stopFollowing() {
+      const client = refreshNativeClient();
+      const follow = client?.aWSxdABvSpX?.qEOhSUmoEi;
+      if (typeof follow !== "function") return false;
+      try {
+        follow.call(client.aWSxdABvSpX, 0);
+        return true;
+      } catch (error) {
+        console.warn("[minibia-bot] native stop-follow dispatch failed", error);
+        return false;
+      }
+    },
     get worldAvailable() { return !!resolveWorld(); },
     get pathfinderAvailable() { return !!resolvePathfinder(); },
     get itemDefinitionsAvailable() { return !!refreshNativeClient()?.TPWhmLyqyrg; },
