@@ -186,7 +186,7 @@
       Number.isFinite(Number(zoomLevel)) &&
       !!center && Number.isFinite(Number(getDataProperty(center, "x"))) &&
       Number.isFinite(Number(getDataProperty(center, "y"))) &&
-      !!canvas && typeof canvas.getBoundingClientRect === "function";
+      !!canvas && (typeof canvas === "object" || typeof canvas === "function");
   };
 
   const resolveMinimap = (client) => {
