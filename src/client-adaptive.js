@@ -154,6 +154,8 @@
 
   let cachedClient = null;
   let cachedDispatch = null;
+  let observerClient = null;
+  let discoveryClient = null;
   const unwrapDispatch = (fn) => {
     let current = fn;
     for (let i = 0; i < 3 && typeof current === "function"; i += 1) {
@@ -299,12 +301,13 @@
 
   const installPacketObserver = (client, dispatch) => {
     if (!client || !dispatch) return false;
-    if (packetObserverInstalled && cachedClient === client) return true;
+    if (observerClient === client && packetObserverInstalled) return true;
     try {
       const key = dispatch.key;
       const current = client[key];
       if (typeof current !== "function") throw new Error("Native packet dispatcher is not callable");
       if (current.__minibiaAdaptiveObserver === true) {
+        observerClient = client;
         packetObserverInstalled = true;
         return true;
       }
@@ -343,6 +346,7 @@
       });
       packetObserverInstalled = client[key] === wrapper;
       if (!packetObserverInstalled) throw new Error("Could not install passive packet observer");
+      observerClient = client;
       return true;
     } catch (error) {
       packetObserverError = String(error?.message || error);
@@ -362,12 +366,25 @@
   const inspect = (seed) => {
     const client = resolveClient(seed);
     const world = (() => { try { return client?.world || null; } catch (_) { return null; } })();
+    if (discoveryClient !== client) {
+      // Drop references tied to the previous client before resolving the replacement.
+      observedAutoWalkConstructor = null;
+      observedAutoWalkConstructorName = null;
+      observedStopWalkConstructor = null;
+      observedStopWalkConstructorName = null;
+      packetObserverInstalled = false;
+      packetObserverError = null;
+      observerClient = null;
+      cachedClient = null;
+      cachedDispatch = null;
+      cachedMinimapClient = null;
+      cachedMinimap = null;
+      discoveryClient = client;
+    }
     const pathfinder = resolvePathfinder(client);
     const packetDispatch = resolvePacketDispatch(client);
+    resolveNativePacketConstructors(pathfinder, client, packetDispatch);
     const observerInstalled = installPacketObserver(client, packetDispatch);
-    if (!observedAutoWalkConstructorName) {
-      observedAutoWalkConstructorName = resolveAutoWalkConstructorName(pathfinder, client, packetDispatch);
-    }
     return {
       version: 6,
       clientFound: !!client,
