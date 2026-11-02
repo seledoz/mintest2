@@ -2,24 +2,19 @@
 // Install before core.js and all modules. The native World is created only
 // after server data arrives, so world/pathfinder access must remain lazy.
 (() => {
-  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 6) return;
+  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 7) return;
 
   let nativeClient = null;
   let NativePosition = null;
   let NativeAutoWalkPacket = null;
 
   try {
-    // The 2026-11-01 scrambled launcher keeps its live GameClient in the
-    // global lexical binding EtkwRLdTdNBx (not on window). Seed structural
-    // discovery with that binding; retain fallback discovery for other builds.
-    const lexicalClient = eval("typeof EtkwRLdTdNBx !== 'undefined' ? EtkwRLdTdNBx : null");
-    nativeClient = window.__minibiaBotAdaptive?.resolveClient?.(lexicalClient)
-      || lexicalClient
-      || window.__minibiaBotAdaptive?.resolveClient?.()
-      || eval("typeof YPXHlIjOD !== 'undefined' ? YPXHlIjOD : null")
-      || eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null");
-    NativePosition = eval("typeof zeOvojmNkQxY === 'function' ? zeOvojmNkQxY : null") || nativeClient?.player?.__position?.constructor || null;
-    NativeAutoWalkPacket = eval("typeof twTOLoGSHp === 'function' ? twTOLoGSHp : null");
+    // The adaptive module resolves the randomized global-lexical GameClient
+    // binding from the live core/index.js source. No scrambled identifier is
+    // stored in this bridge.
+    nativeClient = window.__minibiaBotAdaptive?.resolveClient?.() || null;
+    NativePosition = nativeClient?.player?.__position?.constructor || null;
+    NativeAutoWalkPacket = window.__minibiaBotAdaptive?.getAutoWalkConstructor?.() || null;
   } catch (error) {
     console.warn("[minibia-bot] client compatibility probe failed", error);
   }
@@ -38,20 +33,12 @@
   // to the client instance that existed when the module first loaded.
   const refreshNativeClient = () => {
     const adaptive = window.__minibiaBotAdaptive;
-    let candidate = null;
-    try { candidate = eval("typeof EtkwRLdTdNBx !== 'undefined' ? EtkwRLdTdNBx : null"); } catch (_) {}
-    if (!candidate) {
-      try { candidate = eval("typeof YPXHlIjOD !== 'undefined' ? YPXHlIjOD : null"); } catch (_) {}
-    }
-    if (!candidate) {
-      try { candidate = eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null"); } catch (_) {}
-    }
-    const resolved = adaptive?.resolveClient?.(candidate) || candidate;
-    if (resolved && (typeof resolved === "object" || typeof resolved === "function") &&
-        resolved !== nativeClient) {
+    const resolved = adaptive?.resolveClient?.() || null;
+    if (resolved && resolved !== nativeClient) {
       nativeClient = resolved;
       try {
         NativePosition = nativeClient?.player?.__position?.constructor || NativePosition;
+        NativeAutoWalkPacket = adaptive?.getAutoWalkConstructor?.() || NativeAutoWalkPacket;
       } catch (_) {}
       try { adaptive?.inspect?.(nativeClient); } catch (_) {}
     }
@@ -80,7 +67,6 @@
       if (/new Set\s*\(/.test(source)) score += 2;
       if (/Creature/.test(source)) score += 1;
       if (/\.setTarget\s*\(/.test(source)) score += 1;
-      if (/DMHavyabcUhA/.test(source)) score += 1;
       candidates.push({ method: value, score });
     }
     if (!candidates.length) return null;
@@ -125,28 +111,21 @@
   };
 
   const resolvePathfinder = () => {
+    const client = refreshNativeClient();
     const world = resolveWorld();
-    if (!world) return null;
-    try {
-      if (isNativePathfinder(world.hNccDTwTki)) return world.hNccDTwTki;
-    } catch (_) {}
-    const adaptivePathfinder = window.__minibiaBotAdaptive?.resolvePathfinder?.(refreshNativeClient());
+    if (!client || !world) return null;
+    const adaptivePathfinder = window.__minibiaBotAdaptive?.resolvePathfinder?.(client);
     if (isNativePathfinder(adaptivePathfinder)) return adaptivePathfinder;
     return getPropertyValues(world).find(isNativePathfinder) || null;
   };
 
   const resolveNativePathfindMethod = (target) => {
-    for (const value of getPropertyValues(target)) {
-      if (typeof value !== "function") continue;
-      let source = "";
-      try { source = Function.prototype.toString.call(value); } catch (_) {}
-      if (source.includes("__isAutoWalking") &&
-          source.includes("__pathfindCache") &&
-          source.includes("getTileFromWorldPosition") &&
-          source.includes("DMHavyabcUhA") &&
-          source.includes("search")) return value;
+    try {
+      const method = target?.findPath;
+      return typeof method === "function" ? method : null;
+    } catch (_) {
+      return null;
     }
-    return null;
   };
 
   const resolveNativeClearMethod = (target) => {
@@ -157,8 +136,7 @@
       if (source.includes("__finalDestination") &&
           source.includes("__pathfindCache") &&
           source.includes("__autoWalkStepsRemaining") &&
-          source.includes("__pendingUseObject") &&
-          source.includes("DMHavyabcUhA")) return value;
+          source.includes("__pendingUseObject")) return value;
     }
     return null;
   };
@@ -346,7 +324,7 @@
       if (property === "mouse") return target.mouse || nativeMouse || bindMethod(target, Reflect.get(target, property, target));
       if (property === "interface") return interfaceBridge;
       if (property === "itemDefinitionsByCid" || property === "itemDefinitions") {
-        return target.TPWhmLyqyrg || null;
+        return target.itemDefinitionsByCid || target.itemDefinitions || null;
       }
       if (property === "itemDefinitionsBySid") return null;
       if (property === "send") return undefined;
@@ -436,8 +414,8 @@
   };
   window.__minibiaBotClientCompat = {
     installed: true,
-    version: 6,
-    build: "2026-11-01-1001",
+    version: 7,
+    build: "adaptive-structural-v12",
     client: clientBridge,
     get nativeClient() { return refreshNativeClient(); },
     world,
@@ -472,7 +450,7 @@
     },
     get worldAvailable() { return !!resolveWorld(); },
     get pathfinderAvailable() { return !!resolvePathfinder(); },
-    get itemDefinitionsAvailable() { return !!refreshNativeClient()?.TPWhmLyqyrg; },
+    get itemDefinitionsAvailable() { const current = refreshNativeClient(); return !!(current?.itemDefinitionsByCid || current?.itemDefinitions); },
     get adaptiveDiscovery() { const client = refreshNativeClient(); return window.__minibiaBotAdaptive?.inspect?.(client) || null; },
     get packetDispatchMethod() { return resolveCurrentPacketDispatch()?.key || null; },
     get autoWalkAvailable() {
@@ -498,7 +476,7 @@
     build: "2026-11-01-1001",
     worldAvailable: !!resolveWorld(),
     pathfinderAvailable: !!resolvePathfinder(),
-    itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
+    itemDefinitionsAvailable: !!(nativeClient.itemDefinitionsByCid || nativeClient.itemDefinitions),
     autoWalkAvailable: typeof nativeSend === "function" && (typeof window.__minibiaBotAdaptive?.getAutoWalkConstructor?.() === "function" || typeof NativeAutoWalkPacket === "function")
   });
 })();
