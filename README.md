@@ -1,9 +1,11 @@
-## Public repository (adaptive client build)
+## Public repository — adaptive test branch
+
+**For testing the adaptive client build, use the branch URL below, not `main`.** The adaptive changes are on `adaptive/structural-client-capture`; they have not been merged into `main`. Healing and rune making have been reported working, but cavebot is not working yet, so this is still a test build.
 
 Open Minibia, wait until your character is fully logged in and the game world is visible, then run this in the game page's browser console:
 
 ```js
-fetch("https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js?t=" + Date.now(), {
+fetch("https://raw.githubusercontent.com/seledoz/mintest2/adaptive/structural-client-capture/pz-bot.js?t=" + Date.now(), {
   cache: "no-store"
 })
   .then((response) => {
@@ -20,7 +22,9 @@ fetch("https://raw.githubusercontent.com/seledoz/mintest2/main/pz-bot.js?t=" + D
   });
 ```
 
-This loader installs the adaptive client-discovery layer and compatibility bridge immediately. The bridge can initialize before the world and player are ready, then resolves those objects lazily as the game finishes starting. The browser may display a Promise while the loader fetches the bot; that is normal and is not a load confirmation. A successful load prints a message beginning with [minibia-bot] Loaded source files. After loading, make one ordinary in-game click-to-walk so the passive observer can learn the current client's native AutoWalk packet constructor; it does not send test packets.
+A console entry showing `Promise {<pending>}` is normal while loading and is not confirmation that the bot loaded. A successful load prints a message beginning with `[minibia-bot] Loaded source files`.
+
+**Do not use the `main` loader URL for adaptive-build testing.** The current `main` loader and adaptive compatibility bridge are from different versions, which causes the error `Client compatibility bridge did not install version 2`. Keep testing and fixes on `adaptive/structural-client-capture`; do not merge into `main` until cavebot is fixed and retested.
 
 ## Private repository
 
