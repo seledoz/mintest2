@@ -228,8 +228,8 @@
     if (!pathfinder || !dispatch?.key) return [];
     const dispatchKey = escapeRegExp(dispatch.key);
     const dispatchCall = new RegExp(
-      "(?:\\\\[['\\\"]" + dispatchKey + "['\\\"]\\\\]|\\\\." + dispatchKey +
-      ")\\\\s*\\\\(\\\\s*new\\\\s+([A-Za-z_$][\\\\w$]*)\\\\s*\\\\(([^)]*)\\\\)\\\\s*\\\\)",
+      "(?:\\[['\\\"]" + dispatchKey + "['\\\"]\\]|\\." + dispatchKey +
+      ")\\s*\\(\\s*new\\s+([A-Za-z_$][\\w$]*)\\s*\\(([^)]*)\\)\\s*\\)",
       "g"
     );
     const calls = [];
