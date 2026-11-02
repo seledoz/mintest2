@@ -2,7 +2,7 @@
 // Uses passive structural inspection and observes only packets the native game sends.
 // It never calls unknown methods or injects probe packets.
 (() => {
-  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 4) return;
+  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 5) return;
 
   const ownDataValues = (object, maxDepth = 3) => {
     const values = [];
@@ -206,7 +206,24 @@
   let packetObserverError = null;
   const observedPacketTypes = [];
 
+  // The 2026-11-01 client exposes its native AutoWalk packet constructor
+  // as the module-scoped lexical binding KotINRuodWb. Resolve that exact
+  // constructor directly; source-anchor discovery is brittle across scrambles.
+  const resolveAutoWalkConstructor = () => {
+    try {
+      const candidate = eval("typeof KotINRuodWb === 'function' ? KotINRuodWb : null");
+      return typeof candidate === "function" ? candidate : null;
+    } catch (_) {
+      return null;
+    }
+  };
+
   const resolveAutoWalkConstructorName = (pathfinder) => {
+    const nativeConstructor = resolveAutoWalkConstructor();
+    if (nativeConstructor) {
+      observedAutoWalkConstructor = nativeConstructor;
+      return nativeConstructor.name || "KotINRuodWb";
+    }
     if (!pathfinder) return null;
     for (const entry of ownDataValues(pathfinder, 3)) {
       if (typeof entry.value !== "function") continue;
@@ -292,7 +309,7 @@
       observedAutoWalkConstructorName = resolveAutoWalkConstructorName(pathfinder);
     }
     return {
-      version: 4,
+      version: 5,
       clientFound: !!client,
       worldFound: !!world,
       pathfinderFound: !!pathfinder,
@@ -316,7 +333,7 @@
 
   const api = {
     installed: true,
-    version: 4,
+    version: 5,
     resolveClient,
     resolvePathfinder,
     resolveMinimap,
