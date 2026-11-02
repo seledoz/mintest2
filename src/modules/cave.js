@@ -509,68 +509,6 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     else stuckCounts.clear();
   }
 
-  const chaseState = { targetId: null, startedAt: 0, lastDistance: Infinity, stallCount: 0 };
-  const CHASE_TIMEOUT_MS = 15000;
-  const CHASE_MAX_STALL = 5;
-  const CHASE_MAX_DISTANCE = 8;
-
-  function findAdjacentWalkablePositionForCave(targetPosition, playerPosition) {
-    if (!targetPosition || !playerPosition) return null;
-    const offsets = [
-      { x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 },
-      { x: -1, y: -1 }, { x: 1, y: -1 }, { x: -1, y: 1 }, { x: 1, y: 1 },
-    ];
-    offsets.sort((a, b) => {
-      const da = Math.abs(targetPosition.x + a.x - playerPosition.x) + Math.abs(targetPosition.y + a.y - playerPosition.y);
-      const db = Math.abs(targetPosition.x + b.x - playerPosition.x) + Math.abs(targetPosition.y + b.y - playerPosition.y);
-      return da - db;
-    });
-    for (const offset of offsets) {
-      const position = new Position(targetPosition.x + offset.x, targetPosition.y + offset.y, targetPosition.z);
-      const tile = window.gameClient?.world?.getTileFromWorldPosition?.(position);
-      if (tile?.isWalkable?.()) return normalizePosition(position);
-    }
-    return null;
-  }
-
-  function chaseTarget(target) {
-    if (!target) return false;
-    const now = Date.now();
-    const playerPos = normalizePosition(bot.getPlayerPosition());
-    const targetPos = normalizePosition(target.getPosition?.() || target.__position);
-    if (!playerPos || !targetPos || playerPos.z !== targetPos.z) return false;
-    if (!isOnScreen(targetPos, playerPos)) return giveUpChase(target, 'offscreen');
-    const distance = Math.abs(playerPos.x - targetPos.x) + Math.abs(playerPos.y - targetPos.y);
-    if (distance > CHASE_MAX_DISTANCE) return giveUpChase(target, 'too far');
-    if (chaseState.targetId !== target.id) {
-      chaseState.targetId = target.id;
-      chaseState.startedAt = now;
-      chaseState.lastDistance = distance;
-      chaseState.stallCount = 0;
-    }
-    if (now - chaseState.startedAt > CHASE_TIMEOUT_MS) return giveUpChase(target, 'timeout');
-    if (distance >= chaseState.lastDistance) {
-      chaseState.stallCount++;
-      if (chaseState.stallCount > CHASE_MAX_STALL) return giveUpChase(target, 'stalled');
-    } else chaseState.stallCount = 0;
-    chaseState.lastDistance = distance;
-    const adjacent = findAdjacentWalkablePositionForCave(targetPos, playerPos);
-    if (!adjacent) return giveUpChase(target, 'no walkable adjacent');
-    const to = new Position(adjacent.x, adjacent.y, playerPos.z);
-    try {
-      window.gameClient?.world?.pathfinder?.findPath?.(playerPos, to);
-      return true;
-    } catch (e) {
-      return giveUpChase(target, 'pathfind error');
-    }
-  }
-
-  function giveUpChase(target, reason) {
-    chaseState.targetId = null;
-    bot.log("cave gave up chase", { targetId: target?.id, reason });
-    return false;
-  }
-
   const VIEWPORT_DX = 8;
   const VIEWPORT_DY = 6;
 
@@ -1359,13 +1297,8 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
           resetStuckCounts();
           bot.log("cave paused for auto attack", { combatDurationMs: Number(attackStatus?.combatDurationMs || 0), targetCount: Number(attackStatus?.targetCount || 0) });
         }
-        if (isAStarPathfinderMode()) {
-          const target = bot.attack?.getCurrentTarget?.() || null;
-          if (target) {
-            const chaseResult = chaseTarget(target);
-            bot.logDebug("cave combat chase", { chasing: chaseResult, targetId: target.id, targetName: target.name || "Mob", targetPos: normalizePosition(target.getPosition?.() || target.__position) });
-          } else bot.logDebug("cave combat no target to chase");
-        }
+        // Auto Attack owns combat movement through Minibia's native follow
+        // command. Cavebot only pauses its waypoint route while combat is active.
         return;
       }
       if (state.pausedForCombat) {

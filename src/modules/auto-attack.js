@@ -164,6 +164,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function clearEngagedTarget() {
+    clearCurrentFollowTarget();
     state.engagedTargetId = null;
     state.combatStartedAt = 0;
     state.lastChaseDestinationKey = null;
@@ -171,7 +172,16 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function clearCurrentFollowTarget() {
-    return false;
+    const compat = window.__minibiaBotClientCompat;
+    if (typeof compat?.stopFollowing !== "function") return false;
+    try {
+      const stopped = compat.stopFollowing();
+      if (stopped) resetFollowProgress();
+      return stopped;
+    } catch (error) {
+      bot.logDebug("native follow stop failed", { error: error?.message || error });
+      return false;
+    }
   }
 
   function clearCurrentTarget() {
@@ -251,6 +261,8 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
       // by its native behavior and dispatches the real client attack action.
       if (!compat.attackCreature(target)) return false;
       state.engagedTargetId = target.id;
+      // Use Minibia's native follow command; Cavebot never pathfinds toward monsters.
+      setCurrentFollowTarget(target);
       return true;
     } catch (error) {
       bot.log("native auto attack failed", {
@@ -262,7 +274,22 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function setCurrentFollowTarget(target) {
-    return false;
+    const compat = window.__minibiaBotClientCompat;
+    if (!target?.id || typeof compat?.followCreature !== "function") return false;
+    try {
+      const followed = compat.followCreature(target);
+      if (followed) {
+        state.lastFollowTargetId = target.id;
+        return true;
+      }
+      return false;
+    } catch (error) {
+      bot.logDebug("native follow target failed", {
+        targetId: target.id,
+        error: error?.message || error,
+      });
+      return false;
+    }
   }
 
   function skipTarget(target, reason, now = Date.now(), skipMs = 4000) {
@@ -274,7 +301,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
     state.skippedTargetIds.set(target.id, until);
 
     const clearedTarget = isSameCreature(getCurrentTarget(), target) ? clearCurrentTarget() : false;
-    const clearedFollow = false;
+    const clearedFollow = isSameCreature(getCurrentFollowTarget(), target) ? clearCurrentFollowTarget() : false;
 
     if (state.engagedTargetId === target.id) {
       clearEngagedTarget();
