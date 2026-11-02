@@ -164,6 +164,7 @@ window.__minibiaBotBundle.installAutoAttackModule = function installAutoAttackMo
   }
 
   function clearEngagedTarget() {
+    clearCurrentFollowTarget();
     state.engagedTargetId = null;
     state.combatStartedAt = 0;
     state.lastChaseDestinationKey = null;
