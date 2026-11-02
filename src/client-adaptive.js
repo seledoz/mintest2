@@ -197,6 +197,20 @@
     cachedMinimapClient = client;
     lastMinimapScanAt = now;
     cachedMinimap = null;
+    // Prefer the renderer's structurally identified minimap before the
+    // broad graph scan. Large scrambled clients can exhaust the scan budget
+    // before the renderer branch is visited.
+    for (const rendererEntry of ownDataValues(client, 1)) {
+      const renderer = rendererEntry.value;
+      if (!renderer || (typeof renderer !== "object" && typeof renderer !== "function")) continue;
+      for (const childEntry of ownDataValues(renderer, 1)) {
+        if (isMinimapLike(childEntry.value)) {
+          cachedMinimapClient = client;
+          cachedMinimap = childEntry.value;
+          return cachedMinimap;
+        }
+      }
+    }
     const queue = [{ value: client, depth: 0 }];
     const seen = new Set();
     let inspected = 0;
