@@ -130,8 +130,19 @@
   // Identify it from the stable state transitions it performs rather than its
   // randomized property name. Discovery is read-only: candidate methods are
   // inspected with Function#toString and are never invoked while probing.
+  let cachedPathStartTarget = null;
+  let cachedPathStartMethod = null;
+  let cachedPathStartResolved = false;
+
   const resolveNativePathStartMethod = (target) => {
     if (!target) return null;
+    // The pathfinder object is stable during normal movement. Avoid walking
+    // its prototype chain and parsing function source on every Cavebot tick.
+    // A new scrambled pathfinder instance automatically invalidates the cache.
+    if (target === cachedPathStartTarget && cachedPathStartResolved) {
+      return cachedPathStartMethod;
+    }
+
     const candidates = [];
     const seen = new Set();
     for (const value of getPropertyValues(target)) {
@@ -151,10 +162,17 @@
       if (value.length === 2) score += 1;
       candidates.push({ method: value, score });
     }
-    if (!candidates.length) return null;
+
     candidates.sort((a, b) => b.score - a.score);
-    if (candidates.length > 1 && candidates[0].score === candidates[1].score) return null;
-    return candidates[0].method;
+    const resolved = candidates.length &&
+      !(candidates.length > 1 && candidates[0].score === candidates[1].score)
+      ? candidates[0].method
+      : null;
+
+    cachedPathStartTarget = target;
+    cachedPathStartMethod = resolved;
+    cachedPathStartResolved = true;
+    return resolved;
   };
 
   const resolveNativeClearMethod = (target) => {
