@@ -41,6 +41,7 @@
         NativePosition = nativeClient?.player?.__position?.constructor || NativePosition;
         NativeAutoWalkPacket = adaptive?.getAutoWalkConstructor?.() || NativeAutoWalkPacket;
       } catch (_) {}
+      try { refreshNativeManagers(); } catch (_) {}
     }
     return nativeClient;
   };
@@ -265,15 +266,25 @@
     return null;
   };
 
-  const nativeChatManager =
-    findNestedObject(nativeClient, candidate => {
+  let nativeChatManager = null;
+  let nativeHotbarManager = null;
+  let nativeMouse = null;
+  let channelManager = null;
+  let managerClient = null;
+
+  const refreshNativeManagers = () => {
+    const currentClient = refreshNativeClient();
+    if (!currentClient || managerClient === currentClient) return;
+    managerClient = currentClient;
+
+    nativeChatManager = findNestedObject(currentClient, candidate => {
       const channels = getDataProperty(candidate, "channels");
       return Array.isArray(channels) && channels.some(channel =>
         Array.isArray(getDataProperty(channel, "__contents"))
       );
     }) || null;
-  const nativeHotbarManager =
-    findNestedObject(nativeClient, candidate => {
+
+    nativeHotbarManager = findNestedObject(currentClient, candidate => {
       const slots = getDataProperty(candidate, "slots");
       return Array.isArray(slots) && slots.some(slot => {
         const canvas = getDataProperty(slot, "canvas");
@@ -281,37 +292,46 @@
         return !!element && typeof element.click === "function";
       });
     }) || null;
-  const nativeMouse = (() => {
-    try {
-      return nativeClient.mouse ||
-        findNestedObject(nativeClient, candidate =>
-          typeof getDataProperty(candidate, "__handleItemUseWith") === "function" &&
-          (typeof getDataProperty(candidate, "use") === "function" ||
-           typeof getDataProperty(candidate, "move") === "function")
-        );
-    } catch (_) { return null; }
-  })();
 
-  // Keep native chat handling intact (commands, channel selection, PMs, etc.).
-  const channelManager = nativeChatManager ? new Proxy(nativeChatManager, {
-    get(target, property) {
-      if (property === "sendMessageText") {
-        return (message) => {
-          const sendText = getDataProperty(target, "sendMessageText");
-          if (typeof sendText !== "function") return false;
-          const text = String(message ?? "").trim();
-          if (!text) return false;
-          sendText.call(target, text);
-          return true;
-        };
+    nativeMouse = (() => {
+      try {
+        return currentClient.mouse ||
+          findNestedObject(currentClient, candidate =>
+            typeof getDataProperty(candidate, "__handleItemUseWith") === "function" &&
+            (typeof getDataProperty(candidate, "use") === "function" ||
+             typeof getDataProperty(candidate, "move") === "function")
+          );
+      } catch (_) { return null; }
+    })();
+
+    channelManager = nativeChatManager ? new Proxy(nativeChatManager, {
+      get(target, property) {
+        if (property === "sendMessageText") {
+          return (message) => {
+            const sendText = getDataProperty(target, "sendMessageText");
+            if (typeof sendText !== "function") return false;
+            const text = String(message ?? "").trim();
+            if (!text) return false;
+            sendText.call(target, text);
+            return true;
+          };
+        }
+        return bindMethod(target, Reflect.get(target, property, target));
       }
-      return bindMethod(target, Reflect.get(target, property, target));
-    }
-  }) : null;
+    }) : null;
+  };
+
+  refreshNativeManagers();
 
   const interfaceBridge = {
-    channelManager,
-    hotbarManager: nativeHotbarManager || null
+    get channelManager() {
+      refreshNativeManagers();
+      return channelManager;
+    },
+    get hotbarManager() {
+      refreshNativeManagers();
+      return nativeHotbarManager || null;
+    }
   };
 
   const clientBridge = new Proxy(nativeClient, {
@@ -319,7 +339,7 @@
       const target = refreshNativeClient();
       if (!target) return undefined;
       if (property === "world") return world;
-      if (property === "mouse") return target.mouse || nativeMouse || bindMethod(target, Reflect.get(target, property, target));
+      if (property === "mouse") { refreshNativeManagers(); return target.mouse || nativeMouse || bindMethod(target, Reflect.get(target, property, target)); }
       if (property === "interface") return interfaceBridge;
       if (property === "itemDefinitionsByCid" || property === "itemDefinitions") {
         return target.itemDefinitionsByCid || target.itemDefinitions || null;
