@@ -62,12 +62,18 @@
       let source = "";
       try { source = Function.prototype.toString.call(value); } catch (_) {}
       if (!source.includes("setTarget")) continue;
-      const hasSetIteration = /\.values\s*\(/.test(source) && /\.next\s*\(/.test(source);
+      // The scrambler may rewrite member calls as bracket notation:
+      // obj.values().next() -> obj['values']()['next']().
+      const hasSetIteration =
+        /(?:\.values|\[['"]values['"]\])\s*\(/.test(source) &&
+        /(?:\.next|\[['"]next['"]\])\s*\(/.test(source);
       if (!hasSetIteration) continue;
+      const callsSetTarget = /(?:\.setTarget|\[['"]setTarget['"]\])\s*\(/.test(source);
+      if (!callsSetTarget) continue;
       let score = 4;
       if (/new Set\s*\(/.test(source)) score += 2;
-      if (/Creature/.test(source)) score += 1;
-      if (/\.setTarget\s*\(/.test(source)) score += 1;
+      if (/Creature/.test(source)) score += 2;
+      if (/new [A-Za-z_$][\w$]*\s*\(/.test(source)) score += 1;
       candidates.push({ method: value, score });
     }
     if (!candidates.length) return null;
