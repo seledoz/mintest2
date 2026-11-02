@@ -434,7 +434,6 @@
     dispatch.call(packet);
     return true;
   };
-  const initialPacketDispatch = resolveCurrentPacketDispatch();
   window.__minibiaBotClientCompat = {
     installed: true,
     version: 6,
@@ -452,9 +451,9 @@
       return {
         available: typeof method === "function",
         worldAvailable: !!currentWorld,
-        playerAvailable: !!nativeClient?.player,
-        playerTargetAvailable: !!nativeClient?.player &&
-          ("__target" in nativeClient.player || typeof nativeClient.player.setTarget === "function"),
+        playerAvailable: !!refreshNativeClient()?.player,
+        playerTargetAvailable: !!refreshNativeClient()?.player &&
+          ("__target" in refreshNativeClient().player || typeof refreshNativeClient().player.setTarget === "function"),
         methodArity: typeof method === "function" ? method.length : null
       };
     },
@@ -473,8 +472,8 @@
     },
     get worldAvailable() { return !!resolveWorld(); },
     get pathfinderAvailable() { return !!resolvePathfinder(); },
-    itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
-    get adaptiveDiscovery() { return window.__minibiaBotAdaptive?.inspect?.(nativeClient) || null; },
+    get itemDefinitionsAvailable() { return !!refreshNativeClient()?.TPWhmLyqyrg; },
+    get adaptiveDiscovery() { const client = refreshNativeClient(); return window.__minibiaBotAdaptive?.inspect?.(client) || null; },
     get packetDispatchMethod() { return resolveCurrentPacketDispatch()?.key || null; },
     get autoWalkAvailable() {
       return typeof nativeSend === "function" &&
