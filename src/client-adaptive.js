@@ -551,7 +551,7 @@
 
   const api = {
     installed: true,
-    version: 12,
+    version: 13,
     resolveClient,
     captureClient,
     refreshClientBinding,
