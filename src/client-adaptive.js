@@ -2,7 +2,7 @@
 // Uses passive structural inspection and observes only packets the native game sends.
 // It never calls unknown methods or injects probe packets.
 (() => {
-  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 11) return;
+  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 12) return;
 
   const ownDataValues = (object, maxDepth = 3) => {
     const values = [];
@@ -31,27 +31,102 @@
     catch (_) { return ""; }
   };
 
+  // The live GameClient is a global lexical binding, not necessarily a window
+  // property. Resolve its randomized name from the currently loaded core/index.js
+  // source instead of keeping a build-specific identifier in this module.
+  let capturedClient = null;
+  let capturedBindingName = null;
+  let capturedSourceUrl = null;
+  let bindingRefreshPromise = null;
+
   const isClientLike = (value) => {
     if (!value || (typeof value !== "object" && typeof value !== "function")) return false;
     try {
       const props = ownDataValues(value, 2);
-      const hasPlayer = props.some(x => x.key === "player" && x.value && typeof x.value === "object");
-      const hasNetworkHandler = props.some(x => x.value && typeof x.value === "object" &&
-        ownDataValues(x.value, 2).some(y => typeof y.value === "function" &&
-          /getBuffer/.test(safeSource(y.value)) && /socket/.test(safeSource(y.value))));
-      return hasPlayer && hasNetworkHandler;
+      const hasServerVersion = props.some(x => x.key === "SERVER_VERSION");
+      const hasPlayerSlot = props.some(x => x.key === "player");
+      const hasConnect = props.some(x => x.key === "connect" && typeof x.value === "function");
+      const hasNetworkManager = props.some(x => x.value && typeof x.value === "object" &&
+        ownDataValues(x.value, 2).some(y => y.key === "isConnected" && typeof y.value === "function"));
+      return hasServerVersion && hasPlayerSlot && hasConnect && hasNetworkManager;
     } catch (_) { return false; }
   };
 
+  const findCoreIndexResourceUrl = () => {
+    try {
+      const entries = performance.getEntriesByType("resource");
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const name = String(entries[index]?.name || "");
+        if (/\/src\/core\/index\.js(?:[?#]|$)/.test(name)) return name;
+      }
+    } catch (_) {}
+    try {
+      const build = window.__CLIENT_BUILD;
+      const launcher = String(window.__ccBoot?.launcher || "");
+      const match = launcher.match(/(c\/[^/]+\/)launcher\.js(?:[?#]|$)/);
+      if (build && match) return new URL(`/b/${build}/${match[1]}src/core/index.js`, location.href).href;
+    } catch (_) {}
+    return null;
+  };
+
+  const captureClient = (candidate, bindingName = null, sourceUrl = null) => {
+    if (!isClientLike(candidate)) return null;
+    capturedClient = candidate;
+    if (bindingName) capturedBindingName = bindingName;
+    if (sourceUrl) capturedSourceUrl = sourceUrl;
+    return candidate;
+  };
+
+  const refreshClientBinding = (resourceUrl = null, force = false) => {
+    const url = resourceUrl || findCoreIndexResourceUrl();
+    if (!url) return Promise.resolve(capturedClient);
+    if (!force && url === capturedSourceUrl && isClientLike(capturedClient)) {
+      return Promise.resolve(capturedClient);
+    }
+    if (bindingRefreshPromise) return bindingRefreshPromise;
+
+    bindingRefreshPromise = (async () => {
+      try {
+        const response = await fetch(url, { cache: "no-store" });
+        if (!response.ok) throw new Error(`core/index.js fetch failed: HTTP ${response.status}`);
+        const source = await response.text();
+        // Current launcher form: randomizedClient = new RandomizedGameClient(), new RandomizedUi().
+        const match = source.match(/\\b([A-Za-z_$][\\w$]*)\\s*=\\s*new\\s+[A-Za-z_$][\\w$]*\\s*\\(\\s*\\)\\s*,\\s*new\\s+[A-Za-z_$][\\w$]*\\s*\\(\\s*\\)/);
+        if (!match) throw new Error("Could not extract the GameClient binding from core/index.js");
+        const bindingName = match[1];
+        let candidate = null;
+        try {
+          candidate = eval("typeof " + bindingName + " !== 'undefined' ? " + bindingName + " : null");
+        } catch (_) {}
+        if (!isClientLike(candidate)) {
+          throw new Error("Extracted client binding did not pass structural validation");
+        }
+        const previousClient = capturedClient;
+        captureClient(candidate, bindingName, url);
+        if (previousClient !== candidate && window.__minibiaBotAdaptive?.inspect) {
+          try { window.__minibiaBotAdaptive.inspect(candidate); } catch (_) {}
+        }
+        return candidate;
+      } catch (error) {
+        api.lastBindingError = String(error?.message || error);
+        return capturedClient;
+      }
+    })().finally(() => {
+      bindingRefreshPromise = null;
+    });
+    return bindingRefreshPromise;
+  };
+
   const resolveClient = (seed) => {
-    if (isClientLike(seed)) return seed;
+    if (isClientLike(seed)) return captureClient(seed);
+    if (isClientLike(capturedClient)) return capturedClient;
     let keys = [];
     try { keys = Object.getOwnPropertyNames(window); } catch (_) {}
     for (const key of keys) {
       try {
         const descriptor = Object.getOwnPropertyDescriptor(window, key);
         if (descriptor && Object.prototype.hasOwnProperty.call(descriptor, "value") &&
-            isClientLike(descriptor.value)) return descriptor.value;
+            isClientLike(descriptor.value)) return captureClient(descriptor.value);
       } catch (_) {}
     }
     return null;
@@ -439,7 +514,7 @@
     resolveNativePacketConstructors(pathfinder, client, packetDispatch);
     const observerInstalled = installPacketObserver(client, packetDispatch);
     return {
-      version: 11,
+      version: 12,
       clientFound: !!client,
       worldFound: !!world,
       pathfinderFound: !!pathfinder,
@@ -466,8 +541,11 @@
 
   const api = {
     installed: true,
-    version: 11,
+    version: 12,
     resolveClient,
+    captureClient,
+    refreshClientBinding,
+    getClientBindingDiagnostics: () => ({ bindingName: capturedBindingName, sourceUrl: capturedSourceUrl, clientCaptured: isClientLike(capturedClient), lastError: api.lastBindingError || null }),
     resolvePathfinder,
     resolveMinimap,
     resolvePacketDispatch,
@@ -482,8 +560,30 @@
     safeSource
   };
   window.__minibiaBotAdaptive = api;
+  api.ready = refreshClientBinding().then(client => {
+    if (client) {
+      try { inspect(client); } catch (_) {}
+    }
+    return client;
+  });
+  // Resource entries are event-driven: no frame loop or repeated object-graph scan.
+  try {
+    const resourceObserver = new PerformanceObserver(list => {
+      for (const entry of list.getEntries()) {
+        const name = String(entry?.name || "");
+        if (!/\/src\/core\/index\.js(?:[?#]|$)/.test(name)) continue;
+        refreshClientBinding(name, true).then(client => {
+          if (client) {
+            try { inspect(client); } catch (_) {}
+          }
+        });
+      }
+    });
+    resourceObserver.observe({ type: "resource", buffered: false });
+    window.__minibiaBotAdaptiveResourceObserver = resourceObserver;
+  } catch (_) {}
   // Install the observer as early as possible. If the world/pathfinder is not
   // ready yet, the wrapper resolves its pathfinder lazily on the first packet.
   try { inspect(); } catch (_) {}
-  console.info("[minibia-bot] adaptive client discovery v10 installed");
+  console.info("[minibia-bot] adaptive client discovery v12 installed");
 })();
