@@ -136,6 +136,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     const visited = new Set([startTile]);
     const maxNodes = 4096;
     let head = 0;
+    let unknownTileState = false;
 
     while (head < queue.length) {
       if (visited.size >= maxNodes) {
@@ -153,6 +154,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
         const destination = targetTiles.get(next);
         const pathability = getTilePathability(next);
         if (!pathability.known) {
+          unknownTileState = true;
           continue;
         }
 
@@ -176,7 +178,7 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
 
     // Missing adjacent tiles can mean the target edge is outside the loaded
     // map area. Do not falsely classify that incomplete view as unreachable.
-    if (missingCandidateTile) {
+    if (missingCandidateTile || unknownTileState) {
       return { status: "unknown", position: candidates[0].position };
     }
 
