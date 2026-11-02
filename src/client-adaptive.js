@@ -2,7 +2,7 @@
 // Uses passive structural inspection and observes only packets the native game sends.
 // It never calls unknown methods or injects probe packets.
 (() => {
-  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 7) return;
+  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 8) return;
 
   const ownDataValues = (object, maxDepth = 3) => {
     const values = [];
@@ -170,6 +170,7 @@
   const resolvePacketDispatch = (client) => {
     if (!client) return null;
     if (cachedClient === client && cachedDispatch) return cachedDispatch;
+
     const methods = ownDataValues(client, 4).filter(x => typeof x.value === "function");
     for (const candidate of methods) {
       const callable = unwrapDispatch(candidate.value);
@@ -182,21 +183,43 @@
       let sender;
       try { sender = manager[match[2]]; } catch (_) { continue; }
       const senderSource = safeSource(sender);
-      if (typeof sender === "function" &&
-          /getBuffer/.test(senderSource) &&
-          /socket/.test(senderSource) &&
-          /send/.test(senderSource)) {
+      if (typeof sender === "function" && /getBuffer/.test(senderSource) &&
+          /socket/.test(senderSource) && /send/.test(senderSource)) {
         cachedClient = client;
         cachedDispatch = {
           key: candidate.key,
           verifiedBy: "client-forwarder-to-network-serializer",
-          call: (packet) => {
-            const activeMethod = client[candidate.key];
-            const callableNow = typeof activeMethod === "function" ? activeMethod : candidate.value;
-            return callableNow.call(client, packet);
-          }
+          call: (packet) => client[candidate.key](packet)
         };
         return cachedDispatch;
+      }
+    }
+
+    const pathfinder = resolvePathfinder(client);
+    if (pathfinder) {
+      const directCall = /([A-Za-z_$][\w$]*)\s*(?:\[['"]([^'"]+)['"]\]|\.([A-Za-z_$][\w$]*))\s*\(\s*new\s+([A-Za-z_$][\w$]*)\s*\(/g;
+      for (const entry of ownDataValues(pathfinder, 5)) {
+        if (typeof entry.value !== "function") continue;
+        directCall.lastIndex = 0;
+        let match;
+        while ((match = directCall.exec(safeSource(entry.value)))) {
+          const lexicalClientName = match[1];
+          const key = match[2] || match[3];
+          if (!key) continue;
+          let lexicalClient = null;
+          try { lexicalClient = eval("typeof " + lexicalClientName + " === 'undefined' ? null : " + lexicalClientName); } catch (_) {}
+          if (lexicalClient !== client) continue;
+          let dispatcher;
+          try { dispatcher = client[key]; } catch (_) { continue; }
+          if (typeof dispatcher !== "function") continue;
+          cachedClient = client;
+          cachedDispatch = {
+            key,
+            verifiedBy: "native-pathfinder-to-lexical-client-dispatcher",
+            call: (packet) => client[key](packet)
+          };
+          return cachedDispatch;
+        }
       }
     }
     return null;
@@ -303,22 +326,9 @@
     if (!client || !dispatch) return false;
     if (observerClient === client && packetObserverInstalled) return true;
     try {
-      const key = dispatch.key;
-      // Some scrambled clients expose a fresh bound native function on every
-      // property read. A descriptor-level replacement is then ignored by the
-      // getter/proxy, so do not install an observer on that dispatcher.
-      let ownDescriptor = null;
-      try { ownDescriptor = Object.getOwnPropertyDescriptor(client, key); } catch (_) {}
-      if (ownDescriptor && typeof ownDescriptor.value === "function" &&
-          ownDescriptor.value.__minibiaAdaptiveObserver === true) {
-        const previousOriginal = ownDescriptor.value.__minibiaAdaptiveOriginal;
-        if (typeof previousOriginal === "function") {
-          Object.defineProperty(client, key, { ...ownDescriptor, value: previousOriginal });
-        }
-      }
-      const current = client[key];
+      const current = client[dispatch.key];
       if (typeof current !== "function") throw new Error("Native packet dispatcher is not callable");
-      if (/\\[native code\\]/.test(safeSource(current))) {
+      if (/\[native code\]/.test(safeSource(current))) {
         packetObserverError = "Passive observer unsupported: dispatcher is exposed as a bound native function";
         packetObserverInstalled = false;
         observerClient = null;
@@ -332,20 +342,12 @@
       const original = unwrapDispatch(current);
       const wrapper = function minibiaAdaptivePacketObserver(packet) {
         try {
-          if (!observedAutoWalkConstructorName) {
-            observedAutoWalkConstructorName = resolveAutoWalkConstructorName(resolvePathfinder(client), client, resolvePacketDispatch(client));
-          }
           const ctor = packet && packet.constructor;
           if (ctor && typeof ctor === "function") {
-            if (observedAutoWalkConstructorName && ctor.name === observedAutoWalkConstructorName) {
-              observedAutoWalkConstructor = ctor;
-            }
+            if (observedAutoWalkConstructorName && ctor.name === observedAutoWalkConstructorName) observedAutoWalkConstructor = ctor;
             const packetName = ctor.name || "(anonymous)";
             if (!observedPacketTypes.some(x => x.name === packetName)) {
-              observedPacketTypes.push({
-                name: packetName,
-                ownFields: ownDataValues(packet, 1).map(x => x.key).slice(0, 16)
-              });
+              observedPacketTypes.push({ name: packetName, ownFields: ownDataValues(packet, 1).map(x => x.key).slice(0, 16) });
               if (observedPacketTypes.length > 30) observedPacketTypes.shift();
             }
           }
@@ -356,18 +358,17 @@
         __minibiaAdaptiveObserver: { value: true },
         __minibiaAdaptiveOriginal: { value: original }
       });
-      Object.defineProperty(client, key, {
-        configurable: true,
-        enumerable: false,
-        writable: true,
-        value: wrapper
+      Object.defineProperty(client, dispatch.key, {
+        configurable: true, enumerable: false, writable: true, value: wrapper
       });
-      packetObserverInstalled = client[key] === wrapper;
-      if (!packetObserverInstalled) throw new Error("Could not install passive packet observer");
+      packetObserverInstalled = client[dispatch.key] === wrapper;
+      if (!packetObserverInstalled) throw new Error("Dispatcher property does not retain observer wrapper");
       observerClient = client;
       return true;
     } catch (error) {
       packetObserverError = String(error?.message || error);
+      packetObserverInstalled = false;
+      observerClient = null;
       return false;
     }
   };
@@ -404,7 +405,7 @@
     resolveNativePacketConstructors(pathfinder, client, packetDispatch);
     const observerInstalled = installPacketObserver(client, packetDispatch);
     return {
-      version: 7,
+      version: 8,
       clientFound: !!client,
       worldFound: !!world,
       pathfinderFound: !!pathfinder,
@@ -431,7 +432,7 @@
 
   const api = {
     installed: true,
-    version: 7,
+    version: 8,
     resolveClient,
     resolvePathfinder,
     resolveMinimap,
@@ -450,5 +451,5 @@
   // Install the observer as early as possible. If the world/pathfinder is not
   // ready yet, the wrapper resolves its pathfinder lazily on the first packet.
   try { inspect(); } catch (_) {}
-  console.info("[minibia-bot] adaptive client discovery v7 installed");
+  console.info("[minibia-bot] adaptive client discovery v8 installed");
 })();
