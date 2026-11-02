@@ -91,7 +91,7 @@
         if (!response.ok) throw new Error(`core/index.js fetch failed: HTTP ${response.status}`);
         const source = await response.text();
         // Current launcher form: randomizedClient = new RandomizedGameClient(), new RandomizedUi().
-        const match = source.match(/\\b([A-Za-z_$][\\w$]*)\\s*=\\s*new\\s+[A-Za-z_$][\\w$]*\\s*\\(\\s*\\)\\s*,\\s*new\\s+[A-Za-z_$][\\w$]*\\s*\\(\\s*\\)/);
+        const match = source.match(/\b([A-Za-z_$][\w$]*)\s*=\s*new\s+[A-Za-z_$][\w$]*\s*\(\s*\)\s*,\s*new\s+[A-Za-z_$][\w$]*\s*\(\s*\)/);
         if (!match) throw new Error("Could not extract the GameClient binding from core/index.js");
         const bindingName = match[1];
         let candidate = null;
