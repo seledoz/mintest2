@@ -581,6 +581,34 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
       pos.z === playerPos.z;
   }
 
+  // Fast field precheck for ordinary visible game-path routes. Avoid building
+  // the full A* walkability matrix unless a damage field is actually on the
+  // direct loaded corridor (or the route extends beyond the viewport).
+  // If any sampled tile is unavailable, return true so the existing full
+  // damage-field path logic remains the conservative fallback.
+  function mayCrossDamageFieldOnDirectRoute(from, to) {
+    const world = window.gameClient?.world;
+    const getNativeTile = world?.getTileFromWorldPosition;
+    if (typeof getNativeTile !== "function") return true;
+
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const steps = Math.max(Math.abs(dx), Math.abs(dy), 1);
+    for (let index = 0; index <= steps; index += 1) {
+      const x = Math.round(from.x + dx * index / steps);
+      const y = Math.round(from.y + dy * index / steps);
+      let tile = null;
+      try {
+        tile = getNativeTile(new Position(x, y, from.z));
+      } catch (_) {
+        return true;
+      }
+      if (!tile) return true;
+      if (isDamageFieldTile(tile) && !isFloorChangeTile(tile)) return true;
+    }
+    return false;
+  }
+
   function filterPathToViewport(path, playerPos) {
     if (!path || !path.length) return path;
     const onScreen = path.filter(p => isOnScreen(p, playerPos));
@@ -1063,15 +1091,25 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     // Only use it for same-floor routes that actually cross a recognized damage field.
     const fieldFrom = normalizePosition(from), fieldGoal = normalizePosition(waypoint);
     if (fieldFrom && fieldGoal && fieldFrom.z === fieldGoal.z) {
-      let fieldPath = findPathAStar(fieldFrom, fieldGoal);
+      let fieldPath = null;
       let segmentTarget = fieldGoal;
-      if (!isOnScreen(fieldGoal, fieldFrom) || !getTileAt(fieldGoal)) {
-        // Repath through a reachable loaded segment even when A* returns a partial
-        // path toward an off-screen goal. Recalculate as the player advances.
-        const segment = findLoadedSegmentPath(fieldFrom, fieldGoal);
-        if (segment) {
-          fieldPath = segment.path;
-          segmentTarget = segment.target;
+      const visibleGoal = isOnScreen(fieldGoal, fieldFrom);
+      const needsFieldPathCheck = !visibleGoal ||
+        mayCrossDamageFieldOnDirectRoute(fieldFrom, fieldGoal);
+
+      // On ordinary visible routes, inspect only the direct corridor first.
+      // The expensive full-chunk A* matrix is retained for off-screen routes
+      // and for routes where the quick check finds a field or cannot verify tiles.
+      if (needsFieldPathCheck) {
+        fieldPath = findPathAStar(fieldFrom, fieldGoal);
+        if (!visibleGoal) {
+          // Repath through a reachable loaded segment even when A* returns a partial
+          // path toward an off-screen goal. Recalculate as the player advances.
+          const segment = findLoadedSegmentPath(fieldFrom, fieldGoal);
+          if (segment) {
+            fieldPath = segment.path;
+            segmentTarget = segment.target;
+          }
         }
       }
       const crossesDamageField = Array.isArray(fieldPath) && fieldPath.some((position) => {
