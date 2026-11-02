@@ -2,7 +2,7 @@
 // Uses passive structural inspection and observes only packets the native game sends.
 // It never calls unknown methods or injects probe packets.
 (() => {
-  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 10) return;
+  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 11) return;
 
   const ownDataValues = (object, maxDepth = 3) => {
     const values = [];
@@ -169,7 +169,19 @@
 
   const resolvePacketDispatch = (client) => {
     if (!client) return null;
-    if (cachedClient === client && cachedDispatch) return cachedDispatch;
+    if (cachedClient === client && cachedDispatch) {
+      // Revalidate the cached method before reusing it. The scrambler can rename
+      // or replace a dispatcher without replacing the client object itself.
+      const dispatchTarget = cachedDispatch.target || client;
+      let currentMethod = null;
+      try { currentMethod = dispatchTarget[cachedDispatch.key]; } catch (_) {}
+      const currentSource = safeSource(unwrapDispatch(currentMethod));
+      if (typeof currentMethod === "function" &&
+          currentSource &&
+          currentSource === cachedDispatch.source) return cachedDispatch;
+      cachedClient = null;
+      cachedDispatch = null;
+    }
 
     const methods = ownDataValues(client, 4).filter(x => typeof x.value === "function");
     for (const candidate of methods) {
@@ -188,6 +200,7 @@
         cachedClient = client;
         cachedDispatch = {
           key: candidate.key,
+          source,
           verifiedBy: "client-forwarder-to-network-serializer",
           call: (packet) => client[candidate.key](packet)
         };
@@ -235,6 +248,7 @@
           cachedDispatch = {
             key,
             target: lexicalClient,
+            source: safeSource(dispatcher),
             verifiedBy: "native-pathfinder-to-lexical-client-dispatcher",
             call: (packet) => lexicalClient[key](packet)
           };
@@ -425,7 +439,7 @@
     resolveNativePacketConstructors(pathfinder, client, packetDispatch);
     const observerInstalled = installPacketObserver(client, packetDispatch);
     return {
-      version: 10,
+      version: 11,
       clientFound: !!client,
       worldFound: !!world,
       pathfinderFound: !!pathfinder,
@@ -452,7 +466,7 @@
 
   const api = {
     installed: true,
-    version: 10,
+    version: 11,
     resolveClient,
     resolvePathfinder,
     resolveMinimap,
