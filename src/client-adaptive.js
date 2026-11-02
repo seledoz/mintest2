@@ -2,7 +2,7 @@
 // Uses passive structural inspection and observes only packets the native game sends.
 // It never calls unknown methods or injects probe packets.
 (() => {
-  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 12) return;
+  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 13) return;
 
   const ownDataValues = (object, maxDepth = 3) => {
     const values = [];
@@ -524,7 +524,7 @@
     resolveNativePacketConstructors(pathfinder, client, packetDispatch);
     const observerInstalled = installPacketObserver(client, packetDispatch);
     return {
-      version: 12,
+      version: 13,
       clientFound: !!client,
       worldFound: !!world,
       pathfinderFound: !!pathfinder,
