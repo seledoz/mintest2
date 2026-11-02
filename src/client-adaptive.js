@@ -304,8 +304,26 @@
     if (observerClient === client && packetObserverInstalled) return true;
     try {
       const key = dispatch.key;
+      // Some scrambled clients expose a fresh bound native function on every
+      // property read. A descriptor-level replacement is then ignored by the
+      // getter/proxy, so do not install an observer on that dispatcher.
+      let ownDescriptor = null;
+      try { ownDescriptor = Object.getOwnPropertyDescriptor(client, key); } catch (_) {}
+      if (ownDescriptor && typeof ownDescriptor.value === "function" &&
+          ownDescriptor.value.__minibiaAdaptiveObserver === true) {
+        const previousOriginal = ownDescriptor.value.__minibiaAdaptiveOriginal;
+        if (typeof previousOriginal === "function") {
+          Object.defineProperty(client, key, { ...ownDescriptor, value: previousOriginal });
+        }
+      }
       const current = client[key];
       if (typeof current !== "function") throw new Error("Native packet dispatcher is not callable");
+      if (/\\[native code\\]/.test(safeSource(current))) {
+        packetObserverError = "Passive observer unsupported: dispatcher is exposed as a bound native function";
+        packetObserverInstalled = false;
+        observerClient = null;
+        return false;
+      }
       if (current.__minibiaAdaptiveObserver === true) {
         observerClient = client;
         packetObserverInstalled = true;
