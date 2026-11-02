@@ -265,16 +265,13 @@
     return null;
   };
 
-  const nativeUi = (() => { try { return nativeClient.kYgIgXceQLD || null; } catch (_) { return null; } })();
   const nativeChatManager =
     findNestedObject(nativeClient, candidate => {
-      const sendText = getDataProperty(candidate, "HVtvgeiqmk");
       const channels = getDataProperty(candidate, "channels");
-      return typeof sendText === "function" ||
-        (Array.isArray(channels) && channels.some(channel =>
-          Array.isArray(getDataProperty(channel, "__contents"))
-        ));
-    }) || nativeUi?.uVvWDBBxDT || null;
+      return Array.isArray(channels) && channels.some(channel =>
+        Array.isArray(getDataProperty(channel, "__contents"))
+      );
+    }) || null;
   const nativeHotbarManager =
     findNestedObject(nativeClient, candidate => {
       const slots = getDataProperty(candidate, "slots");
@@ -283,7 +280,7 @@
         const element = getDataProperty(canvas, "canvas");
         return !!element && typeof element.click === "function";
       });
-    }) || nativeUi?.RocGUBNConYq || null;
+    }) || null;
   const nativeMouse = (() => {
     try {
       return nativeClient.mouse ||
@@ -300,10 +297,11 @@
     get(target, property) {
       if (property === "sendMessageText") {
         return (message) => {
-          if (typeof target.HVtvgeiqmk !== "function") return false;
+          const sendText = getDataProperty(target, "sendMessageText");
+          if (typeof sendText !== "function") return false;
           const text = String(message ?? "").trim();
           if (!text) return false;
-          target.HVtvgeiqmk(text, undefined, true);
+          sendText.call(target, text);
           return true;
         };
       }
