@@ -1,18 +1,21 @@
-// Minibia client compatibility bridge for client build 2026-10-30-1003.
+// Minibia client compatibility bridge for scrambled client build 2026-11-01-1001.
 // Install before core.js and all modules. The native World is created only
 // after server data arrives, so world/pathfinder access must remain lazy.
 (() => {
-  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 4) return;
+  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 5) return;
 
   let nativeClient = null;
   let NativePosition = null;
   let NativeAutoWalkPacket = null;
 
   try {
-    // The 2026-10-30 client creates its live instance in index.js as
-    // YPXHlIjOD = new AnkOPljisHyL(). The old obfuscated binding
-    // vfdOywKJESRq no longer exists in this build.
-    nativeClient = window.__minibiaBotAdaptive?.resolveClient?.()
+    // The 2026-11-01 scrambled launcher keeps its live GameClient in the
+    // global lexical binding EtkwRLdTdNBx (not on window). Seed structural
+    // discovery with that binding; retain fallback discovery for other builds.
+    const lexicalClient = eval("typeof EtkwRLdTdNBx !== 'undefined' ? EtkwRLdTdNBx : null");
+    nativeClient = window.__minibiaBotAdaptive?.resolveClient?.(lexicalClient)
+      || lexicalClient
+      || window.__minibiaBotAdaptive?.resolveClient?.()
       || eval("typeof YPXHlIjOD !== 'undefined' ? YPXHlIjOD : null")
       || eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null");
     NativePosition = eval("typeof zeOvojmNkQxY === 'function' ? zeOvojmNkQxY : null") || nativeClient?.player?.__position?.constructor || null;
@@ -384,8 +387,8 @@
     : null;
   window.__minibiaBotClientCompat = {
     installed: true,
-    version: 4,
-    build: "2026-10-30-1003",
+    version: 5,
+    build: "2026-11-01-1001",
     client: clientBridge,
     nativeClient,
     world,
@@ -444,7 +447,7 @@
   };
 
   console.info("[minibia-bot] client compatibility bridge installed", {
-    build: "2026-10-30-1003",
+    build: "2026-11-01-1001",
     worldAvailable: !!resolveWorld(),
     pathfinderAvailable: !!resolvePathfinder(),
     itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
