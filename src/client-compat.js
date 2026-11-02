@@ -339,9 +339,11 @@
   };
 
   const clientBridge = new Proxy(nativeClient, {
-    get(target, property) {
+    get(_target, property) {
+      const target = refreshNativeClient();
+      if (!target) return undefined;
       if (property === "world") return world;
-      if (property === "mouse") return nativeMouse || bindMethod(target, Reflect.get(target, property, target));
+      if (property === "mouse") return target.mouse || nativeMouse || bindMethod(target, Reflect.get(target, property, target));
       if (property === "interface") return interfaceBridge;
       if (property === "itemDefinitionsByCid" || property === "itemDefinitions") {
         return target.TPWhmLyqyrg || null;
@@ -349,6 +351,14 @@
       if (property === "itemDefinitionsBySid") return null;
       if (property === "send") return undefined;
       return bindMethod(target, Reflect.get(target, property, target));
+    },
+    set(_target, property, value) {
+      const target = refreshNativeClient();
+      return !!target && Reflect.set(target, property, value, target);
+    },
+    has(_target, property) {
+      const target = refreshNativeClient();
+      return !!target && property in target;
     }
   });
 
