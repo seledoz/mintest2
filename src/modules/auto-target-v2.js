@@ -43,14 +43,34 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     ) || null;
   }
 
-  function findReachableAdjacentPosition(targetPosition, playerPosition) {
+  function getTilePathability(tile) {
+    if (!tile || typeof tile.isNotPathable !== "function" ||
+        typeof tile.KzmzFKwDhXy !== "function") {
+      return { known: false, specialBlocked: false, notPathable: false };
+    }
+
+    try {
+      return {
+        known: true,
+        specialBlocked: !!tile.KzmzFKwDhXy(),
+        notPathable: !!tile.isNotPathable(),
+      };
+    } catch {
+      return { known: false, specialBlocked: false, notPathable: false };
+    }
+  }
+
+  function findReachabilityResult(targetPosition, playerPosition) {
     const target = normalizePosition(targetPosition);
     const player = normalizePosition(playerPosition);
-    if (!target || !player || target.z !== player.z) return null;
+    if (!target || !player || target.z !== player.z) {
+      return { status: "unknown", position: null };
+    }
 
-    const pathfinder = window.gameClient?.world?.pathfinder;
     const startTile = getTile(player);
-    if (!pathfinder || !startTile || typeof pathfinder.search !== "function") return null;
+    if (!startTile || !Array.isArray(startTile.neighbours)) {
+      return { status: "unknown", position: null };
+    }
 
     const offsets = [
       { x: 0, y: -1 }, { x: 1, y: 0 }, { x: 0, y: 1 }, { x: -1, y: 0 },
@@ -63,33 +83,111 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
       return da - db;
     });
 
+    const candidates = [];
+    let missingCandidateTile = false;
+
     for (const offset of offsets) {
-      const candidate = {
+      const position = {
         x: target.x + offset.x,
         y: target.y + offset.y,
         z: target.z,
       };
-      const tile = getTile(candidate);
-      if (!tile?.isWalkable?.()) continue;
-      if (candidate.x === player.x && candidate.y === player.y) return candidate;
+      const tile = getTile(position);
 
+      if (!tile) {
+        missingCandidateTile = true;
+        continue;
+      }
+
+      let walkable = false;
       try {
-        const path = pathfinder.search(startTile, tile);
-        // Some native client builds return a non-array/undefined value when the
-        // pathfinder cannot expose a route result to this module. Treat that as
-        // unknown rather than declaring every visible monster unreachable.
-        if (!Array.isArray(path)) return candidate;
-        if (path.length > 0) return candidate;
-      } catch (error) {
-        bot.logDebug?.("auto target v2 reachability check failed", {
-          targetPosition: target,
-          candidate,
-          error: error?.message || error,
-        });
+        walkable = !!tile.isWalkable?.();
+      } catch {
+        return { status: "unknown", position: null };
+      }
+      if (!walkable) continue;
+
+      const pathability = getTilePathability(tile);
+      if (!pathability.known) return { status: "unknown", position: null };
+
+      // Match the native search's destination exception:
+      // a special-blocked destination is rejected unless it is also marked
+      // not-pathable. The native search otherwise permits the destination.
+      if (pathability.specialBlocked && !pathability.notPathable) continue;
+
+      candidates.push({ position, tile });
+    }
+
+    if (!candidates.length) {
+      return missingCandidateTile
+        ? { status: "unknown", position: null }
+        : { status: "unreachable", position: null };
+    }
+
+    const targetTiles = new Map(candidates.map(candidate => [candidate.tile, candidate]));
+    if (targetTiles.has(startTile)) {
+      return { status: "reachable", position: targetTiles.get(startTile).position };
+    }
+
+    // This traversal uses private Sets and a queue. It never calls native
+    // pathfinder.search() and never writes __parent/__visited/__closed/__g/__h
+    // or __dirtyNodes on shared native tile objects.
+    const queue = [startTile];
+    const visited = new Set([startTile]);
+    const maxNodes = 4096;
+    let head = 0;
+    let unknownTileState = false;
+
+    while (head < queue.length) {
+      if (visited.size >= maxNodes) {
+        return { status: "unknown", position: candidates[0].position };
+      }
+
+      const current = queue[head++];
+      if (!Array.isArray(current.neighbours)) {
+        return { status: "unknown", position: candidates[0].position };
+      }
+
+      for (const next of current.neighbours) {
+        if (!next || visited.has(next)) continue;
+
+        const destination = targetTiles.get(next);
+        const pathability = getTilePathability(next);
+        if (!pathability.known) {
+          unknownTileState = true;
+          continue;
+        }
+
+        if (destination) {
+          // Native search treats the goal tile differently from intermediate
+          // tiles; preserve that exact pathability exception.
+          if (pathability.specialBlocked && !pathability.notPathable) continue;
+          return { status: "reachable", position: destination.position };
+        }
+
+        // Native search rejects special-blocked and not-pathable intermediate
+        // tiles. The existing neighbour graph already encodes legal adjacency;
+        // native diagonal/cost weighting affects route preference, not whether
+        // a connected route exists.
+        if (pathability.specialBlocked || pathability.notPathable) continue;
+
+        visited.add(next);
+        queue.push(next);
       }
     }
 
-    return null;
+    // Missing adjacent tiles can mean the target edge is outside the loaded
+    // map area. Do not falsely classify that incomplete view as unreachable.
+    if (missingCandidateTile || unknownTileState) {
+      return { status: "unknown", position: candidates[0].position };
+    }
+
+    return { status: "unreachable", position: null };
+  }
+
+  function findReachableAdjacentPosition(targetPosition, playerPosition) {
+    const result = findReachabilityResult(targetPosition, playerPosition);
+    return result.status === "unreachable" ? null : result.position;
   }
 
   function pruneCaches(now = Date.now()) {
@@ -103,16 +201,48 @@ window.__minibiaBotBundle.installAutoTargetV2Module = function installAutoTarget
     }
   }
 
-  function isMonsterReachable(monster) {
+  function isMonsterReachable(monster, now = Date.now()) {
     if (!monster) return false;
+
     const playerPosition = normalizePosition(bot.getPlayerPosition?.());
     const targetPosition = normalizePosition(monster?.__position || monster?.getPosition?.());
+    if (!playerPosition || !targetPosition || playerPosition.z !== targetPosition.z) return false;
 
-    // The native pathfinder does not reliably expose route results to this
-    // module. An empty path can mean "unknown", not "unreachable". Do not
-    // remove visible same-floor monsters from Auto Attack based on that result;
-    // the original combat engine remains responsible for movement and chase.
-    return !!playerPosition && !!targetPosition && playerPosition.z === targetPosition.z;
+    pruneCaches(now);
+
+    const targetKey = getPositionKey(targetPosition);
+    const playerKey = getPositionKey(playerPosition);
+    const id = monster?.id;
+
+    const skipped = id != null ? state.unreachableTargets.get(id) : null;
+    if (skipped && skipped.positionKey === targetKey && skipped.until > now) return false;
+    if (skipped && skipped.positionKey !== targetKey) state.unreachableTargets.delete(id);
+
+    const cacheKey = `${playerKey}|${id ?? "no-id"}|${targetKey}`;
+    const cached = state.reachabilityCache.get(cacheKey);
+    if (cached && now - cached.at <= Math.max(100, Number(config.reachabilityCacheMs) || 350)) {
+      return cached.reachable;
+    }
+
+    const result = findReachabilityResult(targetPosition, playerPosition);
+    // Unknown means the local tile graph is incomplete or unavailable. Keep
+    // the monster eligible rather than accidentally suppressing a valid target.
+    const reachable = result.status !== "unreachable";
+    state.reachabilityCache.set(cacheKey, { reachable, at: now });
+
+    if (!reachable && id != null) {
+      state.unreachableTargets.set(id, {
+        until: now + Math.max(500, Number(config.unreachableSkipMs) || 4000),
+        positionKey: targetKey,
+      });
+      bot.logDebug?.("auto target v2 filtered unreachable monster", {
+        id,
+        name: monster?.name || "Mob",
+        position: targetPosition,
+      });
+    }
+
+    return reachable;
   }
 
   function getRawVisibleMonsters(options = { sameFloorOnly: true }) {
