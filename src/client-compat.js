@@ -36,11 +36,11 @@
     const resolved = adaptive?.resolveClient?.() || null;
     if (resolved && resolved !== nativeClient) {
       nativeClient = resolved;
+      try { adaptive?.inspect?.(nativeClient); } catch (_) {}
       try {
         NativePosition = nativeClient?.player?.__position?.constructor || NativePosition;
         NativeAutoWalkPacket = adaptive?.getAutoWalkConstructor?.() || NativeAutoWalkPacket;
       } catch (_) {}
-      try { adaptive?.inspect?.(nativeClient); } catch (_) {}
     }
     return nativeClient;
   };
