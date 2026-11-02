@@ -379,6 +379,10 @@
   // wire packet or risk sending malformed inventory operations.
   const sendItemMove = () => false;
 
+  // Seed the adaptive observer with the resolved lexical client immediately.
+  // This installs only a passive wrapper around the verified native dispatcher;
+  // it observes genuine packets and never sends or fabricates one.
+  try { window.__minibiaBotAdaptive?.inspect?.(nativeClient); } catch (_) {}
   const adaptivePacketDispatch = window.__minibiaBotAdaptive?.resolvePacketDispatch?.(nativeClient) || null;
   // Keep the existing call sites stable while routing through the verified
   // native client -> network-manager packet dispatch method.
