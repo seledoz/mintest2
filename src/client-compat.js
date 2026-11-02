@@ -2,7 +2,7 @@
 // Install before core.js and all modules. The native World is created only
 // after server data arrives, so world/pathfinder access must remain lazy.
 (() => {
-  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 5) return;
+  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 6) return;
 
   let nativeClient = null;
   let NativePosition = null;
@@ -33,7 +33,35 @@
   const bindMethod = (target, value) =>
     typeof value === "function" ? value.bind(target) : value;
 
-  const resolveWorld = () => nativeClient.world || null;
+  // Re-read the known scrambled lexical client bindings when resolving live
+  // world/pathfinder/packet references. This avoids pinning the bridge forever
+  // to the client instance that existed when the module first loaded.
+  const refreshNativeClient = () => {
+    const adaptive = window.__minibiaBotAdaptive;
+    let candidate = null;
+    try { candidate = eval("typeof EtkwRLdTdNBx !== 'undefined' ? EtkwRLdTdNBx : null"); } catch (_) {}
+    if (!candidate) {
+      try { candidate = eval("typeof YPXHlIjOD !== 'undefined' ? YPXHlIjOD : null"); } catch (_) {}
+    }
+    if (!candidate) {
+      try { candidate = eval("typeof vfdOywKJESRq !== 'undefined' ? vfdOywKJESRq : null"); } catch (_) {}
+    }
+    const resolved = adaptive?.resolveClient?.(candidate) || candidate;
+    if (resolved && (typeof resolved === "object" || typeof resolved === "function") &&
+        resolved !== nativeClient) {
+      nativeClient = resolved;
+      try {
+        NativePosition = nativeClient?.player?.__position?.constructor || NativePosition;
+      } catch (_) {}
+      try { adaptive?.inspect?.(nativeClient); } catch (_) {}
+    }
+    return nativeClient;
+  };
+
+  const resolveWorld = () => {
+    const client = refreshNativeClient();
+    try { return client?.world || null; } catch (_) { return null; }
+  };
 
   // Discover the native attack action by stable behavior, not scrambled helper names.
   // The action iterates a Set of creatures and updates the Player target.
@@ -102,7 +130,7 @@
     try {
       if (isNativePathfinder(world.hNccDTwTki)) return world.hNccDTwTki;
     } catch (_) {}
-    const adaptivePathfinder = window.__minibiaBotAdaptive?.resolvePathfinder?.(nativeClient);
+    const adaptivePathfinder = window.__minibiaBotAdaptive?.resolvePathfinder?.(refreshNativeClient());
     if (isNativePathfinder(adaptivePathfinder)) return adaptivePathfinder;
     return getPropertyValues(world).find(isNativePathfinder) || null;
   };
@@ -383,18 +411,26 @@
   // This installs only a passive wrapper around the verified native dispatcher;
   // it observes genuine packets and never sends or fabricates one.
   try { window.__minibiaBotAdaptive?.inspect?.(nativeClient); } catch (_) {}
-  const adaptivePacketDispatch = window.__minibiaBotAdaptive?.resolvePacketDispatch?.(nativeClient) || null;
-  // Keep the existing call sites stable while routing through the verified
-  // native client -> network-manager packet dispatch method.
-  const nativeSend = adaptivePacketDispatch
-    ? function verifiedNativePacketDispatch(packet) { return adaptivePacketDispatch.call(packet); }
-    : null;
+  // Resolve the verified dispatcher at call time so a renamed dispatcher or
+  // replacement client is not hidden behind a startup-time closure.
+  const resolveCurrentPacketDispatch = () => {
+    const client = refreshNativeClient();
+    try { window.__minibiaBotAdaptive?.inspect?.(client); } catch (_) {}
+    return window.__minibiaBotAdaptive?.resolvePacketDispatch?.(client) || null;
+  };
+  const nativeSend = function verifiedNativePacketDispatch(packet) {
+    const dispatch = resolveCurrentPacketDispatch();
+    if (!dispatch || typeof dispatch.call !== "function") return false;
+    dispatch.call(packet);
+    return true;
+  };
+  const initialPacketDispatch = resolveCurrentPacketDispatch();
   window.__minibiaBotClientCompat = {
     installed: true,
-    version: 5,
+    version: 6,
     build: "2026-11-01-1001",
     client: clientBridge,
-    nativeClient,
+    get nativeClient() { return refreshNativeClient(); },
     world,
     pathfinder,
     get nativeAttackAvailable() {
@@ -429,7 +465,7 @@
     get pathfinderAvailable() { return !!resolvePathfinder(); },
     itemDefinitionsAvailable: !!nativeClient.TPWhmLyqyrg,
     get adaptiveDiscovery() { return window.__minibiaBotAdaptive?.inspect?.(nativeClient) || null; },
-    packetDispatchMethod: adaptivePacketDispatch?.key || null,
+    get packetDispatchMethod() { return resolveCurrentPacketDispatch()?.key || null; },
     get autoWalkAvailable() {
       return typeof nativeSend === "function" &&
         (typeof window.__minibiaBotAdaptive?.getAutoWalkConstructor?.() === "function" ||
@@ -445,8 +481,7 @@
       const adaptiveMatch = window.__minibiaBotAdaptive?.isAutoWalkPacket?.(packet) === true;
       const legacyMatch = typeof NativeAutoWalkPacket === "function" && packet instanceof NativeAutoWalkPacket;
       if ((!adaptiveMatch && !legacyMatch) || typeof nativeSend !== "function") return false;
-      nativeSend.call(nativeClient, packet);
-      return true;
+      return nativeSend(packet);
     }
   };
 
