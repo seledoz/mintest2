@@ -1090,7 +1090,8 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
     // Use the same AutoWalkPacket movement that fixed damage-field crossing in MinTest3.
     // Only use it for same-floor routes that actually cross a recognized damage field.
     const fieldFrom = normalizePosition(from), fieldGoal = normalizePosition(waypoint);
-    if (fieldFrom && fieldGoal && fieldFrom.z === fieldGoal.z) {
+    if (fieldFrom && fieldGoal && fieldFrom.z === fieldGoal.z &&
+        (isAStarPathfinderMode() || config.useSparduePathing)) {
       let fieldPath = null;
       let segmentTarget = fieldGoal;
       const visibleGoal = isOnScreen(fieldGoal, fieldFrom);
