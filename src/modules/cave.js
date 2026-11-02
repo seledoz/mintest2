@@ -933,8 +933,10 @@ window.__minibiaBotBundle.installCaveModule = function installCaveModule(bot) {
   }
   function getMinimapCanvas() {
     const nativeMinimap = getNativeMinimap();
-    return nativeMinimap?.minimap?.canvas ||
-      document.getElementById("minimap") || null;
+    const displayedCanvas = document.getElementById("minimap");
+    if (displayedCanvas instanceof HTMLCanvasElement) return displayedCanvas;
+    const backingCanvas = nativeMinimap?.minimap?.canvas;
+    return backingCanvas instanceof HTMLCanvasElement ? backingCanvas : null;
   }
   function getMinimapViewport() {
     const canvas = getMinimapCanvas();
