@@ -101,11 +101,7 @@
         if (!isClientLike(candidate)) {
           throw new Error("Extracted client binding did not pass structural validation");
         }
-        const previousClient = capturedClient;
         captureClient(candidate, bindingName, url);
-        if (previousClient !== candidate && window.__minibiaBotAdaptive?.inspect) {
-          try { window.__minibiaBotAdaptive.inspect(candidate); } catch (_) {}
-        }
         return candidate;
       } catch (error) {
         api.lastBindingError = String(error?.message || error);
