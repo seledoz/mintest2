@@ -2,7 +2,7 @@
 // Install before core.js and all modules. The native World is created only
 // after server data arrives, so world/pathfinder access must remain lazy.
 (() => {
-  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 7) return;
+  if (window.__minibiaBotClientCompat?.installed && window.__minibiaBotClientCompat?.version >= 8) return;
 
   let nativeClient = null;
   let NativePosition = null;
@@ -126,13 +126,35 @@
     return getPropertyValues(world).find(isNativePathfinder) || null;
   };
 
-  const resolveNativePathfindMethod = (target) => {
-    try {
-      const method = target?.findPath;
-      return typeof method === "function" ? method : null;
-    } catch (_) {
-      return null;
+  // The native pathfinder's public start method is scrambled on some builds.
+  // Identify it from the stable state transitions it performs rather than its
+  // randomized property name. Discovery is read-only: candidate methods are
+  // inspected with Function#toString and are never invoked while probing.
+  const resolveNativePathStartMethod = (target) => {
+    if (!target) return null;
+    const candidates = [];
+    const seen = new Set();
+    for (const value of getPropertyValues(target)) {
+      if (typeof value !== "function" || seen.has(value)) continue;
+      seen.add(value);
+      let source = "";
+      try { source = Function.prototype.toString.call(value); } catch (_) {}
+      if (!source.includes("__finalDestination") ||
+          !source.includes("__isAutoWalking") ||
+          !source.includes("__autowalkStartPosition") ||
+          !source.includes("__lastPathfindTime")) continue;
+      let score = 4;
+      if (source.includes("__pathfindCooldown")) score += 2;
+      if (source.includes("noteAutowalk")) score += 2;
+      if (source.includes("__autoWalkStepsRemaining")) score += 1;
+      if (source.includes("isServerMapclickEnabled")) score += 1;
+      if (value.length === 2) score += 1;
+      candidates.push({ method: value, score });
     }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.score - a.score);
+    if (candidates.length > 1 && candidates[0].score === candidates[1].score) return null;
+    return candidates[0].method;
   };
 
   const resolveNativeClearMethod = (target) => {
@@ -158,8 +180,8 @@
       if (property === "findPath") {
         return (from, destination) => {
           const current = resolvePathfinder();
-          const nativeFindPath = current && resolveNativePathfindMethod(current);
-          if (typeof nativeFindPath !== "function") return false;
+          const nativePathStart = current && resolveNativePathStartMethod(current);
+          if (typeof nativePathStart !== "function") return false;
           if (!from || !destination ||
               !Number.isFinite(Number(from.x)) ||
               !Number.isFinite(Number(from.y)) ||
@@ -167,7 +189,8 @@
               !Number.isFinite(Number(destination.x)) ||
               !Number.isFinite(Number(destination.y)) ||
               !Number.isFinite(Number(destination.z))) return false;
-          return nativeFindPath.call(current, from, destination, true);
+          nativePathStart.call(current, from, destination, false);
+          return true;
         };
       }
       if (property === "setPathfindCache") {
@@ -438,8 +461,8 @@
   };
   window.__minibiaBotClientCompat = {
     installed: true,
-    version: 7,
-    build: "adaptive-structural-v12",
+    version: 8,
+    build: "adaptive-structural-v12-native-path-start",
     client: clientBridge,
     get nativeClient() { return refreshNativeClient(); },
     world,
@@ -474,6 +497,10 @@
     },
     get worldAvailable() { return !!resolveWorld(); },
     get pathfinderAvailable() { return !!resolvePathfinder(); },
+    get nativePathStartAvailable() {
+      const current = resolvePathfinder();
+      return typeof resolveNativePathStartMethod(current) === "function";
+    },
     get itemDefinitionsAvailable() { const current = refreshNativeClient(); return !!(current?.itemDefinitionsByCid || current?.itemDefinitions); },
     get adaptiveDiscovery() { const client = refreshNativeClient(); return window.__minibiaBotAdaptive?.inspect?.(client) || null; },
     get packetDispatchMethod() { return resolveCurrentPacketDispatch()?.key || null; },
