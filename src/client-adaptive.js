@@ -206,35 +206,95 @@
   let packetObserverError = null;
   const observedPacketTypes = [];
 
-  // The 2026-11-01 client exposes its native AutoWalk packet constructor
-  // as the module-scoped lexical binding KotINRuodWb. Resolve that exact
-  // constructor directly; source-anchor discovery is brittle across scrambles.
-  const resolveAutoWalkConstructor = () => {
+  // Discover packet constructors from native pathfinder dispatch calls.
+  // Names are extracted from native source, validated, then resolved lexically.
+  // This does not invoke or dispatch any packet.
+  let observedStopWalkConstructor = null;
+  let observedStopWalkConstructorName = null;
+
+  const escapeRegExp = (value) => String(value).replace(/[.*+?^$()|[\]\\]/g, "\\$&");
+
+  const resolveLexicalConstructor = (name) => {
+    if (typeof name !== "string" || !/^[A-Za-z_$][\w$]*$/.test(name)) return null;
     try {
-      const candidate = eval("typeof KotINRuodWb === 'function' ? KotINRuodWb : null");
+      const candidate = eval("typeof " + name + " === 'function' ? " + name + " : null");
       return typeof candidate === "function" ? candidate : null;
     } catch (_) {
       return null;
     }
   };
 
-  const resolveAutoWalkConstructorName = (pathfinder) => {
-    const nativeConstructor = resolveAutoWalkConstructor();
-    if (nativeConstructor) {
-      observedAutoWalkConstructor = nativeConstructor;
-      return nativeConstructor.name || "KotINRuodWb";
-    }
-    if (!pathfinder) return null;
-    for (const entry of ownDataValues(pathfinder, 3)) {
+  const findNativePacketConstructorCalls = (pathfinder, dispatch) => {
+    if (!pathfinder || !dispatch?.key) return [];
+    const dispatchKey = escapeRegExp(dispatch.key);
+    const dispatchCall = new RegExp(
+      "(?:\\\\[['\\\"]" + dispatchKey + "['\\\"]\\\\]|\\\\." + dispatchKey +
+      ")\\\\s*\\\\(\\\\s*new\\\\s+([A-Za-z_$][\\\\w$]*)\\\\s*\\\\(([^)]*)\\\\)\\\\s*\\\\)",
+      "g"
+    );
+    const calls = [];
+    for (const entry of ownDataValues(pathfinder, 5)) {
       if (typeof entry.value !== "function") continue;
       const source = safeSource(entry.value);
-      if (!source.includes("DMHavyabcUhA")) continue;
-      const direct = source.match(/DMHavyabcUhA\s*\(\s*new\s+([A-Za-z_$][\w$]*)\s*\(/);
-      if (direct) return direct[1];
-      const matches = [...source.matchAll(/new\s+([A-Za-z_$][\w$]*)\s*\(/g)];
-      if (matches.length) return matches[matches.length - 1][1];
+      if (!source) continue;
+      dispatchCall.lastIndex = 0;
+      let match;
+      while ((match = dispatchCall.exec(source))) {
+        calls.push({
+          method: entry.key,
+          constructorName: match[1],
+          argumentSource: match[2].trim(),
+          constructor: resolveLexicalConstructor(match[1])
+        });
+      }
     }
-    return null;
+    return calls;
+  };
+
+  const resolveNativePacketConstructors = (pathfinder, client, dispatch) => {
+    const calls = findNativePacketConstructorCalls(pathfinder, dispatch);
+    let autoWalk = null;
+    let stopWalk = null;
+
+    for (const call of calls) {
+      if (typeof call.constructor !== "function") continue;
+      const constructorSource = safeSource(call.constructor);
+
+      if (call.argumentSource &&
+          /length/.test(constructorSource) &&
+          /writeUInt8/.test(constructorSource) &&
+          /for/.test(constructorSource)) {
+        autoWalk = call;
+      }
+
+      if (!call.argumentSource && !stopWalk) stopWalk = call;
+    }
+
+    if (autoWalk) {
+      observedAutoWalkConstructor = autoWalk.constructor;
+      observedAutoWalkConstructorName = autoWalk.constructorName;
+    }
+    if (stopWalk) {
+      observedStopWalkConstructor = stopWalk.constructor;
+      observedStopWalkConstructorName = stopWalk.constructorName;
+    }
+
+    return { autoWalk, stopWalk, calls };
+  };
+
+  const resolveAutoWalkConstructorName = (pathfinder, client, dispatch) => {
+    const found = resolveNativePacketConstructors(pathfinder, client, dispatch);
+    return found.autoWalk?.constructorName || observedAutoWalkConstructorName || null;
+  };
+
+  const resolveStopWalkConstructor = (pathfinder, client, dispatch) => {
+    resolveNativePacketConstructors(pathfinder, client, dispatch);
+    return observedStopWalkConstructor;
+  };
+
+  const createStopWalkPacket = () => {
+    if (typeof observedStopWalkConstructor !== "function") return null;
+    return new observedStopWalkConstructor();
   };
 
   const installPacketObserver = (client, dispatch) => {
@@ -252,7 +312,7 @@
       const wrapper = function minibiaAdaptivePacketObserver(packet) {
         try {
           if (!observedAutoWalkConstructorName) {
-            observedAutoWalkConstructorName = resolveAutoWalkConstructorName(resolvePathfinder(client));
+            observedAutoWalkConstructorName = resolveAutoWalkConstructorName(resolvePathfinder(client), client, resolvePacketDispatch(client));
           }
           const ctor = packet && packet.constructor;
           if (ctor && typeof ctor === "function") {
@@ -306,10 +366,10 @@
     const packetDispatch = resolvePacketDispatch(client);
     const observerInstalled = installPacketObserver(client, packetDispatch);
     if (!observedAutoWalkConstructorName) {
-      observedAutoWalkConstructorName = resolveAutoWalkConstructorName(pathfinder);
+      observedAutoWalkConstructorName = resolveAutoWalkConstructorName(pathfinder, client, packetDispatch);
     }
     return {
-      version: 5,
+      version: 6,
       clientFound: !!client,
       worldFound: !!world,
       pathfinderFound: !!pathfinder,
@@ -320,20 +380,23 @@
       packetObserverError,
       autoWalkConstructorName: observedAutoWalkConstructorName,
       autoWalkConstructorCaptured: typeof observedAutoWalkConstructor === "function",
+      stopWalkConstructorName: observedStopWalkConstructorName,
+      stopWalkConstructorCaptured: typeof observedStopWalkConstructor === "function",
       observedPacketTypes: observedPacketTypes.slice(),
       capabilities: {
         player: !!client?.player,
         world: !!world,
         pathfinding: !!pathfinder,
         nativePacketDispatch: !!packetDispatch,
-        autoWalkPacketConstruction: typeof observedAutoWalkConstructor === "function"
+        autoWalkPacketConstruction: typeof observedAutoWalkConstructor === "function",
+        stopWalkPacketConstruction: typeof observedStopWalkConstructor === "function"
       }
     };
   };
 
   const api = {
     installed: true,
-    version: 5,
+    version: 6,
     resolveClient,
     resolvePathfinder,
     resolveMinimap,
@@ -341,6 +404,8 @@
     createAutoWalkPacket,
     isAutoWalkPacket,
     getAutoWalkConstructor: () => observedAutoWalkConstructor,
+    resolveStopWalkConstructor: (seed) => { const client = resolveClient(seed); return resolveStopWalkConstructor(resolvePathfinder(client), client, resolvePacketDispatch(client)); },
+    createStopWalkPacket,
     getObservedPacketTypes: () => observedPacketTypes.slice(),
     inspect,
     refresh: inspect,
@@ -350,5 +415,5 @@
   // Install the observer as early as possible. If the world/pathfinder is not
   // ready yet, the wrapper resolves its pathfinder lazily on the first packet.
   try { inspect(); } catch (_) {}
-  console.info("[minibia-bot] adaptive client discovery v4 installed");
+  console.info("[minibia-bot] adaptive client discovery v6 installed");
 })();
