@@ -2,7 +2,7 @@
 // Uses passive structural inspection and observes only packets the native game sends.
 // It never calls unknown methods or injects probe packets.
 (() => {
-  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 9) return;
+  if (window.__minibiaBotAdaptive?.installed && window.__minibiaBotAdaptive?.version >= 10) return;
 
   const ownDataValues = (object, maxDepth = 3) => {
     const values = [];
@@ -211,10 +211,26 @@
           // The window-discovered client may be a bound wrapper around the
           // lexical singleton used by native pathfinder methods. Validate the
           // lexical object structurally, then dispatch through that exact object.
-          if (!lexicalClient || !isClientLike(lexicalClient)) continue;
+          if (!lexicalClient ||
+              (typeof lexicalClient !== "object" && typeof lexicalClient !== "function")) continue;
+          // Native pathfinder source proves this lexical singleton is the packet
+          // dispatcher owner. Confirm its live player/world and that the resolved
+          // pathfinder belongs to that same world; do not require a network-handler
+          // source signature that can change across client replacements.
+          let lexicalPlayer = null;
+          let lexicalWorld = null;
           let dispatcher;
-          try { dispatcher = lexicalClient[key]; } catch (_) { continue; }
-          if (typeof dispatcher !== "function") continue;
+          try {
+            lexicalPlayer = lexicalClient.player;
+            lexicalWorld = lexicalClient.world;
+            dispatcher = lexicalClient[key];
+          } catch (_) { continue; }
+          if (!lexicalPlayer || typeof lexicalPlayer !== "object" ||
+              !lexicalWorld || typeof lexicalWorld !== "object" ||
+              typeof dispatcher !== "function") continue;
+          let lexicalPathfinder = null;
+          try { lexicalPathfinder = resolvePathfinder(lexicalClient); } catch (_) {}
+          if (!lexicalPathfinder || lexicalPathfinder !== pathfinder) continue;
           cachedClient = client;
           cachedDispatch = {
             key,
@@ -409,7 +425,7 @@
     resolveNativePacketConstructors(pathfinder, client, packetDispatch);
     const observerInstalled = installPacketObserver(client, packetDispatch);
     return {
-      version: 9,
+      version: 10,
       clientFound: !!client,
       worldFound: !!world,
       pathfinderFound: !!pathfinder,
@@ -436,7 +452,7 @@
 
   const api = {
     installed: true,
-    version: 9,
+    version: 10,
     resolveClient,
     resolvePathfinder,
     resolveMinimap,
@@ -455,5 +471,5 @@
   // Install the observer as early as possible. If the world/pathfinder is not
   // ready yet, the wrapper resolves its pathfinder lazily on the first packet.
   try { inspect(); } catch (_) {}
-  console.info("[minibia-bot] adaptive client discovery v9 installed");
+  console.info("[minibia-bot] adaptive client discovery v10 installed");
 })();
